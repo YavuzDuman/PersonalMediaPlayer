@@ -46,7 +46,7 @@
                     Click="Pause_Click"
                     CornerRadius="8">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon x:Name="PauseIcon" FontSize="14" Glyph="&#xE769;" />
+                        <FontIcon x:Name="PauseIcon" FontSize="16" Glyph="&#xE769;" />
                         <TextBlock x:Name="PauseLabel" VerticalAlignment="Center" Text="Pause" />
                     </StackPanel>
                 </Button>
@@ -58,7 +58,7 @@
                     Click="Restart_Click"
                     CornerRadius="8">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                        <FontIcon FontSize="16" Glyph="&#xE72C;" />
                         <TextBlock VerticalAlignment="Center" Text="Restart" />
                     </StackPanel>
                 </Button>
@@ -71,7 +71,7 @@
                     CornerRadius="8"
                     Style="{StaticResource AccentButtonStyle}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="12" Glyph="&#xE71A;" />
+                        <FontIcon FontSize="16" Glyph="&#xE71A;" />
                         <TextBlock VerticalAlignment="Center" Text="Stop" />
                     </StackPanel>
                 </Button>
@@ -82,7 +82,7 @@
                     Click="Cancel_Click"
                     CornerRadius="8">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="12" Glyph="&#xE711;" />
+                        <FontIcon FontSize="16" Glyph="&#xE711;" />
                         <TextBlock VerticalAlignment="Center" Text="Cancel" />
                     </StackPanel>
                 </Button>

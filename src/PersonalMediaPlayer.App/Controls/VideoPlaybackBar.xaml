@@ -90,13 +90,14 @@
                     <Button
                         x:Name="MuteButton"
                         x:FieldModifier="public"
-                        Width="36"
-                        Height="36"
+                        Width="40"
+                        Height="40"
+                        Padding="0"
                         ToolTipService.ToolTip="Mute">
                         <FontIcon
                             x:Name="MuteIcon"
                             x:FieldModifier="public"
-                            FontSize="14"
+                            FontSize="16"
                             Glyph="&#xE767;" />
                     </Button>
                     <Slider
@@ -117,9 +118,9 @@
                     <Button
                         x:Name="BackButton"
                         x:FieldModifier="public"
-                        Height="36"
-                        MinWidth="64"
-                        Padding="10,4"
+                        Height="40"
+                        MinWidth="76"
+                        Padding="12,0"
                         ToolTipService.ToolTip="Back 10 seconds">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon FontSize="14" Glyph="&#xE100;" />
@@ -130,7 +131,8 @@
                         x:Name="PlayButton"
                         x:FieldModifier="public"
                         Width="44"
-                        Height="36"
+                        Height="40"
+                        Padding="0"
                         ToolTipService.ToolTip="Play or pause">
                         <FontIcon
                             x:Name="PlayIcon"
@@ -141,9 +143,9 @@
                     <Button
                         x:Name="ForwardButton"
                         x:FieldModifier="public"
-                        Height="36"
-                        MinWidth="64"
-                        Padding="10,4"
+                        Height="40"
+                        MinWidth="76"
+                        Padding="12,0"
                         ToolTipService.ToolTip="Forward 10 seconds">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock FontSize="14" VerticalAlignment="Center" Text="10" />
@@ -175,8 +177,8 @@
                     <Button
                         x:Name="BookmarkButton"
                         x:FieldModifier="public"
-                        Height="36"
-                        Padding="10,0"
+                        Height="40"
+                        Padding="12,0"
                         ToolTipService.ToolTip="Bookmark this moment"
                         Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -188,7 +190,8 @@
                         x:Name="SnapshotButton"
                         x:FieldModifier="public"
                         Width="44"
-                        Height="36"
+                        Height="40"
+                        Padding="0"
                         ToolTipService.ToolTip="Save this frame"
                         Visibility="Collapsed">
                         <FontIcon FontSize="16" Glyph="&#xE722;" />
@@ -197,7 +200,8 @@
                         x:Name="FullScreenButton"
                         x:FieldModifier="public"
                         Width="44"
-                        Height="36"
+                        Height="40"
+                        Padding="0"
                         ToolTipService.ToolTip="Full screen">
                         <FontIcon
                             x:Name="FullScreenIcon"

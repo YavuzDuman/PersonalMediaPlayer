@@ -116,49 +116,49 @@
             <StackPanel Spacing="8">
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled" Visibility="{x:Bind ToolBarVisibility, Mode=OneWay}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Button Width="36" Height="36" Click="ToolNone_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Zoom">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolNone_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Zoom">
                             <FontIcon FontSize="16" Glyph="&#xE8A3;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolRead_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Read text in an area">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolRead_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Read text in an area">
                             <FontIcon FontSize="16" Glyph="&#xE8C1;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolPen_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Pen">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolPen_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Pen">
                             <FontIcon FontSize="16" Glyph="&#xE70F;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolHighlight_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Highlight">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolHighlight_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Highlight">
                             <FontIcon FontSize="16" Glyph="&#xE7E6;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolEraser_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Eraser">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolEraser_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Eraser">
                             <FontIcon FontSize="16" Glyph="&#xE75C;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolArrow_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Arrow">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolArrow_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Arrow">
                             <FontIcon FontSize="16" Glyph="&#xE72A;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolRect_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Rectangle">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolRect_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Rectangle">
                             <FontIcon FontSize="16" Glyph="&#xE739;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolText_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Text">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolText_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Text">
                             <FontIcon FontSize="16" Glyph="&#xE8D2;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolStep_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Step number">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolStep_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Step number">
                             <TextBlock FontSize="14" FontWeight="SemiBold" Text="1" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolBlur_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Blur private area">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolBlur_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Blur private area">
                             <FontIcon FontSize="16" Glyph="&#xE71C;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolRedact_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Redact with a solid color">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolRedact_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Redact with a solid color">
                             <FontIcon FontSize="16" Glyph="&#xE73E;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ToolCrop_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Trim">
+                        <Button Width="40" Height="40" Padding="0" Click="ToolCrop_Click" CornerRadius="8" IsEnabled="{x:Bind CanEdit, Mode=OneWay}" ToolTipService.ToolTip="Trim">
                             <FontIcon FontSize="16" Glyph="&#xE7A8;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="Undo_Click" CornerRadius="8" IsEnabled="{x:Bind CanUndo, Mode=OneWay}" ToolTipService.ToolTip="Undo">
+                        <Button Width="40" Height="40" Padding="0" Click="Undo_Click" CornerRadius="8" IsEnabled="{x:Bind CanUndo, Mode=OneWay}" ToolTipService.ToolTip="Undo">
                             <FontIcon FontSize="16" Glyph="&#xE7A7;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="Redo_Click" CornerRadius="8" IsEnabled="{x:Bind CanRedo, Mode=OneWay}" ToolTipService.ToolTip="Redo">
+                        <Button Width="40" Height="40" Padding="0" Click="Redo_Click" CornerRadius="8" IsEnabled="{x:Bind CanRedo, Mode=OneWay}" ToolTipService.ToolTip="Redo">
                             <FontIcon FontSize="16" Glyph="&#xE7A6;" />
                         </Button>
-                        <Button Width="36" Height="36" Click="ClearMarks_Click" CornerRadius="8" IsEnabled="{x:Bind CanClearMarks, Mode=OneWay}" ToolTipService.ToolTip="Erase all marks">
+                        <Button Width="40" Height="40" Padding="0" Click="ClearMarks_Click" CornerRadius="8" IsEnabled="{x:Bind CanClearMarks, Mode=OneWay}" ToolTipService.ToolTip="Erase all marks">
                             <FontIcon FontSize="16" Glyph="&#xE894;" />
                         </Button>
                         <Border Width="1" Height="24" Margin="4,0" VerticalAlignment="Center" Background="#33FFFFFF" />
