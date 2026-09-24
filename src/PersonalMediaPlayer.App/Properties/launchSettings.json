@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "PersonalMediaPlayer.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "PersonalMediaPlayer.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

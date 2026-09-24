@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="PersonalMediaPlayer.App.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <StackPanel Padding="24,8,24,24" Spacing="20">
+        <StackPanel Spacing="4">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Settings" />
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="Appearance, library, screenshot shortcuts, and app info" />
+        </StackPanel>
+
+        <Border
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Appearance" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Choose light, dark, or match Windows." />
+                <ComboBox
+                    MinWidth="220"
+                    ItemsSource="{x:Bind ViewModel.ThemeOptions}"
+                    SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Library folder" />
+                    <TextBlock
+                        IsTextSelectionEnabled="True"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind ViewModel.LibraryPath}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <Button
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Command="{x:Bind ViewModel.OpenLibraryFolderCommand}"
+                    Content="Open folder" />
+            </Grid>
+        </Border>
+
+        <Border
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Screenshots" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Text="Show the mouse pointer in captured shots. You can also change this on the Capture page." />
+                <ToggleSwitch
+                    Header="Include mouse cursor"
+                    IsOn="{x:Bind ViewModel.IncludeCursor, Mode=TwoWay}"
+                    OffContent="Hidden"
+                    OnContent="In screenshot" />
+                <ComboBox
+                    MinWidth="220"
+                    Header="Capture delay"
+                    ItemsSource="{x:Bind ViewModel.DelayOptions}"
+                    SelectedIndex="{x:Bind ViewModel.DelayIndex, Mode=TwoWay}" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Screenshot shortcuts" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Text="These work while the app is in the background. They do not use Print Screen or Win+Shift+S." />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Ctrl+Alt+Shift+A — Selected area" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Ctrl+Alt+Shift+W — Single window" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Ctrl+Alt+Shift+M — Single monitor" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Ctrl+Alt+Shift+D — All monitors" />
+                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Ctrl+Alt+Shift+F — Fullscreen" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <StackPanel Spacing="4">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="About" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Personal Media Player 0.1 — Windows desktop library for your screenshots, recordings, and imported media." />
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</Page>

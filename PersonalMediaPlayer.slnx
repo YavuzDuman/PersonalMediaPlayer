@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/PersonalMediaPlayer.App/PersonalMediaPlayer.App.csproj" />
+  <Project Path="src/PersonalMediaPlayer.Core/PersonalMediaPlayer.Core.csproj" />
+</Solution>

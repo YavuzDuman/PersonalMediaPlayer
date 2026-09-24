@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="PersonalMediaPlayer.App.Controls.VideoPlaybackBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Border
+        Padding="16,12"
+        Background="#CC161616"
+        BorderBrush="#33FFFFFF"
+        BorderThickness="1"
+        CornerRadius="16">
+        <StackPanel Spacing="8">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    x:Name="PositionText"
+                    x:FieldModifier="public"
+                    MinWidth="48"
+                    VerticalAlignment="Center"
+                    Foreground="White"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="00:00" />
+                <Grid x:Name="TimelineHost" Grid.Column="1" Background="Transparent">
+                    <Slider
+                        x:Name="SeekSlider"
+                        x:FieldModifier="public"
+                        VerticalAlignment="Center"
+                        IsEnabled="False"
+                        IsThumbToolTipEnabled="False"
+                        Maximum="1000"
+                        Minimum="0"
+                        StepFrequency="1" />
+                    <Canvas
+                        x:Name="TrimCanvas"
+                        Height="28"
+                        Background="Transparent"
+                        IsHitTestVisible="False"
+                        Visibility="Collapsed"
+                        PointerCanceled="Trim_Released"
+                        PointerMoved="Trim_Moved"
+                        PointerPressed="Trim_Pressed"
+                        PointerReleased="Trim_Released"
+                        SizeChanged="TrimCanvas_SizeChanged">
+                        <Border
+                            x:Name="TrimRange"
+                            Height="4"
+                            VerticalAlignment="Center"
+                            Background="#E6FFFFFF"
+                            CornerRadius="2"
+                            IsHitTestVisible="False" />
+                        <Border
+                            x:Name="TrimStartThumb"
+                            Width="12"
+                            Height="22"
+                            Background="White"
+                            CornerRadius="3"
+                            IsHitTestVisible="False" />
+                        <Border
+                            x:Name="TrimEndThumb"
+                            Width="12"
+                            Height="22"
+                            Background="White"
+                            CornerRadius="3"
+                            IsHitTestVisible="False" />
+                    </Canvas>
+                </Grid>
+                <TextBlock
+                    x:Name="DurationText"
+                    x:FieldModifier="public"
+                    Grid.Column="2"
+                    MinWidth="48"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Foreground="White"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="--:--" />
+            </Grid>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button
+                        x:Name="MuteButton"
+                        x:FieldModifier="public"
+                        Width="36"
+                        Height="36"
+                        ToolTipService.ToolTip="Mute">
+                        <FontIcon
+                            x:Name="MuteIcon"
+                            x:FieldModifier="public"
+                            FontSize="14"
+                            Glyph="&#xE767;" />
+                    </Button>
+                    <Slider
+                        x:Name="VolumeSlider"
+                        x:FieldModifier="public"
+                        Width="120"
+                        VerticalAlignment="Center"
+                        Maximum="100"
+                        Minimum="0"
+                        StepFrequency="1"
+                        Value="80" />
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Center">
+                    <Button
+                        x:Name="BackButton"
+                        x:FieldModifier="public"
+                        Height="36"
+                        MinWidth="64"
+                        Padding="10,4"
+                        ToolTipService.ToolTip="Back 10 seconds">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE100;" />
+                            <TextBlock FontSize="14" VerticalAlignment="Center" Text="10" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="PlayButton"
+                        x:FieldModifier="public"
+                        Width="44"
+                        Height="36"
+                        ToolTipService.ToolTip="Play or pause">
+                        <FontIcon
+                            x:Name="PlayIcon"
+                            x:FieldModifier="public"
+                            FontSize="16"
+                            Glyph="&#xE768;" />
+                    </Button>
+                    <Button
+                        x:Name="ForwardButton"
+                        x:FieldModifier="public"
+                        Height="36"
+                        MinWidth="64"
+                        Padding="10,4"
+                        ToolTipService.ToolTip="Forward 10 seconds">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock FontSize="14" VerticalAlignment="Center" Text="10" />
+                            <FontIcon FontSize="14" Glyph="&#xE101;" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="2"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Center">
+                    <ComboBox
+                        x:Name="SpeedCombo"
+                        x:FieldModifier="public"
+                        MinWidth="88"
+                        SelectedIndex="3"
+                        ToolTipService.ToolTip="Playback speed">
+                        <ComboBoxItem Content="0.25×" Tag="0.25" />
+                        <ComboBoxItem Content="0.5×" Tag="0.5" />
+                        <ComboBoxItem Content="0.75×" Tag="0.75" />
+                        <ComboBoxItem Content="1×" Tag="1" />
+                        <ComboBoxItem Content="1.25×" Tag="1.25" />
+                        <ComboBoxItem Content="1.5×" Tag="1.5" />
+                        <ComboBoxItem Content="1.75×" Tag="1.75" />
+                        <ComboBoxItem Content="2×" Tag="2" />
+                    </ComboBox>
+                    <Button
+                        x:Name="BookmarkButton"
+                        x:FieldModifier="public"
+                        Height="36"
+                        Padding="10,0"
+                        ToolTipService.ToolTip="Bookmark this moment"
+                        Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE8A4;" />
+                            <TextBlock VerticalAlignment="Center" Text="Mark" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="SnapshotButton"
+                        x:FieldModifier="public"
+                        Width="44"
+                        Height="36"
+                        ToolTipService.ToolTip="Save this frame"
+                        Visibility="Collapsed">
+                        <FontIcon FontSize="16" Glyph="&#xE722;" />
+                    </Button>
+                    <Button
+                        x:Name="FullScreenButton"
+                        x:FieldModifier="public"
+                        Width="44"
+                        Height="36"
+                        ToolTipService.ToolTip="Full screen">
+                        <FontIcon
+                            x:Name="FullScreenIcon"
+                            x:FieldModifier="public"
+                            FontSize="16"
+                            Glyph="&#xE740;" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </Border>
+        <Border
+            x:Name="HoverCard"
+            Width="168"
+            Padding="4"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Background="#F0161616"
+            BorderBrush="#66FFFFFF"
+            BorderThickness="1"
+            CornerRadius="10"
+            IsHitTestVisible="False"
+            Visibility="Collapsed">
+            <StackPanel>
+                <Border Height="90" Background="Black" CornerRadius="6">
+                    <Image x:Name="HoverImage" Stretch="UniformToFill" />
+                </Border>
+                <TextBlock
+                    x:Name="HoverTime"
+                    Margin="0,4,0,2"
+                    HorizontalAlignment="Center"
+                    Foreground="White"
+                    FontSize="12"
+                    Text="0:00" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

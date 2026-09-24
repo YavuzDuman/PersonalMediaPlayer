@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="PersonalMediaPlayer.App.Views.MediaPreviewPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PersonalMediaPlayer.App.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="PageRoot" Padding="24,8,24,24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock
+                    Style="{StaticResource TitleTextBlockStyle}"
+                    Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="{x:Bind ViewModel.ImportedOn, Mode=OneWay}" />
+            </StackPanel>
+            <StackPanel
+                Grid.Column="1"
+                Orientation="Horizontal"
+                Spacing="8"
+                VerticalAlignment="Center">
+                <Button Click="Copy_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE16F;" />
+                        <TextBlock Text="Copy" />
+                    </StackPanel>
+                </Button>
+                <Button
+                    Click="SaveMarkup_Click"
+                    IsEnabled="{x:Bind ViewModel.HasMarkup, Mode=OneWay}"
+                    Style="{StaticResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE74E;" />
+                        <TextBlock Text="Save marks" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="CompareButton" Click="Compare_Click" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE7C1;" />
+                        <TextBlock x:Name="CompareLabel" Text="Compare" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="RestoreButton" Click="Restore_Click" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE777;" />
+                        <TextBlock Text="Restore original" />
+                    </StackPanel>
+                </Button>
+                <Button Click="EditButton_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE70F;" />
+                        <TextBlock Text="Size &amp; rotate" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <InfoBar
+            Grid.Row="1"
+            IsClosable="True"
+            IsOpen="{x:Bind ViewModel.HasStatus, Mode=TwoWay}"
+            Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+            Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
+
+        <controls:MarkupSurface x:Name="Markup" Grid.Row="2" />
+
+        <Grid
+            x:Name="LeavePrompt"
+            Grid.RowSpan="3"
+            Padding="24"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Visibility="Collapsed">
+            <StackPanel
+                MaxWidth="420"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="12">
+                <TextBlock
+                    Text="This photo has unsaved marks. Leave without saving?"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                <Button
+                    HorizontalAlignment="Stretch"
+                    Click="LeavePromptConfirm_Click"
+                    Content="Leave"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    HorizontalAlignment="Stretch"
+                    Click="LeavePromptStay_Click"
+                    Content="Stay" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Page>

@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="PersonalMediaPlayer.App.Views.RecordingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PersonalMediaPlayer.App.Controls"
+    xmlns:lvs="using:LibVLCSharp.Platforms.Windows"
+    xmlns:models="using:PersonalMediaPlayer.Core.Models">
+    <Grid x:Name="PageRoot" Padding="24,8,24,24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel x:Name="HeaderPanel" Spacing="4">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Recordings" />
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap"
+                Text="Record a monitor, a window, or an area you drag. Stop to review the video, then Save. Saved recordings are library items: rename, delete, or drag them onto a folder." />
+        </StackPanel>
+
+        <Border
+            x:Name="SetupCard"
+            Grid.Row="1"
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <StackPanel Spacing="12">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox
+                        x:Name="SourceCombo"
+                        HorizontalAlignment="Stretch"
+                        Header="Source"
+                        SelectedIndex="0"
+                        SelectionChanged="Source_Changed">
+                        <x:String>Monitor</x:String>
+                        <x:String>Window</x:String>
+                        <x:String>Selected area</x:String>
+                    </ComboBox>
+                    <ComboBox
+                        x:Name="MonitorCombo"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Header="Monitor"
+                        DisplayMemberPath="Label" />
+                    <ComboBox
+                        x:Name="WindowCombo"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Header="Window"
+                        DisplayMemberPath="Title"
+                        Visibility="Collapsed" />
+                    <Button
+                        x:Name="RefreshWindowsButton"
+                        Grid.Column="2"
+                        VerticalAlignment="Bottom"
+                        Click="RefreshWindows_Click"
+                        Content="Refresh"
+                        Visibility="Collapsed" />
+                </Grid>
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="8">
+                        <ToggleSwitch
+                            x:Name="CursorSwitch"
+                            Header="Include mouse cursor"
+                            OffContent="Hidden"
+                            OnContent="In recording" />
+                        <ToggleSwitch
+                            x:Name="SystemAudioSwitch"
+                            Header="System audio"
+                            OffContent="Off"
+                            OnContent="Speakers" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Spacing="2">
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Recording time" />
+                        <TextBlock
+                            x:Name="TimerText"
+                            Style="{StaticResource SubtitleTextBlockStyle}"
+                            Text="00:00" />
+                    </StackPanel>
+                </Grid>
+                <TextBlock
+                    x:Name="StatusText"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Text="Choose a monitor or window, then start. On a single display, move this window aside or it will appear in a monitor recording." />
+                <Button
+                    x:Name="StartButton"
+                    HorizontalAlignment="Left"
+                    MinWidth="160"
+                    Click="Start_Click"
+                    Content="Start"
+                    Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid x:Name="SavedListHost" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Saved in the library" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Text="Same cards as the library. Double-click to play, right-click to rename or delete, and drag a card onto a folder." />
+                </StackPanel>
+                <ScrollViewer
+                    Grid.Row="1"
+                    HorizontalScrollBarVisibility="Auto"
+                    HorizontalScrollMode="Enabled"
+                    VerticalScrollMode="Disabled">
+                    <StackPanel x:Name="FolderStrip" Orientation="Horizontal" Spacing="8" />
+                </ScrollViewer>
+                <Grid Grid.Row="2">
+                    <TextBlock
+                        x:Name="EmptyRecordingsText"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Text="Saved recordings appear here, and in the library, after you save a preview." />
+                    <GridView
+                        x:Name="RecordingGrid"
+                        CanDragItems="True"
+                        DragItemsStarting="RecordingGrid_DragItemsStarting"
+                        DoubleTapped="RecordingGrid_DoubleTapped"
+                        IsItemClickEnabled="False"
+                        RightTapped="RecordingGrid_RightTapped"
+                        SelectionMode="Single">
+                        <GridView.ItemTemplate>
+                            <DataTemplate x:DataType="models:MediaItem">
+                                <controls:MediaCard Item="{x:Bind}" />
+                            </DataTemplate>
+                        </GridView.ItemTemplate>
+                        <GridView.ItemContainerStyle>
+                            <Style TargetType="GridViewItem">
+                                <Setter Property="Margin" Value="0,0,16,16" />
+                            </Style>
+                        </GridView.ItemContainerStyle>
+                    </GridView>
+                </Grid>
+            </Grid>
+
+            <Grid x:Name="PreviewHost" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid>
+                    <Border
+                        x:Name="VideoHost"
+                        MinHeight="280"
+                        Background="Black"
+                        CornerRadius="16">
+                        <lvs:VideoView
+                            x:Name="VideoView"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            Initialized="VideoView_Initialized" />
+                    </Border>
+                    <controls:VideoPlaybackBar
+                        x:Name="Playback"
+                        Margin="16"
+                        VerticalAlignment="Bottom" />
+                </Grid>
+                <Grid
+                    x:Name="PreviewDetails"
+                    Grid.Row="1"
+                    Margin="0,12,0,0"
+                    ColumnSpacing="12"
+                    VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="4">
+                        <TextBlock
+                            x:Name="PreviewHint"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            TextWrapping="Wrap" />
+                        <TextBox x:Name="NameBox" PlaceholderText="Name" />
+                    </StackPanel>
+                    <StackPanel
+                        Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        VerticalAlignment="Bottom">
+                        <Button
+                            x:Name="TrimPreviewButton"
+                            Click="TrimPreview_Click"
+                            Content="Trim"
+                            Visibility="Collapsed" />
+                        <Button
+                            x:Name="SavePreviewButton"
+                            Click="SavePreview_Click"
+                            Content="Save to library"
+                            Style="{StaticResource AccentButtonStyle}" />
+                        <Button
+                            x:Name="DiscardPreviewButton"
+                            Click="DiscardPreview_Click"
+                            Content="Discard" />
+                        <Button
+                            x:Name="ClosePreviewButton"
+                            Click="ClosePreview_Click"
+                            Content="Back to list"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <Grid
+            x:Name="LeavePrompt"
+            Grid.RowSpan="3"
+            Padding="24"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Visibility="Collapsed">
+            <StackPanel
+                MaxWidth="420"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="12">
+                <TextBlock
+                    x:Name="LeavePromptText"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                <Button
+                    x:Name="LeavePromptConfirm"
+                    HorizontalAlignment="Stretch"
+                    Click="LeavePromptConfirm_Click"
+                    Content="Leave"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    HorizontalAlignment="Stretch"
+                    Click="LeavePromptStay_Click"
+                    Content="Stay" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Page>

@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="PersonalMediaPlayer.App.Views.CapturePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PersonalMediaPlayer.App.Controls"
+    xmlns:converters="using:PersonalMediaPlayer.App.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+    <Page.Resources>
+        <converters:BoolToVisibilityConverter x:Key="VisibleWhenTrue" />
+        <converters:BoolToVisibilityConverter x:Key="VisibleWhenFalse" Invert="True" />
+    </Page.Resources>
+
+    <Grid x:Name="PageRoot" Padding="24,8,24,24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="8">
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Capture" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Text="Review the shot, rename it, then Save. Nothing is stored in Screenshots until you save." />
+                </StackPanel>
+                <ComboBox
+                    MinWidth="200"
+                    Header="Mode"
+                    ItemsSource="{x:Bind ViewModel.CaptureModes}"
+                    SelectedIndex="{x:Bind ViewModel.CaptureModeIndex, Mode=TwoWay}" />
+                <ComboBox
+                    MinWidth="200"
+                    Header="Delay"
+                    ItemsSource="{x:Bind ViewModel.DelayOptions}"
+                    SelectedIndex="{x:Bind ViewModel.DelayIndex, Mode=TwoWay}"
+                    Visibility="{x:Bind ViewModel.IsScreenCapture, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                <ToggleSwitch
+                    Header="Include mouse cursor"
+                    IsOn="{x:Bind ViewModel.IncludeCursor, Mode=TwoWay}"
+                    OffContent="Hidden"
+                    OnContent="In screenshot"
+                    Visibility="{x:Bind ViewModel.IsScreenCapture, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                <TextBlock
+                    MaxWidth="520"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Text="Background shortcuts (not Windows snip keys): Ctrl+Alt+Shift+A area, W window, M monitor, D all monitors, F fullscreen." />
+            </StackPanel>
+            <Button
+                x:Name="ScreenshotButton"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Click="ScreenshotButton_Click"
+                IsEnabled="{x:Bind ViewModel.CanCapture, Mode=OneWay}"
+                Style="{StaticResource AccentButtonStyle}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE7C8;" />
+                    <TextBlock Text="{x:Bind ViewModel.CaptureButtonLabel, Mode=OneWay}" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <InfoBar
+            Grid.Row="1"
+            IsClosable="True"
+            IsOpen="{x:Bind ViewModel.HasStatus, Mode=TwoWay}"
+            Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+            Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
+
+        <Grid Grid.Row="2">
+            <StackPanel
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="16"
+                Visibility="{x:Bind ViewModel.HasPreview, Mode=OneWay, Converter={StaticResource VisibleWhenFalse}}">
+                <FontIcon
+                    FontSize="48"
+                    Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                    Glyph="&#xE7C8;" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    Style="{StaticResource SubtitleTextBlockStyle}"
+                    Text="No screenshot yet" />
+                <TextBlock
+                    MaxWidth="420"
+                    HorizontalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap"
+                    Text="{x:Bind ViewModel.ModeInstructions, Mode=OneWay}" />
+            </StackPanel>
+
+            <Grid
+                ColumnSpacing="16"
+                Visibility="{x:Bind ViewModel.HasPreview, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="320" />
+                </Grid.ColumnDefinitions>
+
+                <controls:MarkupSurface x:Name="Markup" />
+
+                <Grid Grid.Column="1" RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="12">
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Last screenshot" />
+                            <TextBox
+                                Header="Name"
+                                IsEnabled="{x:Bind ViewModel.CanRename, Mode=OneWay}"
+                                Text="{x:Bind ViewModel.FileName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                TextWrapping="Wrap"
+                                Text="{x:Bind ViewModel.SaveHint, Mode=OneWay}" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.DetailsExtra, Mode=OneWay}" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.SizeAndTime, Mode=OneWay}" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap"
+                                Text="{x:Bind ViewModel.FolderLabel, Mode=OneWay}" />
+                            <TextBox
+                                IsReadOnly="True"
+                                Text="{x:Bind ViewModel.PathLabel, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <TextBox
+                                AcceptsReturn="True"
+                                Header="Text in screenshot"
+                                IsReadOnly="True"
+                                MaxHeight="220"
+                                PlaceholderText="Text from the screenshot appears here."
+                                ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                Text="{x:Bind ViewModel.RecognizedText, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="1" Spacing="8">
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="Save_Click"
+                            IsEnabled="{x:Bind ViewModel.CanSave, Mode=OneWay}"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Visibility="{x:Bind ViewModel.IsSaved, Mode=OneWay, Converter={StaticResource VisibleWhenFalse}}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE74E;" />
+                                <TextBlock Text="Save" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="ReadText_Click"
+                            IsEnabled="{x:Bind ViewModel.CanReadText, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE8C1;" />
+                                <TextBlock Text="Read text" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="CopyText_Click"
+                            IsEnabled="{x:Bind ViewModel.CanCopyText, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE8C8;" />
+                                <TextBlock Text="Copy text" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="Copy_Click"
+                            IsEnabled="{x:Bind ViewModel.CanCopy, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE16F;" />
+                                <TextBlock Text="Copy" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="ScreenshotButton_Click"
+                            IsEnabled="{x:Bind ViewModel.CanCapture, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE7C8;" />
+                                <TextBlock Text="New" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="AddToFolder_Click"
+                            IsEnabled="{x:Bind ViewModel.CanShare, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE8B7;" />
+                                <TextBlock Text="Copy to folder" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="SaveAs_Click"
+                            IsEnabled="{x:Bind ViewModel.CanShare, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE792;" />
+                                <TextBlock Text="Save as…" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Click="ShowInExplorer_Click"
+                            IsEnabled="{x:Bind ViewModel.CanShare, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE838;" />
+                                <TextBlock Text="Show in Explorer" />
+                            </StackPanel>
+                        </Button>
+                        <Button HorizontalAlignment="Stretch" Click="Delete_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="16" Glyph="&#xE74D;" />
+                                <TextBlock Text="{x:Bind ViewModel.DiscardLabel, Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <Grid
+            x:Name="LeavePrompt"
+            Grid.RowSpan="3"
+            Padding="24"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Visibility="Collapsed">
+            <StackPanel
+                MaxWidth="420"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="12">
+                <TextBlock
+                    x:Name="LeavePromptText"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap"
+                    Text="This shot is not in Screenshots. Leave without saving?" />
+                <Button
+                    HorizontalAlignment="Stretch"
+                    Click="LeavePromptConfirm_Click"
+                    Content="Leave"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    HorizontalAlignment="Stretch"
+                    Click="LeavePromptStay_Click"
+                    Content="Stay" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Page>

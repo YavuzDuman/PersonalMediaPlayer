@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="PersonalMediaPlayer.App.Views.PhotoEditorPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="24,8,24,24" ColumnSpacing="20" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="320" />
+        </Grid.ColumnDefinitions>
+
+        <Grid Grid.ColumnSpan="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Edit photo" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="The original is kept. Cancel restores it unchanged." />
+            </StackPanel>
+            <StackPanel
+                Grid.Column="1"
+                Orientation="Horizontal"
+                Spacing="8"
+                VerticalAlignment="Center">
+                <ProgressRing
+                    Width="20"
+                    Height="20"
+                    IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+                <Button Click="CancelButton_Click" Content="Cancel" />
+                <Button
+                    Click="SaveButton_Click"
+                    Content="Save"
+                    Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <InfoBar
+            Grid.Row="1"
+            Grid.ColumnSpan="2"
+            IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+            Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+            Severity="Error" />
+
+        <Border
+            Grid.Row="2"
+            Background="Black"
+            CornerRadius="16">
+            <ScrollViewer
+                x:Name="PreviewScroll"
+                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Auto"
+                MinZoomFactor="1"
+                MaxZoomFactor="8"
+                PointerWheelChanged="PreviewScroll_PointerWheelChanged"
+                SizeChanged="PreviewScroll_SizeChanged"
+                Tapped="PreviewScroll_Tapped"
+                VerticalScrollBarVisibility="Auto"
+                VerticalScrollMode="Auto"
+                ZoomMode="Disabled">
+                <Image
+                    x:Name="PreviewImage"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    IsHitTestVisible="False"
+                    RenderTransformOrigin="0.5,0.5"
+                    Source="{x:Bind ViewModel.PreviewImage, Mode=OneWay}"
+                    Stretch="Uniform">
+                    <Image.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform
+                                ScaleX="{x:Bind ViewModel.PreviewScaleX, Mode=OneWay}"
+                                ScaleY="{x:Bind ViewModel.PreviewScaleY, Mode=OneWay}" />
+                            <RotateTransform Angle="{x:Bind ViewModel.Rotation, Mode=OneWay}" />
+                        </TransformGroup>
+                    </Image.RenderTransform>
+                </Image>
+            </ScrollViewer>
+        </Border>
+
+        <ScrollViewer Grid.Row="2" Grid.Column="1">
+            <StackPanel Spacing="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Name" />
+                    <TextBox
+                        PlaceholderText="File name"
+                        Text="{x:Bind ViewModel.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Size" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.SizeHint, Mode=OneWay}" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <NumberBox
+                            Header="Width"
+                            Maximum="16384"
+                            Minimum="1"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.Width, Mode=TwoWay}" />
+                        <TextBlock
+                            Grid.Column="1"
+                            Margin="0,28,0,0"
+                            VerticalAlignment="Top"
+                            Text="×" />
+                        <NumberBox
+                            Grid.Column="2"
+                            Header="Height"
+                            Maximum="16384"
+                            Minimum="1"
+                            SmallChange="1"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.Height, Mode=TwoWay}" />
+                    </Grid>
+                    <CheckBox
+                        Content="Keep aspect ratio"
+                        IsChecked="{x:Bind ViewModel.KeepAspectRatio, Mode=TwoWay}" />
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Rotation" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.RotationLabel, Mode=OneWay}" />
+                    <Slider
+                        Maximum="360"
+                        Minimum="0"
+                        StepFrequency="1"
+                        TickFrequency="90"
+                        TickPlacement="BottomRight"
+                        Value="{x:Bind ViewModel.Rotation, Mode=TwoWay}" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Command="{x:Bind ViewModel.RotateLeftCommand}"
+                            Content="-90°" />
+                        <Button
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            Command="{x:Bind ViewModel.RotateRightCommand}"
+                            Content="+90°" />
+                        <Button
+                            Grid.Column="2"
+                            HorizontalAlignment="Stretch"
+                            Command="{x:Bind ViewModel.ResetRotationCommand}"
+                            Content="0°" />
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Zoom" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="Click the photo to zoom in at that point. Ctrl+click or Ctrl+wheel to zoom out. You can zoom repeatedly." />
+                </StackPanel>
+
+                <Button
+                    HorizontalAlignment="Stretch"
+                    Command="{x:Bind ViewModel.ResetEditsCommand}"
+                    Content="Reset all edits" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

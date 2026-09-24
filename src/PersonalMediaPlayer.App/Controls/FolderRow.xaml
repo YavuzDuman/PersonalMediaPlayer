@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="PersonalMediaPlayer.App.Controls.FolderRow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+    <Grid Padding="2,4" ColumnSpacing="10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="64" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border
+            x:Name="CoverHost"
+            Width="64"
+            Height="64"
+            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+            CornerRadius="8">
+            <Grid>
+                <FontIcon
+                    x:Name="Placeholder"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="20"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE8B7;" />
+                <Border
+                    x:Name="PlayMark"
+                    Width="22"
+                    Height="22"
+                    Margin="4"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Background="#CC000000"
+                    CornerRadius="11"
+                    Visibility="Collapsed">
+                    <FontIcon
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="10"
+                        Foreground="White"
+                        Glyph="&#xE768;" />
+                </Border>
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+            <TextBlock
+                x:Name="NameText"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                TextTrimming="CharacterEllipsis"
+                TextWrapping="NoWrap" />
+            <TextBlock
+                x:Name="CountText"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                TextTrimming="CharacterEllipsis"
+                TextWrapping="NoWrap" />
+        </StackPanel>
+    </Grid>
+</UserControl>
