@@ -37,6 +37,12 @@
                 Orientation="Horizontal"
                 Spacing="8"
                 VerticalAlignment="Center">
+                <Button Click="EditVideo_Click" Style="{StaticResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE70F;" />
+                        <TextBlock Text="Edit" />
+                    </StackPanel>
+                </Button>
                 <Button x:Name="RestoreButton" Click="Restore_Click" Content="Restore original" Visibility="Collapsed" />
                 <Button x:Name="EditTrimButton" Click="EditTrim_Click" Content="Trim" IsEnabled="False" />
             </StackPanel>
@@ -60,7 +66,7 @@
         </Grid>
 
         <Grid Grid.Row="1">
-            <Border Background="Black" CornerRadius="16">
+            <Border x:Name="VideoHost" Background="Black" CornerRadius="16">
                 <lvs:VideoView x:Name="VideoView" Initialized="VideoView_Initialized" />
             </Border>
             <controls:VideoPlaybackBar

@@ -55,6 +55,60 @@ internal static class PlaybackBookmarks
         Write(all);
     }
 
+    public static void Remap(string filePath, IReadOnlyList<(long StartMs, long EndMs)> removed, double rate)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || rate <= 0)
+        {
+            return;
+        }
+
+        var all = Read();
+        if (!all.TryGetValue(filePath, out var marks) || marks.Count == 0)
+        {
+            return;
+        }
+
+        var cuts = removed.Where(cut => cut.EndMs > cut.StartMs).OrderBy(cut => cut.StartMs).ToList();
+        var kept = new List<Bookmark>();
+        foreach (var mark in marks)
+        {
+            if (cuts.Any(cut => mark.TimeMs >= cut.StartMs && mark.TimeMs < cut.EndMs))
+            {
+                continue;
+            }
+
+            var shift = cuts.Where(cut => cut.EndMs <= mark.TimeMs).Sum(cut => cut.EndMs - cut.StartMs);
+            mark.TimeMs = Math.Max(0, (long)((mark.TimeMs - shift) / rate));
+            kept.Add(mark);
+        }
+
+        kept.Sort((left, right) => left.TimeMs.CompareTo(right.TimeMs));
+        all[filePath] = kept;
+        Write(all);
+    }
+
+    public static void Scale(string filePath, double rate)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || rate <= 0 || Math.Abs(rate - 1d) < 0.001)
+        {
+            return;
+        }
+
+        var all = Read();
+        if (!all.TryGetValue(filePath, out var marks) || marks.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var mark in marks)
+        {
+            mark.TimeMs = Math.Max(0, (long)(mark.TimeMs / rate));
+        }
+
+        marks.Sort((left, right) => left.TimeMs.CompareTo(right.TimeMs));
+        Write(all);
+    }
+
     public static void Move(string oldPath, string newPath)
     {
         if (string.IsNullOrWhiteSpace(oldPath)

@@ -50,7 +50,23 @@ Hover the timeline to see a small frame and the time under the pointer. Playback
 
 **Mark** saves the current moment. The list sits on the right of the video and opens from the menu button once a mark exists. A long note shows a short preview; click it to read the rest. Removing a mark asks first. Marks stay with the file when you rename it.
 
-The player resumes a video that was left in the middle, and it can play again after the end. **Trim** drags the ends of the timeline, previews that span, and saves a new file at the source size. The camera button saves a still of the current moment and opens it as a screenshot preview. **Restore original** is available after a trim that overwrote the video.
+The player resumes a video that was left in the middle, and it can play again after the end. **Trim** on the player drags the ends of the timeline, previews that span, and saves a new file at the source size. The camera button saves a still of the current moment and opens it as a screenshot preview. **Restore original** is available after an overwrite that replaced the video.
+
+**Edit** opens the editor. The picture keeps playing, and the tools sit in the column on the right. The line above the picture chooses what a drag on the timeline does:
+
+| Timeline | Drag does this |
+| --- | --- |
+| Playhead | Moves through the video. Click and drag both seek |
+| Trim ends | The white handles are the first and last frames you keep. Dragging the middle stays inside that span |
+| Remove part | Drags the piece to delete. A short click only moves the playhead |
+
+Trim can also be set from the playhead, or nudged by 1 second or 0.1 seconds. The card shows those times to a tenth of a second. Playback, picture and sound, stays inside the kept span.
+
+Remove section accepts typed times in **From** and **To**. `1:05.4`, `0:12`, `1:02:03`, and a number of seconds such as `90` all work. The span shows as a yellow band on the timeline. Parts already removed stay red. **Remove this part** drops the yellow span. **Put back** restores one removed part. Preview skips each removed part with the sound still in step. A removed piece has to be at least half a second, and the video that remains has to be at least half a second.
+
+Speed runs from 0.25× to 4×. The pitch changes with the speed. The card shows the length of the kept picture and the length the saved file will have. Volume runs from muted to 100%, and 100% is the original loudness. The editor’s own volume replaces the volume slider on the playback bar.
+
+**Save** asks for a new file or an overwrite. Overwrite keeps the previous file with your other originals, and bookmarks move onto the new times. A mark inside a removed span is dropped. Save as new names the copy from the changes you made: `2x`, `80%` or `muted`, `trim`, and `cut`, in that order. A second copy of the same name is `2`, then `3`. Cancel, or leaving with unsaved changes, asks you to stay or leave. A save that is still running asks you to wait.
 
 ## Capture
 

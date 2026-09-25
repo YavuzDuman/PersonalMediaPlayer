@@ -16,6 +16,14 @@ internal sealed class TimelineThumbnails : IDisposable
 
     public void Cancel() => _generation++;
 
+    public void ReleaseFile()
+    {
+        _generation++;
+        _player?.Dispose();
+        _player = null;
+        _path = null;
+    }
+
     public void Dispose()
     {
         _generation++;

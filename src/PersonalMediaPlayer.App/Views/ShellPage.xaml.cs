@@ -135,6 +135,12 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
+        if (NavFrame.Content is VideoEditorPage editor && !editor.PrepareToLeave(typeof(CapturePage), kind, back: false))
+        {
+            SyncNavSelection();
+            return;
+        }
+
         if (NavFrame.Content is MediaPreviewPage preview && !preview.PrepareToLeave(typeof(CapturePage), kind, back: false))
         {
             SyncNavSelection();
@@ -173,6 +179,11 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
+        if (NavFrame.Content is VideoEditorPage editor && !editor.PrepareToLeave(null, null, back: true))
+        {
+            return;
+        }
+
         if (NavFrame.Content is MediaPreviewPage preview && !preview.PrepareToLeave(null, null, back: true))
         {
             return;
@@ -201,6 +212,12 @@ public sealed partial class ShellPage : UserControl
         }
 
         if (NavFrame.Content is VideoPlayerPage video && !video.PrepareToLeave(pageType, null, back: false))
+        {
+            SyncNavSelection();
+            return;
+        }
+
+        if (NavFrame.Content is VideoEditorPage editor && !editor.PrepareToLeave(pageType, null, back: false))
         {
             SyncNavSelection();
             return;

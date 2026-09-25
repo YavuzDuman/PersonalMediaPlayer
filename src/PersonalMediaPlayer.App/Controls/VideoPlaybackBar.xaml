@@ -26,6 +26,7 @@
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="00:00" />
                 <Grid x:Name="TimelineHost" Grid.Column="1" Background="Transparent">
+                    <Canvas x:Name="CutsCanvas" IsHitTestVisible="False" />
                     <Slider
                         x:Name="SeekSlider"
                         x:FieldModifier="public"

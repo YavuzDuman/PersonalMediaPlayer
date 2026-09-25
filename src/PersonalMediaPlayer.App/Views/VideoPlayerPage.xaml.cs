@@ -74,6 +74,7 @@ public sealed partial class VideoPlayerPage : Page
         Playback.TrimRangeChanged += (_, _) => ApplyTrimFromBar();
         Playback.TrimSeekRequested += (_, fraction) => SeekToFraction(fraction);
         Loaded += (_, _) => Focus(FocusState.Programmatic);
+        VideoView.Loaded += (_, _) => EnsurePlayback();
         KeyDown += VideoPlayerPage_KeyDown;
     }
 
@@ -97,6 +98,11 @@ public sealed partial class VideoPlayerPage : Page
             ? Visibility.Visible
             : Visibility.Collapsed;
         _filePath = item.FilePath;
+        if (VideoHost.Child is null)
+        {
+            VideoHost.Child = VideoView;
+        }
+
         Playback.SetHoverSource(item.FilePath);
         ShowBookmarks();
         ResetDuration();
@@ -197,11 +203,23 @@ public sealed partial class VideoPlayerPage : Page
         Playback.SetHoverSource(null);
         ExitFullScreen();
         ResetDuration();
+        DetachPlayback();
+    }
 
+    private void DetachPlayback()
+    {
         if (_player is not null)
         {
             _player.LengthChanged -= Player_LengthChanged;
-            _player.Stop();
+            try
+            {
+                _player.Stop();
+            }
+            catch (Exception)
+            {
+                // The player can already be stopped when the page is leaving.
+            }
+
             VideoView.MediaPlayer = null;
             _player.Dispose();
             _player = null;
@@ -209,22 +227,32 @@ public sealed partial class VideoPlayerPage : Page
 
         _libVlc?.Dispose();
         _libVlc = null;
+        if (VideoHost.Child is not null)
+        {
+            VideoHost.Child = null;
+        }
     }
 
     private void VideoView_Initialized(object sender, InitializedEventArgs e)
     {
-        _libVlc?.Dispose();
-        _player?.Dispose();
-
         _swapChainOptions = e.SwapChainOptions;
-        _libVlc = new LibVLC(enableDebugLogs: false, e.SwapChainOptions);
+        EnsurePlayback();
+    }
+
+    private void EnsurePlayback()
+    {
+        if (_player is not null || _swapChainOptions is null)
+        {
+            return;
+        }
+
+        _libVlc = new LibVLC(enableDebugLogs: false, _swapChainOptions);
         _player = new VlcMediaPlayer(_libVlc);
         _player.LengthChanged += Player_LengthChanged;
         HookPlayer();
         VideoView.MediaPlayer = _player;
         ApplyVolumeToPlayer();
         ApplyRateToPlayer();
-
         if (!string.IsNullOrWhiteSpace(_pendingPath))
         {
             PlayFile(_pendingPath);
@@ -930,6 +958,22 @@ public sealed partial class VideoPlayerPage : Page
                 Playback.SnapshotButton.IsEnabled = true;
             }
         }
+    }
+
+    private void EditVideo_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_filePath))
+        {
+            return;
+        }
+
+        var item = App.MediaLibrary.GetById(Path.GetRelativePath(App.MediaLibrary.LibraryRoot, _filePath).Replace('\\', '/'));
+        if (item is null)
+        {
+            return;
+        }
+
+        Frame.Navigate(typeof(VideoEditorPage), item);
     }
 
     private void EditTrim_Click(object sender, RoutedEventArgs e)

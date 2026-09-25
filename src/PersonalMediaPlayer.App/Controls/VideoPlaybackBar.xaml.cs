@@ -1,6 +1,8 @@
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using PersonalMediaPlayer.App.Editing;
 
 namespace PersonalMediaPlayer.App.Controls;
@@ -26,6 +28,13 @@ public sealed partial class VideoPlaybackBar : UserControl
     private bool _hoverBusy;
     private bool _hoverDirty;
     private bool _hoverOpen;
+    private bool _cutPicking;
+    private bool _trimPassThrough;
+    private double _trimGrab = 18;
+    private bool _cutDragging;
+    private double _cutAnchor;
+    private List<(double Start, double End)> _removedFractions = [];
+    private (double Start, double End)? _selection;
 
     public VideoPlaybackBar()
     {
@@ -38,8 +47,11 @@ public sealed partial class VideoPlaybackBar : UserControl
         Loaded += (_, _) =>
         {
             TimelineHost.AddHandler(PointerMovedEvent, new PointerEventHandler(Timeline_Moved), true);
+            TimelineHost.AddHandler(PointerPressedEvent, new PointerEventHandler(Timeline_Pressed), true);
+            TimelineHost.AddHandler(PointerReleasedEvent, new PointerEventHandler(Timeline_Released), true);
             TimelineHost.AddHandler(PointerExitedEvent, new PointerEventHandler(Timeline_Exited), true);
-            TimelineHost.AddHandler(PointerCanceledEvent, new PointerEventHandler(Timeline_Exited), true);
+            TimelineHost.AddHandler(PointerCanceledEvent, new PointerEventHandler(Timeline_Released), true);
+            TimelineHost.SizeChanged += (_, _) => DrawRemovedFractions();
         };
         Unloaded += (_, _) =>
         {
@@ -60,6 +72,14 @@ public sealed partial class VideoPlaybackBar : UserControl
         HideHover();
     }
 
+    public void ReleaseHoverFile()
+    {
+        _hoverTimer.Stop();
+        _hoverOpen = false;
+        _thumbs.ReleaseFile();
+        HideHover();
+    }
+
     public void SetHoverDuration(long durationMs)
     {
         _hoverDurationMs = durationMs > 0 ? durationMs : 0;
@@ -77,22 +97,78 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     public event EventHandler<double>? TrimSeekRequested;
 
-    public void BeginTrim()
+    public event EventHandler<CutSelection>? CutSelected;
+
+    public event EventHandler<double>? TimelineClicked;
+
+    public readonly record struct CutSelection(double Start, double End);
+
+    public void SetCutPicking(bool enabled)
     {
+        _cutPicking = enabled;
+        _cutDragging = false;
+        SeekSlider.IsHitTestVisible = !enabled && (_trimPassThrough || TrimCanvas.Visibility != Visibility.Visible);
+    }
+
+    public void SetSelectionFraction(double? start, double? end)
+    {
+        _selection = start is double from && end is double to
+            ? (Math.Min(from, to), Math.Max(from, to))
+            : null;
+        DrawRemovedFractions();
+    }
+
+    public void SetRemovedFractions(IReadOnlyList<(double Start, double End)> fractions)
+    {
+        _removedFractions = fractions.ToList();
+        DrawRemovedFractions();
+    }
+
+    public void BeginTrim(bool passThrough = false)
+    {
+        _trimPassThrough = passThrough;
         _trimStart = 0;
         _trimEnd = 1;
+        TrimCanvas.Background = passThrough ? null : new SolidColorBrush(Colors.Transparent);
         TrimCanvas.Visibility = Visibility.Visible;
         TrimCanvas.IsHitTestVisible = true;
-        SeekSlider.IsHitTestVisible = false;
+        SeekSlider.IsHitTestVisible = passThrough && !_cutPicking;
+        ArrangeTrim();
+    }
+
+    public void SetTrimInteractive(bool enabled)
+    {
+        _trimGrab = enabled ? 28 : 18;
+        TrimStartThumb.Width = enabled ? 18 : 12;
+        TrimEndThumb.Width = enabled ? 18 : 12;
+        TrimStartThumb.Height = enabled ? 32 : 22;
+        TrimEndThumb.Height = enabled ? 32 : 22;
+        TrimCanvas.IsHitTestVisible = enabled && TrimCanvas.Visibility == Visibility.Visible;
+        if (!enabled)
+        {
+            _trimDrag = TrimHandle.None;
+        }
+
+        SeekSlider.IsHitTestVisible = !enabled && !_cutPicking;
+        ArrangeTrim();
+    }
+
+    public void SetTrimFractions(double start, double end)
+    {
+        const double minGap = 0.01;
+        _trimStart = Math.Clamp(Math.Min(start, end - minGap), 0, 1);
+        _trimEnd = Math.Clamp(Math.Max(end, _trimStart + minGap), 0, 1);
         ArrangeTrim();
     }
 
     public void EndTrim()
     {
         _trimDrag = TrimHandle.None;
+        _trimPassThrough = false;
+        TrimCanvas.Background = new SolidColorBrush(Colors.Transparent);
         TrimCanvas.Visibility = Visibility.Collapsed;
         TrimCanvas.IsHitTestVisible = false;
-        SeekSlider.IsHitTestVisible = true;
+        SeekSlider.IsHitTestVisible = !_cutPicking;
     }
 
     private void Timeline_Moved(object sender, PointerRoutedEventArgs e)
@@ -101,6 +177,13 @@ public sealed partial class VideoPlaybackBar : UserControl
         {
             HideHover();
             return;
+        }
+
+        if (_cutDragging && TimelineHost.ActualWidth > 1)
+        {
+            var dragEnd = CutFraction(e);
+            _selection = (Math.Min(_cutAnchor, dragEnd), Math.Max(_cutAnchor, dragEnd));
+            DrawRemovedFractions();
         }
 
         var x = Math.Clamp(e.GetCurrentPoint(TimelineHost).Position.X, 0, TimelineHost.ActualWidth);
@@ -117,6 +200,84 @@ public sealed partial class VideoPlaybackBar : UserControl
     }
 
     private void Timeline_Exited(object sender, PointerRoutedEventArgs e) => HideHover();
+
+    private void Timeline_Pressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_trimDrag != TrimHandle.None || !_cutPicking || TimelineHost.ActualWidth <= 1)
+        {
+            return;
+        }
+
+        _cutDragging = true;
+        _cutAnchor = CutFraction(e);
+        TimelineHost.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void Timeline_Released(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_cutDragging)
+        {
+            return;
+        }
+
+        _cutDragging = false;
+        TimelineHost.ReleasePointerCaptures();
+        var end = CutFraction(e);
+        var start = Math.Min(_cutAnchor, end);
+        end = Math.Max(_cutAnchor, end);
+        if (end - start < 0.008)
+        {
+            TimelineClicked?.Invoke(this, end);
+        }
+        else
+        {
+            CutSelected?.Invoke(this, new CutSelection(start, end));
+        }
+
+        e.Handled = true;
+    }
+
+    private double CutFraction(PointerRoutedEventArgs e)
+        => Math.Clamp(e.GetCurrentPoint(TimelineHost).Position.X / Math.Max(1, TimelineHost.ActualWidth), 0, 1);
+
+    private void DrawRemovedFractions()
+    {
+        CutsCanvas.Children.Clear();
+        var width = TimelineHost.ActualWidth;
+        var height = Math.Max(8, TimelineHost.ActualHeight);
+        if (width <= 1)
+        {
+            return;
+        }
+
+        CutsCanvas.Width = width;
+        CutsCanvas.Height = height;
+        foreach (var (start, end) in _removedFractions)
+        {
+            AddSpan(start, end, width, height, 8, ColorHelper.FromArgb(210, 220, 48, 48));
+        }
+
+        if (_selection is { } selected)
+        {
+            AddSpan(selected.Start, selected.End, width, height, 16, ColorHelper.FromArgb(230, 255, 186, 46));
+        }
+    }
+
+    private void AddSpan(double start, double end, double width, double height, double band, Windows.UI.Color color)
+    {
+        var mark = new Border
+        {
+            Width = Math.Max(2, (end - start) * width),
+            Height = band,
+            Background = new SolidColorBrush(color),
+            CornerRadius = new CornerRadius(2),
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(mark, start * width);
+        Canvas.SetTop(mark, (height - band) / 2);
+        CutsCanvas.Children.Add(mark);
+    }
 
     private void HideHover()
     {
@@ -191,9 +352,9 @@ public sealed partial class VideoPlaybackBar : UserControl
         var x = e.GetCurrentPoint(TrimCanvas).Position.X;
         var startX = _trimStart * width;
         var endX = _trimEnd * width;
-        _trimDrag = Math.Abs(x - startX) <= 18
+        _trimDrag = Math.Abs(x - startX) <= _trimGrab
             ? TrimHandle.Start
-            : Math.Abs(x - endX) <= 18
+            : Math.Abs(x - endX) <= _trimGrab
                 ? TrimHandle.End
                 : TrimHandle.Seek;
         TrimCanvas.CapturePointer(e.Pointer);
