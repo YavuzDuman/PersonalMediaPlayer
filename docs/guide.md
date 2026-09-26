@@ -1,12 +1,12 @@
 # Using Personal Media Player
 
-The window has four places: **Library**, **Recordings**, **Capture**, and **Settings**.
+The window has five places: **Library**, **Recordings**, **Download**, **Capture**, and **Settings**.
 
 Your files live under `%LocalAppData%\PersonalMediaPlayer\Library`. Settings can open that folder. Import copies a file into the library, so later changes to the original on disk do not change the copy.
 
 ## Library
 
-Import photos (`png`, `jpg`, `jpeg`, `webp`, `bmp`, `gif`) and videos (`mp4`, `mkv`, `mov`, `avi`, `wmv`, `webm`, `m4v`). Drop files on the page, or use **Import**.
+Import photos (`png`, `jpg`, `jpeg`, `webp`, `bmp`, `gif`) and videos (`mp4`, `mkv`, `mov`, `avi`, `wmv`, `webm`, `m4v`, `m4a`). Drop files on the page, or use **Import**. A music file saved from Download uses `m4a` and is listed with the videos.
 
 The left column is a mix of real albums and views:
 
@@ -64,9 +64,29 @@ Trim can also be set from the playhead, or nudged by 1 second or 0.1 seconds. Th
 
 Remove section accepts typed times in **From** and **To**. `1:05.4`, `0:12`, `1:02:03`, and a number of seconds such as `90` all work. The span shows as a yellow band on the timeline. Parts already removed stay red. **Remove this part** drops the yellow span. **Put back** restores one removed part. Preview skips each removed part with the sound still in step. A removed piece has to be at least half a second, and the video that remains has to be at least half a second.
 
-Speed runs from 0.25× to 4×. The pitch changes with the speed. The card shows the length of the kept picture and the length the saved file will have. Volume runs from muted to 100%, and 100% is the original loudness. The editor’s own volume replaces the volume slider on the playback bar.
+Speed runs from 0.25× to 4×. The pitch changes with the speed. The card shows the length of the kept picture and the length the saved file will have. Volume runs from muted to 100%, and 100% is the original loudness. The editor’s own volume replaces the volume slider on the playback bar. Crop draws a rectangle over the picture. **Preview crop** shows only that area while you edit.
 
-**Save** asks for a new file or an overwrite. Overwrite keeps the previous file with your other originals, and bookmarks move onto the new times. A mark inside a removed span is dropped. Save as new names the copy from the changes you made: `2x`, `80%` or `muted`, `trim`, and `cut`, in that order. A second copy of the same name is `2`, then `3`. Cancel, or leaving with unsaved changes, asks you to stay or leave. A save that is still running asks you to wait.
+**Save** asks for a new file or an overwrite. Overwrite keeps the previous file with your other originals, and bookmarks move onto the new times. A mark inside a removed span is dropped. Save as new names the copy from the changes you made: `2x`, `80%` or `muted`, `crop`, `trim`, and `cut`, in that order. A second copy of the same name is `2`, then `3`. Trim, cut, and crop without a speed or volume change are written in one pass. Cancel, or leaving with unsaved changes, asks you to stay or leave. A save that is still running asks you to wait.
+
+## Download
+
+Paste a YouTube, Shorts, `youtu.be`, or YouTube Music link and press **Look up**. The page lists each quality with its size. An estimate is marked **about**. **Audio only** is included when the clip has a separate audio track. **Add to queue** stays off until the text in the box matches the looked-up link exactly, including capital letters.
+
+The queue downloads one item at a time. Each row shows waiting, a download percentage, paused, ready, failed, or cancelled.
+
+| Button | What it does |
+| --- | --- |
+| Pause | Stops that item and keeps the part already saved |
+| Resume | Continues that same download. Closing the app leaves unfinished items paused, and they do not start again until you press this |
+| Cancel | Drops the item and deletes its partial file |
+| Retry | Puts a failed or cancelled item back in line |
+| Preview | Opens a finished file on the same video bar |
+
+**Save** asks for a name and a place. **A folder in this app** puts it in Library, in an album you already have, or in a new album. **A folder on this PC** opens the system save dialog for any folder and any name. Video is an `.mp4`. Audio only is an `.m4a`. **Discard** deletes the preview without saving.
+
+**History** is the card row under the queue. Each card shows the picture, the file name, the link, the quality, the date, and the folder. **Open** plays it in the app. **Folder** selects it in File Explorer. **Remove** drops the card only. The saved file stays where it is.
+
+Leaving Download while something is queued, downloading, paused, or not yet saved asks you to stay or leave. Leaving cancels the rest and deletes unsaved files. Closing the app does not.
 
 ## Capture
 

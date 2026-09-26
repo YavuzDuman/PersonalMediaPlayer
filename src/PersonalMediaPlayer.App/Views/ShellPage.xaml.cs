@@ -96,6 +96,9 @@ public sealed partial class ShellPage : UserControl
             case "capture":
                 NavigateToSection(typeof(CapturePage));
                 break;
+            case "download":
+                NavigateToSection(typeof(DownloadPage));
+                break;
         }
     }
 
@@ -147,6 +150,12 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
+        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(typeof(CapturePage), kind, back: false))
+        {
+            SyncNavSelection();
+            return;
+        }
+
         if (!NavFrame.Navigate(typeof(CapturePage), kind))
         {
             SyncNavSelection();
@@ -185,6 +194,11 @@ public sealed partial class ShellPage : UserControl
         }
 
         if (NavFrame.Content is MediaPreviewPage preview && !preview.PrepareToLeave(null, null, back: true))
+        {
+            return;
+        }
+
+        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(null, null, back: true))
         {
             return;
         }
@@ -229,6 +243,12 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
+        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(pageType, null, back: false))
+        {
+            SyncNavSelection();
+            return;
+        }
+
         if (NavFrame.Navigate(pageType))
         {
             NavFrame.BackStack.Clear();
@@ -263,7 +283,9 @@ public sealed partial class ShellPage : UserControl
             ? "capture"
             : type == typeof(RecordingsPage)
                 ? "recordings"
-                : "library";
+                : type == typeof(DownloadPage)
+                    ? "download"
+                    : "library";
         SelectNavTag(tag);
     }
 }

@@ -28,6 +28,11 @@
                     <FontIcon Glyph="&#xE714;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="Download" Tag="download">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE896;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem Content="Capture" Tag="capture">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE7C8;" />

@@ -54,4 +54,18 @@ internal static class FilePickerHelper
         WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         return await picker.PickSaveFileAsync();
     }
+
+    public static async Task<StorageFile?> PickSaveDownloadAsync(Window window, string suggestedName, bool audio)
+    {
+        var picker = new FileSavePicker
+        {
+            SuggestedStartLocation = audio ? PickerLocationId.MusicLibrary : PickerLocationId.VideosLibrary,
+            SuggestedFileName = suggestedName
+        };
+        picker.FileTypeChoices.Add(audio ? "Audio" : "Video", [audio ? ".m4a" : ".mp4"]);
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        return await picker.PickSaveFileAsync();
+    }
 }

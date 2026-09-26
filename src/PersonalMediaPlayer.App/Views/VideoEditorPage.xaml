@@ -34,6 +34,17 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <ProgressRing x:Name="SaveProgress" Width="20" Height="20" IsActive="False" />
+                <Button x:Name="UndoButton" Click="Undo_Click" Content="Undo" IsEnabled="False" ToolTipService.ToolTip="Undo (Ctrl+Z)">
+                    <Button.KeyboardAccelerators>
+                        <KeyboardAccelerator Invoked="Undo_Invoked" Key="Z" Modifiers="Control" />
+                    </Button.KeyboardAccelerators>
+                </Button>
+                <Button x:Name="RedoButton" Click="Redo_Click" Content="Redo" IsEnabled="False" ToolTipService.ToolTip="Redo (Ctrl+Y)">
+                    <Button.KeyboardAccelerators>
+                        <KeyboardAccelerator Invoked="Redo_Invoked" Key="Y" Modifiers="Control" />
+                        <KeyboardAccelerator Invoked="Redo_Invoked" Key="Z" Modifiers="Control,Shift" />
+                    </Button.KeyboardAccelerators>
+                </Button>
                 <Button Click="Cancel_Click" Content="Cancel" />
                 <Button
                     x:Name="SaveButton"
@@ -53,7 +64,8 @@
             Severity="Error" />
 
         <Grid Grid.Row="2">
-            <Border x:Name="VideoHost" Background="Black" CornerRadius="16" />
+            <Border x:Name="VideoHost" Background="Black" CornerRadius="16" SizeChanged="VideoHost_SizeChanged" />
+            <controls:VideoCropSurface x:Name="CropSurface" CropChanged="CropSurface_Changed" />
             <Border
                 Margin="16"
                 Padding="12"
@@ -124,7 +136,7 @@
                         <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Volume" />
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="100% is the original loudness. 0% saves silence."
+                            Text="This is the loudness saved into the file. 100% keeps the original. The slider under the picture only changes what you hear while editing."
                             TextWrapping="Wrap" />
                         <TextBlock x:Name="VolumeLabel" Style="{StaticResource SubtitleTextBlockStyle}" Text="100%" />
                         <Slider
@@ -139,6 +151,33 @@
                             <Button Click="VolumePreset_Click" Content="50%" Tag="50" />
                             <Button Click="VolumePreset_Click" Content="100%" Tag="100" />
                         </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Border
+                    Padding="16"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                    <StackPanel Spacing="12">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Crop" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Drag inside the rectangle to move it. Drag an edge or corner to resize it. The dark area is left out."
+                            TextWrapping="Wrap" />
+                        <TextBlock x:Name="CropSummary" Text="The whole picture is kept." TextWrapping="Wrap" />
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Click="ResetCrop_Click"
+                            Content="Reset selection" />
+                        <Button
+                            x:Name="PreviewCropButton"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Click="PreviewCrop_Click"
+                            Content="Preview crop"
+                            IsEnabled="False" />
                     </StackPanel>
                 </Border>
                 <Border

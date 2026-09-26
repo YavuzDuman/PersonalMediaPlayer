@@ -4,26 +4,45 @@ namespace PersonalMediaPlayer.App.Editing;
 
 internal static class VideoSpeedEncoder
 {
-    public static void Write(string sourcePath, string destinationPath, double rate, double volume)
+    public readonly record struct VideoCrop(double Left, double Top, double Right, double Bottom);
+
+    public static void Write(string sourcePath, string destinationPath, double rate, double volume, VideoCrop? crop = null, IReadOnlyList<(long Start, long End)>? keep = null)
     {
         if (rate < 0.25 || rate > 4)
         {
             throw new InvalidOperationException("Choose a speed from 0.25x to 4x.");
         }
 
+        try
+        {
+            WriteCore(sourcePath, destinationPath, rate, volume, crop, keep, hardware: true);
+        }
+        catch (COMException)
+        {
+            if (File.Exists(destinationPath))
+            {
+                File.Delete(destinationPath);
+            }
+
+            WriteCore(sourcePath, destinationPath, rate, volume, crop, keep, hardware: false);
+        }
+    }
+
+    private static void WriteCore(string sourcePath, string destinationPath, double rate, double volume, VideoCrop? crop, IReadOnlyList<(long Start, long End)>? keep, bool hardware)
+    {
         MediaFoundation.Startup();
         IMFSourceReader? reader = null;
         IMFSinkWriter? writer = null;
         try
         {
-            MediaFoundation.CreateReader(sourcePath, out reader);
-            var video = VideoStream.Open(reader);
+            MediaFoundation.CreateReader(sourcePath, hardware, out reader);
+            var video = VideoStream.Open(reader, crop);
             var audio = AudioStream.TryOpen(reader);
-            MediaFoundation.CreateWriter(destinationPath, out writer);
-            video.AddTo(writer, rate);
+            MediaFoundation.CreateWriter(destinationPath, hardware, out writer);
+            video.AddTo(writer, rate, hardware);
             audio?.AddTo(writer);
             writer.BeginWriting();
-            CopyStreams(reader, writer, video, audio, rate, volume);
+            CopyStreams(reader, writer, video, audio, rate, volume, keep);
             writer.FinishWriting();
         }
         finally
@@ -40,7 +59,7 @@ internal static class VideoSpeedEncoder
         }
     }
 
-    private static void CopyStreams(IMFSourceReader reader, IMFSinkWriter writer, VideoStream video, AudioStream? audio, double rate, double volume)
+    private static void CopyStreams(IMFSourceReader reader, IMFSinkWriter writer, VideoStream video, AudioStream? audio, double rate, double volume, IReadOnlyList<(long Start, long End)>? keep)
     {
         var videoDone = false;
         var audioDone = audio is null;
@@ -75,12 +94,36 @@ internal static class VideoSpeedEncoder
             {
                 if (actual == video.ReaderIndex)
                 {
-                    ScaleTime(sample, rate);
-                    writer.WriteSample(video.WriterIndex, sample);
+                    if (!TryPlace(sample, keep, rate))
+                    {
+                        continue;
+                    }
+
+                    if (video.HasCrop)
+                    {
+                        var cropped = video.Crop(sample);
+                        try
+                        {
+                            writer.WriteSample(video.WriterIndex, cropped);
+                        }
+                        finally
+                        {
+                            Marshal.ReleaseComObject(cropped);
+                        }
+                    }
+                    else
+                    {
+                        writer.WriteSample(video.WriterIndex, sample);
+                    }
                 }
                 else if (audio is not null && actual == audio.ReaderIndex)
                 {
-                    var sped = audio.Resample(sample, rate, volume);
+                    var sped = audio.Resample(sample, rate, volume, keep);
+                    if (sped is null)
+                    {
+                        continue;
+                    }
+
                     try
                     {
                         writer.WriteSample(audio.WriterIndex, sped);
@@ -129,19 +172,63 @@ internal static class VideoSpeedEncoder
         throw new InvalidOperationException("The video streams could not be read.");
     }
 
-    private static void ScaleTime(IMFSample sample, double rate)
+    private static bool TryPlace(IMFSample sample, IReadOnlyList<(long Start, long End)>? keep, double rate)
     {
         sample.GetSampleTime(out var time);
-        sample.SetSampleTime((long)(time / rate));
+        long duration = 1;
         try
         {
-            sample.GetSampleDuration(out var duration);
-            sample.SetSampleDuration(Math.Max(1, (long)(duration / rate)));
+            sample.GetSampleDuration(out duration);
         }
         catch (COMException)
         {
-            // Some decoded frames omit a duration. The next timestamp still places them.
+            duration = 1;
         }
+
+        if (!TryKeep(keep, time, duration, out var keptDuration, out var timeline))
+        {
+            return false;
+        }
+
+        sample.SetSampleTime((long)(timeline / rate));
+        sample.SetSampleDuration(Math.Max(1, (long)(keptDuration / rate)));
+        return true;
+    }
+
+    private static bool TryKeep(IReadOnlyList<(long Start, long End)>? keep, long time, long duration, out long keptDuration, out long timeline)
+    {
+        if (duration < 1)
+        {
+            duration = 1;
+        }
+
+        if (keep is null)
+        {
+            keptDuration = duration;
+            timeline = time;
+            return true;
+        }
+
+        long cursor = 0;
+        foreach (var (start, end) in keep)
+        {
+            if (time >= start && time < end)
+            {
+                var room = end - time;
+                keptDuration = Math.Min(duration, Math.Max(1, room));
+                timeline = cursor + (time - start);
+                return true;
+            }
+
+            if (end > start)
+            {
+                cursor += end - start;
+            }
+        }
+
+        keptDuration = 0;
+        timeline = 0;
+        return false;
     }
 
     private sealed class VideoStream
@@ -156,11 +243,23 @@ internal static class VideoSpeedEncoder
 
         private uint _height;
 
+        private int _sourceWidth;
+
+        private int _sourceHeight;
+
+        private int _cropX;
+
+        private int _cropY;
+
+        private int _cropWidth;
+
+        private int _cropHeight;
+
         private long _frameRate = Pack(1, 30);
 
         private int _bitrate = 4_000_000;
 
-        public static VideoStream Open(IMFSourceReader reader)
+        public static VideoStream Open(IMFSourceReader reader, VideoCrop? crop)
         {
             reader.SetStreamSelection(MediaFoundation.AllStreams, false);
             reader.SetStreamSelection(MediaFoundation.FirstVideo, true);
@@ -237,18 +336,120 @@ internal static class VideoSpeedEncoder
                 // The estimated bitrate stays.
             }
 
-            return new VideoStream
+            var stream = new VideoStream
             {
                 ReaderIndex = StreamIndex(reader, MfGuids.Video),
                 _input = current,
                 _width = decodedWidth,
                 _height = decodedHeight,
+                _sourceWidth = (int)decodedWidth,
+                _sourceHeight = (int)decodedHeight,
                 _frameRate = frameRate,
                 _bitrate = bitrate
             };
+            stream.ApplyCrop(crop);
+            return stream;
         }
 
-        public void AddTo(IMFSinkWriter writer, double rate)
+        public bool HasCrop => _cropWidth > 0;
+
+        public IMFSample Crop(IMFSample source)
+        {
+            source.ConvertToContiguousBuffer(out var buffer);
+            try
+            {
+                buffer.Lock(out var pointer, out _, out var length);
+                byte[] bytes;
+                try
+                {
+                    bytes = new byte[length];
+                    Marshal.Copy(pointer, bytes, 0, length);
+                }
+                finally
+                {
+                    buffer.Unlock();
+                }
+
+                var cropped = CropNv12(bytes);
+                source.GetSampleTime(out var time);
+                long duration = 1;
+                try
+                {
+                    source.GetSampleDuration(out duration);
+                }
+                catch (COMException)
+                {
+                    duration = 1;
+                }
+
+                return MediaFoundation.CreateSample(cropped, time, Math.Max(1, duration));
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(buffer);
+            }
+        }
+
+        private void ApplyCrop(VideoCrop? crop)
+        {
+            if (crop is not { } region || _sourceWidth < 2 || _sourceHeight < 2)
+            {
+                return;
+            }
+
+            var x = Math.Clamp((int)Math.Round(region.Left * _sourceWidth), 0, _sourceWidth - 2) & ~1;
+            var y = Math.Clamp((int)Math.Round(region.Top * _sourceHeight), 0, _sourceHeight - 2) & ~1;
+            var right = Math.Clamp((int)Math.Round(region.Right * _sourceWidth), x + 2, _sourceWidth) & ~1;
+            var bottom = Math.Clamp((int)Math.Round(region.Bottom * _sourceHeight), y + 2, _sourceHeight) & ~1;
+            var cropWidth = right - x;
+            var cropHeight = bottom - y;
+            if (cropWidth < 2 || cropHeight < 2 || (x == 0 && y == 0 && cropWidth == _sourceWidth && cropHeight == _sourceHeight))
+            {
+                return;
+            }
+
+            _cropX = x;
+            _cropY = y;
+            _cropWidth = cropWidth;
+            _cropHeight = cropHeight;
+            _width = (uint)cropWidth;
+            _height = (uint)cropHeight;
+            _input.SetUINT64(MfGuids.FrameSize, Pack(_width, _height));
+            _bitrate = (int)Math.Clamp((long)_bitrate * cropWidth * cropHeight / (_sourceWidth * _sourceHeight), 1_000_000, 20_000_000);
+        }
+
+        private byte[] CropNv12(byte[] source)
+        {
+            var stride = _sourceWidth;
+            var tight = _sourceWidth * _sourceHeight * 3 / 2;
+            if (source.Length >= tight && source.Length % (_sourceHeight * 3 / 2) == 0)
+            {
+                var candidate = source.Length / (_sourceHeight * 3 / 2);
+                if (candidate >= _sourceWidth && candidate % 2 == 0)
+                {
+                    stride = candidate;
+                }
+            }
+
+            var target = new byte[_cropWidth * _cropHeight * 3 / 2];
+            for (var row = 0; row < _cropHeight; row++)
+            {
+                Buffer.BlockCopy(source, (row + _cropY) * stride + _cropX, target, row * _cropWidth, _cropWidth);
+            }
+
+            var sourceUv = stride * _sourceHeight;
+            var targetUv = _cropWidth * _cropHeight;
+            var uvHeight = _cropHeight / 2;
+            var uvY = _cropY / 2;
+            for (var row = 0; row < uvHeight; row++)
+            {
+                Buffer.BlockCopy(source, sourceUv + (row + uvY) * stride + _cropX, target, targetUv + row * _cropWidth, _cropWidth);
+            }
+
+            return target;
+        }
+
+        public void AddTo(IMFSinkWriter writer, double rate, bool hardware)
         {
             var output = MediaFoundation.CreateType(MfGuids.Video, MfGuids.H264);
             try
@@ -279,7 +480,22 @@ internal static class VideoSpeedEncoder
                 Marshal.ReleaseComObject(output);
             }
 
-            writer.SetInputMediaType(WriterIndex, _input, null);
+            if (hardware)
+            {
+                writer.SetInputMediaType(WriterIndex, _input, null);
+                return;
+            }
+
+            var parameters = MediaFoundation.CreateAttributes();
+            try
+            {
+                parameters.SetUINT32(MfGuids.QualityVsSpeed, 80);
+                writer.SetInputMediaType(WriterIndex, _input, parameters);
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(parameters);
+            }
         }
     }
 
@@ -376,7 +592,7 @@ internal static class VideoSpeedEncoder
             }
         }
 
-        public IMFSample Resample(IMFSample source, double rate, double volume)
+        public IMFSample? Resample(IMFSample source, double rate, double volume, IReadOnlyList<(long Start, long End)>? keep)
         {
             source.ConvertToContiguousBuffer(out var buffer);
             try
@@ -393,10 +609,28 @@ internal static class VideoSpeedEncoder
                     buffer.Unlock();
                 }
 
-                var sped = ResamplePcm16(bytes, _channels, _sampleRate, _outputRate, rate, volume);
                 source.GetSampleTime(out var time);
-                var sample = MediaFoundation.CreateSample(sped, (long)(time / rate), sped.Length / (_channels * 2) * 10_000_000L / _outputRate);
-                return sample;
+                var frame = _channels * 2;
+                var frames = bytes.Length / frame;
+                if (frames < 1)
+                {
+                    return null;
+                }
+
+                var sourceDuration = frames * 10_000_000L / _sampleRate;
+                if (!TryKeep(keep, time, sourceDuration, out var keptDuration, out var timeline))
+                {
+                    return null;
+                }
+
+                var keptFrames = (int)Math.Clamp(keptDuration * _sampleRate / 10_000_000L, 1, frames);
+                if (keptFrames < frames)
+                {
+                    bytes = bytes[..(keptFrames * frame)];
+                }
+
+                var sped = ResamplePcm16(bytes, _channels, _sampleRate, _outputRate, rate, volume);
+                return MediaFoundation.CreateSample(sped, (long)(timeline / rate), Math.Max(1, sped.Length / frame * 10_000_000L / _outputRate));
             }
             finally
             {
@@ -480,6 +714,9 @@ internal static class MfGuids
     public static readonly Guid AacPayload = new("bfbabe79-7434-4d1c-94f0-72a3b9e17188");
     public static readonly Guid AacProfile = new("7632f0e6-9538-4d61-acda-ea29c8c14456");
     public static readonly Guid EnableVideoProcessing = new("fb394f3d-ccf1-42ee-bbb3-f9b845d5681d");
+    public static readonly Guid DisableThrottling = new("08b845d8-2b74-4afe-9d53-be16d2d5ae4f");
+    public static readonly Guid EnableHardwareTransforms = new("a634a91c-822b-41b9-a494-4de4643612b0");
+    public static readonly Guid QualityVsSpeed = new("98332df8-03cd-476b-89fa-3f9e442dec9f");
 }
 
 internal static class MediaFoundation
@@ -493,12 +730,17 @@ internal static class MediaFoundation
 
     public static void Startup() => MfImports.MFStartup(0x00020070, 0);
 
-    public static void CreateReader(string path, out IMFSourceReader reader)
+    public static void CreateReader(string path, bool hardware, out IMFSourceReader reader)
     {
         var attributes = CreateAttributes();
         try
         {
             attributes.SetUINT32(MfGuids.EnableVideoProcessing, 1);
+            if (hardware)
+            {
+                attributes.SetUINT32(MfGuids.EnableHardwareTransforms, 1);
+            }
+
             MfImports.MFCreateSourceReaderFromURL(path, attributes, out reader);
         }
         finally
@@ -507,8 +749,24 @@ internal static class MediaFoundation
         }
     }
 
-    public static void CreateWriter(string path, out IMFSinkWriter writer)
-        => MfImports.MFCreateSinkWriterFromURL(path, null, null, out writer);
+    public static void CreateWriter(string path, bool hardware, out IMFSinkWriter writer)
+    {
+        var attributes = CreateAttributes();
+        try
+        {
+            attributes.SetUINT32(MfGuids.DisableThrottling, 1);
+            if (hardware)
+            {
+                attributes.SetUINT32(MfGuids.EnableHardwareTransforms, 1);
+            }
+
+            MfImports.MFCreateSinkWriterFromURL(path, null, attributes, out writer);
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(attributes);
+        }
+    }
 
     public static IMFMediaType CreateType(Guid major, Guid subtype)
     {

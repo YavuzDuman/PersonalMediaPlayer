@@ -63,6 +63,12 @@ public sealed partial class MainWindow : Window
         if (Shell.ContentFrame.Content is RecordingsPage recordings && recordings.TryHandleHostClose())
         {
             args.Cancel = true;
+            return;
+        }
+
+        if (Shell.ContentFrame.Content is DownloadPage download)
+        {
+            download.PersistForExit();
         }
     }
 

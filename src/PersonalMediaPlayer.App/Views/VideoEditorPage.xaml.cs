@@ -40,14 +40,25 @@ public sealed partial class VideoEditorPage : Page
     private long? _markStartMs;
     private long? _markEndMs;
     private readonly List<(long StartMs, long EndMs)> _cuts = [];
+    private bool _cropPreview;
+    private int _videoWidth;
+    private int _videoHeight;
+    private Media? _openMedia;
+    private readonly DispatcherTimer _historyTimer;
+    private readonly List<EditorSnapshot> _history = [];
+    private int _historyIndex;
+    private bool _historyReady;
+    private bool _restoring;
+    private double _listenVolume = 80;
 
     public VideoEditorPage()
     {
         InitializeComponent();
         Playback.SpeedCombo.Visibility = Visibility.Collapsed;
         Playback.FullScreenButton.Visibility = Visibility.Collapsed;
-        Playback.MuteButton.Visibility = Visibility.Collapsed;
-        Playback.VolumeSlider.Visibility = Visibility.Collapsed;
+        Playback.VolumeSlider.Value = 80;
+        Playback.MuteButton.Click += PlaybackMute_Click;
+        Playback.VolumeSlider.ValueChanged += PlaybackVolume_Changed;
         Playback.PlayButton.Click += Play_Click;
         Playback.BackButton.Click += (_, _) => Skip(-10_000);
         Playback.ForwardButton.Click += (_, _) => Skip(10_000);
@@ -61,6 +72,14 @@ public sealed partial class VideoEditorPage : Page
         Playback.TrimSeekRequested += (_, fraction) => SeekToFraction(fraction);
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _timer.Tick += (_, _) => UpdateClock();
+        _historyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _historyTimer.Tick += (_, _) =>
+        {
+            _historyTimer.Stop();
+            CommitHistory();
+        };
+        _history.Add(Capture());
+        _historyReady = true;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -163,7 +182,9 @@ public sealed partial class VideoEditorPage : Page
 
     private bool HasTrim => _durationMs > 0 && (_trimStartMs > 50 || _durationMs - _trimEndMs > 50);
 
-    private bool HasEdits => HasSpeedChange || HasVolumeChange || HasCuts || HasTrim;
+    private bool HasCrop => CropSurface is not null && CropSurface.HasCrop;
+
+    private bool HasEdits => HasSpeedChange || HasVolumeChange || HasCuts || HasTrim || HasCrop;
 
     private void VideoView_Initialized(object? sender, InitializedEventArgs e)
     {
@@ -197,8 +218,18 @@ public sealed partial class VideoEditorPage : Page
             return;
         }
 
-        using var media = new Media(_libVlc, path, FromType.FromPath);
+        _openMedia?.Dispose();
+        var media = new Media(_libVlc, path, FromType.FromPath);
+        _openMedia = media;
+        media.ParsedChanged += (_, args) =>
+        {
+            if (args.ParsedStatus == MediaParsedStatus.Done)
+            {
+                DispatcherQueue.TryEnqueue(() => ApplyVideoSize(media));
+            }
+        };
         media.Parse(MediaParseOptions.ParseLocal);
+        ApplyVideoSize(media);
         SetDuration(media.Duration);
         _player.Play(media);
         ApplyRate();
@@ -227,6 +258,8 @@ public sealed partial class VideoEditorPage : Page
             _player = null;
         }
 
+        _openMedia?.Dispose();
+        _openMedia = null;
         _libVlc?.Dispose();
         _libVlc = null;
         if (VideoHost.Child is not null)
@@ -272,12 +305,14 @@ public sealed partial class VideoEditorPage : Page
 
     private void ApplyVolume()
     {
-        var volume = (int)VolumeSlider.Value;
+        var volume = (int)Math.Round(Playback.VolumeSlider.Value);
         if (_player is not null)
         {
             _player.Mute = volume <= 0;
             _player.Volume = volume;
         }
+
+        Playback.MuteIcon.Glyph = volume <= 0 ? "\uE74F" : "\uE767";
     }
 
     private void Seek_Pressed(object sender, PointerRoutedEventArgs e) => _dragging = true;
@@ -293,12 +328,14 @@ public sealed partial class VideoEditorPage : Page
 
     private void Seek_Changed(object sender, RangeBaseValueChangedEventArgs e)
     {
-        if (_dragging || _updatingSlider || _player is null || _durationMs <= 0)
+        if (!_dragging || _updatingSlider || _player is null || _durationMs <= 0)
         {
             return;
         }
 
-        _player.Time = PlayableTime((long)(e.NewValue / 1000d * _durationMs));
+        var time = PlayableTime((long)(e.NewValue / 1000d * _durationMs));
+        _player.Time = time;
+        Playback.PositionText.Text = Format(time);
     }
 
     private void UpdateClock()
@@ -365,6 +402,7 @@ public sealed partial class VideoEditorPage : Page
         ApplyRate();
         UpdateSpeedText();
         SaveButton.IsEnabled = HasEdits && !_saving;
+        NoteEdit();
     }
 
     private void Preset_Click(object sender, RoutedEventArgs e)
@@ -599,6 +637,8 @@ public sealed partial class VideoEditorPage : Page
         {
             Playback.SetSelectionFraction(null, null);
         }
+
+        NoteEdit();
     }
 
     private void RefreshCuts()
@@ -710,6 +750,8 @@ public sealed partial class VideoEditorPage : Page
         {
             SaveButton.IsEnabled = HasEdits && !_saving;
         }
+
+        NoteEdit();
     }
 
     private void UpdateTrimSummary()
@@ -819,9 +861,32 @@ public sealed partial class VideoEditorPage : Page
         }
 
         var volume = (int)e.NewValue;
-        VolumeLabel.Text = volume <= 0 ? "Muted" : $"{volume}%";
-        ApplyVolume();
+        VolumeLabel.Text = volume <= 0 ? "Muted in the file" : $"{volume}% in the file";
         SaveButton.IsEnabled = HasEdits && !_saving;
+        NoteEdit();
+    }
+
+    private void PlaybackVolume_Changed(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (e.NewValue > 0)
+        {
+            _listenVolume = e.NewValue;
+        }
+
+        ApplyVolume();
+    }
+
+    private void PlaybackMute_Click(object sender, RoutedEventArgs e)
+    {
+        if (Playback.VolumeSlider.Value > 0)
+        {
+            _listenVolume = Playback.VolumeSlider.Value;
+            Playback.VolumeSlider.Value = 0;
+        }
+        else
+        {
+            Playback.VolumeSlider.Value = _listenVolume <= 0 ? 80 : _listenVolume;
+        }
     }
 
     private void VolumePreset_Click(object sender, RoutedEventArgs e)
@@ -872,7 +937,31 @@ public sealed partial class VideoEditorPage : Page
             ReleasePlayer();
             var produced = source;
             string? working = null;
-            if (HasCuts || HasTrim)
+            var needsEncoder = HasSpeedChange || HasVolumeChange || (HasCrop && _videoWidth <= 0);
+            if (!needsEncoder)
+            {
+                working = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + Path.GetExtension(source));
+                File.Copy(source, working, overwrite: true);
+                try
+                {
+                    (int X, int Y, int Width, int Height)? crop = HasCrop ? PixelCrop() : null;
+                    await VideoTrimmer.RenderAsync(
+                        working,
+                        temp,
+                        _cuts.Select(cut => (TimeSpan.FromMilliseconds(cut.StartMs), TimeSpan.FromMilliseconds(cut.EndMs))).ToArray(),
+                        TimeSpan.FromMilliseconds(_trimStartMs),
+                        TimeSpan.FromMilliseconds(_trimEndMs > 0 ? _trimEndMs : _durationMs),
+                        crop);
+                }
+                finally
+                {
+                    if (File.Exists(working))
+                    {
+                        File.Delete(working);
+                    }
+                }
+            }
+            else if (HasCuts || HasTrim)
             {
                 working = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + Path.GetExtension(source));
                 File.Copy(source, working, overwrite: true);
@@ -882,29 +971,46 @@ public sealed partial class VideoEditorPage : Page
                     File.Delete(cutFile);
                 }
 
-                try
+                var trimWhileEncoding = _durationMs > 0 && (HasSpeedChange || HasVolumeChange || HasCrop);
+                if (!trimWhileEncoding)
                 {
-                    await VideoTrimmer.RemoveSectionsAsync(
-                        working,
-                        cutFile,
-                        _cuts.Select(cut => (TimeSpan.FromMilliseconds(cut.StartMs), TimeSpan.FromMilliseconds(cut.EndMs))).ToArray(),
-                        TimeSpan.FromMilliseconds(_trimStartMs),
-                        TimeSpan.FromMilliseconds(_trimEndMs > 0 ? _trimEndMs : _durationMs));
-                }
-                finally
-                {
-                    if (File.Exists(working))
+                    try
                     {
-                        File.Delete(working);
+                        await VideoTrimmer.RemoveSectionsAsync(
+                            working,
+                            cutFile,
+                            _cuts.Select(cut => (TimeSpan.FromMilliseconds(cut.StartMs), TimeSpan.FromMilliseconds(cut.EndMs))).ToArray(),
+                            TimeSpan.FromMilliseconds(_trimStartMs),
+                            TimeSpan.FromMilliseconds(_trimEndMs > 0 ? _trimEndMs : _durationMs));
                     }
-                }
+                    finally
+                    {
+                        if (File.Exists(working))
+                        {
+                            File.Delete(working);
+                        }
+                    }
 
-                produced = cutFile;
+                    produced = cutFile;
+                }
+                else if (File.Exists(working))
+                {
+                    File.Delete(working);
+                }
             }
 
-            if (HasSpeedChange || HasVolumeChange)
+            if (needsEncoder)
             {
-                await VideoTrimmer.ChangeSpeedAsync(produced, temp, rate, VolumeSlider.Value / 100d);
+                var crop = HasCrop
+                    ? new VideoSpeedEncoder.VideoCrop(CropSurface.Left, CropSurface.Top, CropSurface.Right, CropSurface.Bottom)
+                    : (VideoSpeedEncoder.VideoCrop?)null;
+                await VideoTrimmer.ChangeSpeedAsync(
+                    produced,
+                    temp,
+                    rate,
+                    VolumeSlider.Value / 100d,
+                    crop,
+                    (HasCuts || HasTrim) && _durationMs > 0 ? KeptSourceRanges() : null);
             }
             else if (cutFile is not null)
             {
@@ -1016,6 +1122,21 @@ public sealed partial class VideoEditorPage : Page
         }
     }
 
+    private (long Start, long End)[] KeptSourceRanges()
+    {
+        var duration = TimeSpan.FromMilliseconds(_durationMs);
+        var removed = _cuts
+            .Select(cut => (TimeSpan.FromMilliseconds(cut.StartMs), TimeSpan.FromMilliseconds(cut.EndMs)))
+            .ToArray();
+        var from = TimeSpan.FromMilliseconds(_trimStartMs);
+        var to = TimeSpan.FromMilliseconds(_trimEndMs > 0 ? _trimEndMs : _durationMs);
+        return VideoTrimmer.KeptSpans(duration, removed)
+            .Select(span => (Start: span.Start < from ? from : span.Start, End: span.End > to ? to : span.End))
+            .Where(span => span.End > span.Start)
+            .Select(span => (span.Start.Ticks, span.End.Ticks))
+            .ToArray();
+    }
+
     private string EditedFileName(string source, double rate)
     {
         var stem = Path.GetFileNameWithoutExtension(source);
@@ -1029,6 +1150,11 @@ public sealed partial class VideoEditorPage : Page
         {
             var volume = (int)VolumeSlider.Value;
             parts.Add(volume <= 0 ? "muted" : $"{volume}%");
+        }
+
+        if (HasCrop)
+        {
+            parts.Add("crop");
         }
 
         if (HasTrim)
@@ -1052,6 +1178,323 @@ public sealed partial class VideoEditorPage : Page
 
         return candidate + ".mp4";
     }
+
+    private void ApplyVideoSize(Media media)
+    {
+        if (!ReferenceEquals(media, _openMedia))
+        {
+            return;
+        }
+
+        foreach (var track in media.Tracks)
+        {
+            if (track.TrackType != TrackType.Video || track.Data.Video.Width <= 0 || track.Data.Video.Height <= 0)
+            {
+                continue;
+            }
+
+            _videoWidth = (int)track.Data.Video.Width;
+            _videoHeight = (int)track.Data.Video.Height;
+            LayoutCrop();
+            if (media.Duration > 0)
+            {
+                SetDuration(media.Duration);
+            }
+
+            return;
+        }
+    }
+
+    private void VideoHost_SizeChanged(object sender, SizeChangedEventArgs e) => LayoutCrop();
+
+    private void LayoutCrop()
+    {
+        if (CropSurface is null || _videoWidth <= 0 || _videoHeight <= 0 || VideoHost.ActualWidth <= 1 || VideoHost.ActualHeight <= 1)
+        {
+            return;
+        }
+
+        var scale = Math.Min(VideoHost.ActualWidth / _videoWidth, VideoHost.ActualHeight / _videoHeight);
+        var width = _videoWidth * scale;
+        var height = _videoHeight * scale;
+        var x = (VideoHost.ActualWidth - width) / 2;
+        var y = (VideoHost.ActualHeight - height) / 2;
+        CropSurface.SetPicture(x, y, width, height);
+    }
+
+    private void CropSurface_Changed(object sender, EventArgs e)
+    {
+        if (_cropPreview)
+        {
+            ApplyCropPreview();
+        }
+
+        UpdateCropSummary();
+        if (SaveButton is not null)
+        {
+            SaveButton.IsEnabled = HasEdits && !_saving;
+        }
+
+        NoteEdit();
+    }
+
+    private void UpdateCropSummary()
+    {
+        if (CropSummary is null || PreviewCropButton is null)
+        {
+            return;
+        }
+
+        PreviewCropButton.IsEnabled = HasCrop;
+        if (!HasCrop)
+        {
+            CropSummary.Text = "The whole picture is kept.";
+            if (_cropPreview)
+            {
+                _cropPreview = false;
+                ApplyCropPreview();
+            }
+
+            return;
+        }
+
+        if (_videoWidth <= 0 || _videoHeight <= 0)
+        {
+            CropSummary.Text = "A crop is selected.";
+            return;
+        }
+
+        var (x, y, width, height) = PixelCrop();
+        CropSummary.Text = $"Keeps {width}×{height}, starting {x} px across and {y} px down.";
+    }
+
+    private (int X, int Y, int Width, int Height) PixelCrop()
+    {
+        var x = Math.Clamp((int)Math.Round(CropSurface.Left * _videoWidth), 0, Math.Max(0, _videoWidth - 2)) & ~1;
+        var y = Math.Clamp((int)Math.Round(CropSurface.Top * _videoHeight), 0, Math.Max(0, _videoHeight - 2)) & ~1;
+        var right = Math.Clamp((int)Math.Round(CropSurface.Right * _videoWidth), x + 2, _videoWidth) & ~1;
+        var bottom = Math.Clamp((int)Math.Round(CropSurface.Bottom * _videoHeight), y + 2, _videoHeight) & ~1;
+        return (x, y, Math.Max(2, right - x), Math.Max(2, bottom - y));
+    }
+
+    private void ResetCrop_Click(object sender, RoutedEventArgs e)
+    {
+        _cropPreview = false;
+        CropSurface.Reset();
+        ApplyCropPreview();
+        if (PreviewCropButton is not null)
+        {
+            PreviewCropButton.Content = "Preview crop";
+        }
+    }
+
+    private void PreviewCrop_Click(object sender, RoutedEventArgs e)
+    {
+        if (!HasCrop)
+        {
+            return;
+        }
+
+        _cropPreview = !_cropPreview;
+        ApplyCropPreview();
+        PreviewCropButton.Content = _cropPreview ? "Show the full frame" : "Preview crop";
+    }
+
+    private void ApplyCropPreview()
+    {
+        if (_player is null)
+        {
+            return;
+        }
+
+        if (!_cropPreview || !HasCrop || _videoWidth <= 0 || _videoHeight <= 0)
+        {
+            _player.CropGeometry = string.Empty;
+            CropSurface.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var (x, y, width, height) = PixelCrop();
+        _player.CropGeometry = $"{width}x{height}+{x}+{y}";
+        CropSurface.Visibility = Visibility.Collapsed;
+    }
+
+    private void NoteEdit()
+    {
+        if (!_historyReady || _restoring)
+        {
+            return;
+        }
+
+        _historyTimer.Stop();
+        _historyTimer.Start();
+    }
+
+    private void CommitHistory()
+    {
+        if (!_historyReady || _restoring)
+        {
+            return;
+        }
+
+        var snap = Capture();
+        if (Same(snap, _history[_historyIndex]))
+        {
+            return;
+        }
+
+        if (_historyIndex < _history.Count - 1)
+        {
+            _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
+        }
+
+        _history.Add(snap);
+        _historyIndex = _history.Count - 1;
+        UpdateHistoryButtons();
+    }
+
+    private static bool Same(EditorSnapshot left, EditorSnapshot right)
+    {
+        return left.Speed == right.Speed
+            && left.Volume == right.Volume
+            && left.TrimStartMs == right.TrimStartMs
+            && left.TrimEndMs == right.TrimEndMs
+            && left.MarkStartMs == right.MarkStartMs
+            && left.MarkEndMs == right.MarkEndMs
+            && left.CropLeft == right.CropLeft
+            && left.CropTop == right.CropTop
+            && left.CropRight == right.CropRight
+            && left.CropBottom == right.CropBottom
+            && left.CropPreview == right.CropPreview
+            && left.Cuts.SequenceEqual(right.Cuts);
+    }
+
+    private void Undo_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (FocusManager.GetFocusedElement(XamlRoot) is TextBox)
+        {
+            return;
+        }
+
+        args.Handled = true;
+        Undo_Click(sender, new RoutedEventArgs());
+    }
+
+    private void Redo_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (FocusManager.GetFocusedElement(XamlRoot) is TextBox)
+        {
+            return;
+        }
+
+        args.Handled = true;
+        Redo_Click(sender, new RoutedEventArgs());
+    }
+
+    private void Undo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_historyIndex <= 0)
+        {
+            return;
+        }
+
+        _historyTimer.Stop();
+        _historyIndex--;
+        Restore(_history[_historyIndex]);
+    }
+
+    private void Redo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_historyIndex >= _history.Count - 1)
+        {
+            return;
+        }
+
+        _historyTimer.Stop();
+        _historyIndex++;
+        Restore(_history[_historyIndex]);
+    }
+
+    private EditorSnapshot Capture()
+    {
+        return new EditorSnapshot(
+            SpeedSlider.Value,
+            VolumeSlider.Value,
+            _trimStartMs,
+            _trimEndMs,
+            _cuts.ToArray(),
+            _markStartMs,
+            _markEndMs,
+            CropSurface.Left,
+            CropSurface.Top,
+            CropSurface.Right,
+            CropSurface.Bottom,
+            _cropPreview);
+    }
+
+    private void Restore(EditorSnapshot snap)
+    {
+        _restoring = true;
+        try
+        {
+            SpeedSlider.Value = snap.Speed;
+            VolumeSlider.Value = snap.Volume;
+            _trimStartMs = snap.TrimStartMs;
+            _trimEndMs = snap.TrimEndMs;
+            if (_durationMs > 0)
+            {
+                Playback.SetTrimFractions(snap.TrimStartMs / (double)_durationMs, Math.Max(snap.TrimStartMs + 1, snap.TrimEndMs) / (double)_durationMs);
+            }
+
+            _cuts.Clear();
+            _cuts.AddRange(snap.Cuts);
+            _markStartMs = snap.MarkStartMs;
+            _markEndMs = snap.MarkEndMs;
+            NormalizeCuts();
+            UpdateCutMark();
+            UpdateTrimSummary();
+            _cropPreview = snap.CropPreview;
+            CropSurface.SetFractions(snap.CropLeft, snap.CropTop, snap.CropRight, snap.CropBottom);
+            if (PreviewCropButton is not null)
+            {
+                PreviewCropButton.Content = _cropPreview ? "Show the full frame" : "Preview crop";
+            }
+
+            ApplyCropPreview();
+            ApplyRate();
+            ApplyVolume();
+            UpdateSpeedText();
+            if (SaveButton is not null)
+            {
+                SaveButton.IsEnabled = HasEdits && !_saving;
+            }
+        }
+        finally
+        {
+            _restoring = false;
+            UpdateHistoryButtons();
+        }
+    }
+
+    private void UpdateHistoryButtons()
+    {
+        UndoButton.IsEnabled = _historyIndex > 0;
+        RedoButton.IsEnabled = _historyIndex < _history.Count - 1;
+    }
+
+    private readonly record struct EditorSnapshot(
+        double Speed,
+        double Volume,
+        long TrimStartMs,
+        long TrimEndMs,
+        (long StartMs, long EndMs)[] Cuts,
+        long? MarkStartMs,
+        long? MarkEndMs,
+        double CropLeft,
+        double CropTop,
+        double CropRight,
+        double CropBottom,
+        bool CropPreview);
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {

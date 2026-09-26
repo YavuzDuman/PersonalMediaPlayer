@@ -143,6 +143,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         TrimEndThumb.Width = enabled ? 18 : 12;
         TrimStartThumb.Height = enabled ? 32 : 22;
         TrimEndThumb.Height = enabled ? 32 : 22;
+        TrimCanvas.Background = enabled ? new SolidColorBrush(Colors.Transparent) : null;
         TrimCanvas.IsHitTestVisible = enabled && TrimCanvas.Visibility == Visibility.Visible;
         if (!enabled)
         {

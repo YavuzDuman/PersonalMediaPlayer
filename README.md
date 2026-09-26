@@ -35,6 +35,7 @@ flowchart LR
     direction TB
     Library
     Recordings
+    Download
     Capture
     Settings
   end
@@ -45,11 +46,13 @@ flowchart LR
   Player --> Editor[Video editor]
   Capture --> Shot[Screenshot preview]
   Recordings --> Take[Recording preview]
+  Download --> Queue[Queue and history]
   Photo --> Folder[(Library folder)]
   Player --> Folder
   Editor --> Folder
   Shot --> Folder
   Take --> Folder
+  Queue --> Folder
 ```
 
 | Area | What you do there |
@@ -59,13 +62,14 @@ flowchart LR
 | **Videos** | Play, hover the timeline for a frame, bookmark, resume, trim, edit, and grab a still |
 | **Capture** | Shoot an area, window, monitor, every display, or turn a text file into an image |
 | **Recordings** | Record a monitor, a window, or a rectangle, with optional speaker audio |
+| **Download** | Queue YouTube, Shorts, and music links, preview, then save into the library or any PC folder |
 | **Settings** | Theme, library folder, screenshot delay, cursor, and the shortcut list |
 
 Details for each screen are in the [user guide](docs/guide.md).
 
 ## Library at a glance
 
-Import or drop files. Photos: `png` `jpg` `jpeg` `webp` `bmp` `gif`. Videos: `mp4` `mkv` `mov` `avi` `wmv` `webm` `m4v`.
+Import or drop files. Photos: `png` `jpg` `jpeg` `webp` `bmp` `gif`. Videos: `mp4` `mkv` `mov` `avi` `wmv` `webm` `m4v` `m4a`.
 
 | View | Contents |
 | --- | --- |
@@ -91,12 +95,12 @@ Search covers the name, the type, the album, and words read from a screenshot. A
 | --- | --- | --- |
 | Pen, arrow, rectangle, text, blur, crop | Shared control bar on the picture | Area, window, monitor, all displays, fullscreen |
 | Read the whole shot, or only the box you drag | Hover shows a frame and a time. Click or drag seeks | Text file drawn as one tall image |
-| Slider compares the original and the saved file | Bookmarks, resume, replay, and an editor for speed, volume, trim, and cuts | Speaker audio on a recording. No microphone |
+| Slider compares the original and the saved file | Bookmarks, resume, replay, and an editor for speed, volume, crop, trim, and cuts | Speaker audio on a recording. No microphone |
 | Restore puts the backup back | Still frame of the current moment | Shortcuts work while the app is in the background |
 
 </div>
 
-Leaving a screenshot, a marked photo, a trimmed video, an open video edit, or an unsaved recording asks you to stay or leave before the page changes.
+Leaving a screenshot, a marked photo, a trimmed video, an open video edit, an unsaved recording, or an unfinished download asks you to stay or leave before the page changes.
 
 ## Screenshot shortcuts
 

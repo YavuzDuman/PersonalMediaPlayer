@@ -11,7 +11,7 @@ public static class MediaFileTypes
 
     public static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".m4v"
+        ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".m4v", ".m4a"
     };
 
     public static bool IsImage(string path)
