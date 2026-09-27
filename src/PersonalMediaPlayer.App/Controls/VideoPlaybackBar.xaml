@@ -25,51 +25,60 @@
                     Foreground="White"
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="00:00" />
-                <Grid x:Name="TimelineHost" Grid.Column="1" Background="Transparent">
-                    <Canvas x:Name="CutsCanvas" IsHitTestVisible="False" />
-                    <Slider
-                        x:Name="SeekSlider"
-                        x:FieldModifier="public"
-                        VerticalAlignment="Center"
-                        IsEnabled="False"
-                        IsThumbToolTipEnabled="False"
-                        Maximum="1000"
-                        Minimum="0"
-                        StepFrequency="1" />
-                    <Canvas
-                        x:Name="TrimCanvas"
-                        Height="28"
-                        Background="Transparent"
-                        IsHitTestVisible="False"
-                        Visibility="Collapsed"
-                        PointerCanceled="Trim_Released"
-                        PointerMoved="Trim_Moved"
-                        PointerPressed="Trim_Pressed"
-                        PointerReleased="Trim_Released"
-                        SizeChanged="TrimCanvas_SizeChanged">
-                        <Border
-                            x:Name="TrimRange"
-                            Height="4"
+                <ScrollViewer
+                    x:Name="TimelineScroll"
+                    Grid.Column="1"
+                    HorizontalScrollBarVisibility="Auto"
+                    HorizontalScrollMode="Enabled"
+                    SizeChanged="TimelineScroll_SizeChanged"
+                    VerticalScrollBarVisibility="Disabled"
+                    VerticalScrollMode="Disabled">
+                    <Grid x:Name="TimelineHost" MinHeight="28" Background="Transparent">
+                        <Canvas x:Name="CutsCanvas" IsHitTestVisible="False" />
+                        <Slider
+                            x:Name="SeekSlider"
+                            x:FieldModifier="public"
                             VerticalAlignment="Center"
-                            Background="#E6FFFFFF"
-                            CornerRadius="2"
-                            IsHitTestVisible="False" />
-                        <Border
-                            x:Name="TrimStartThumb"
-                            Width="12"
-                            Height="22"
-                            Background="White"
-                            CornerRadius="3"
-                            IsHitTestVisible="False" />
-                        <Border
-                            x:Name="TrimEndThumb"
-                            Width="12"
-                            Height="22"
-                            Background="White"
-                            CornerRadius="3"
-                            IsHitTestVisible="False" />
-                    </Canvas>
-                </Grid>
+                            IsEnabled="False"
+                            IsThumbToolTipEnabled="False"
+                            Maximum="1000"
+                            Minimum="0"
+                            StepFrequency="1" />
+                        <Canvas
+                            x:Name="TrimCanvas"
+                            Height="28"
+                            Background="Transparent"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed"
+                            PointerCanceled="Trim_Released"
+                            PointerMoved="Trim_Moved"
+                            PointerPressed="Trim_Pressed"
+                            PointerReleased="Trim_Released"
+                            SizeChanged="TrimCanvas_SizeChanged">
+                            <Border
+                                x:Name="TrimRange"
+                                Height="4"
+                                VerticalAlignment="Center"
+                                Background="#E6FFFFFF"
+                                CornerRadius="2"
+                                IsHitTestVisible="False" />
+                            <Border
+                                x:Name="TrimStartThumb"
+                                Width="12"
+                                Height="22"
+                                Background="White"
+                                CornerRadius="3"
+                                IsHitTestVisible="False" />
+                            <Border
+                                x:Name="TrimEndThumb"
+                                Width="12"
+                                Height="22"
+                                Background="White"
+                                CornerRadius="3"
+                                IsHitTestVisible="False" />
+                        </Canvas>
+                    </Grid>
+                </ScrollViewer>
                 <TextBlock
                     x:Name="DurationText"
                     x:FieldModifier="public"
@@ -81,6 +90,34 @@
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="--:--" />
             </Grid>
+            <StackPanel
+                x:Name="ZoomBar"
+                HorizontalAlignment="Right"
+                Orientation="Horizontal"
+                Spacing="6"
+                Visibility="Collapsed">
+                <Button
+                    x:Name="ZoomOutButton"
+                    MinWidth="32"
+                    Padding="8,2"
+                    Click="ZoomOut_Click"
+                    Content="−"
+                    ToolTipService.ToolTip="Zoom out" />
+                <TextBlock
+                    x:Name="ZoomLabel"
+                    MinWidth="36"
+                    VerticalAlignment="Center"
+                    Foreground="White"
+                    Text="1×"
+                    TextAlignment="Center" />
+                <Button
+                    x:Name="ZoomInButton"
+                    MinWidth="32"
+                    Padding="8,2"
+                    Click="ZoomIn_Click"
+                    Content="+"
+                    ToolTipService.ToolTip="Zoom in" />
+            </StackPanel>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

@@ -12,6 +12,7 @@ namespace PersonalMediaPlayer.App.Views;
 public sealed partial class MediaPreviewPage : Page
 {
     private bool _allowLeave;
+    private bool _closeWindow;
     private bool _saving;
     private Type? _pendingPageType;
     private object? _pendingParameter;
@@ -77,6 +78,18 @@ public sealed partial class MediaPreviewPage : Page
         return false;
     }
 
+    internal bool TryHandleHostClose()
+    {
+        if (_allowLeave || !Markup.HasEdits)
+        {
+            return false;
+        }
+
+        _closeWindow = true;
+        DispatcherQueue.TryEnqueue(ShowLeavePrompt);
+        return true;
+    }
+
     protected override void OnNavigatingFrom(NavigatingCancelEventArgs e)
     {
         if (_allowLeave || !Markup.HasEdits)
@@ -97,12 +110,22 @@ public sealed partial class MediaPreviewPage : Page
     private void ShowLeavePrompt() => LeavePrompt.Visibility = Visibility.Visible;
 
     private void LeavePromptStay_Click(object sender, RoutedEventArgs e)
-        => LeavePrompt.Visibility = Visibility.Collapsed;
+    {
+        _closeWindow = false;
+        LeavePrompt.Visibility = Visibility.Collapsed;
+    }
 
     private void LeavePromptConfirm_Click(object sender, RoutedEventArgs e)
     {
         LeavePrompt.Visibility = Visibility.Collapsed;
         _allowLeave = true;
+        if (_closeWindow)
+        {
+            _closeWindow = false;
+            App.MainAppWindow.Close();
+            return;
+        }
+
         ContinueNavigation();
     }
 

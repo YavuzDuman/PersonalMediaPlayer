@@ -66,9 +66,39 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (Shell.ContentFrame.Content is DownloadPage download)
+        if (Shell.ContentFrame.Content is MergePage merge && merge.TryHandleHostClose())
         {
-            download.PersistForExit();
+            args.Cancel = true;
+            return;
+        }
+
+        if (Shell.ContentFrame.Content is VideoEditorPage editor && editor.TryHandleHostClose())
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        if (Shell.ContentFrame.Content is DownloadPage download && download.TryHandleHostClose())
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        if (Shell.ContentFrame.Content is CapturePage capture && capture.TryHandleHostClose())
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        if (Shell.ContentFrame.Content is MediaPreviewPage preview && preview.TryHandleHostClose())
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        if (Shell.ContentFrame.Content is DownloadPage finishedDownload)
+        {
+            finishedDownload.PersistForExit();
         }
     }
 

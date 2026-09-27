@@ -8,6 +8,106 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
+    <Page.Resources>
+        <Style x:Key="ToolChip" TargetType="Button">
+            <Setter Property="Background" Value="{ThemeResource ControlFillColorDefaultBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,8" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="MinHeight" Value="62" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="RootGrid">
+                            <Border
+                                x:Name="ChipFill"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}" />
+                            <Border
+                                x:Name="Wash"
+                                Background="{ThemeResource TextFillColorPrimaryBrush}"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Opacity="0" />
+                            <ContentPresenter
+                                x:Name="ChipContent"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                Foreground="{TemplateBinding Foreground}" />
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Wash.Opacity" Value="0.08" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Wash.Opacity" Value="0.14" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Wash.Opacity" Value="0" />
+                                            <Setter Target="RootGrid.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="SelectionStates">
+                                    <VisualState x:Name="Unselected" />
+                                    <VisualState x:Name="Selected">
+                                        <VisualState.Setters>
+                                            <Setter Target="ChipFill.Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                                            <Setter Target="ChipContent.Foreground" Value="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="EditorChip" BasedOn="{StaticResource ToolChip}" TargetType="Button">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style x:Key="EditorAccent" BasedOn="{StaticResource EditorChip}" TargetType="Button">
+            <Setter Property="Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="HeaderIcon" BasedOn="{StaticResource ToolChip}" TargetType="Button">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="MinWidth" Value="36" />
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+        </Style>
+        <Style x:Key="EditorCard" TargetType="Border">
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="18" />
+        </Style>
+        <Style x:Key="QuietWell" TargetType="Border">
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+            <Setter Property="CornerRadius" Value="12" />
+        </Style>
+    </Page.Resources>
+
     <Grid x:Name="PageRoot" Padding="24,8,24,24" ColumnSpacing="20" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -16,7 +116,7 @@
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="380" />
+            <ColumnDefinition Width="372" />
         </Grid.ColumnDefinitions>
 
         <Grid Grid.ColumnSpan="2">
@@ -24,7 +124,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel Spacing="4">
+            <StackPanel Spacing="2" VerticalAlignment="Center">
                 <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Edit video" />
                 <TextBlock
                     x:Name="FileNameText"
@@ -34,24 +134,33 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <ProgressRing x:Name="SaveProgress" Width="20" Height="20" IsActive="False" />
-                <Button x:Name="UndoButton" Click="Undo_Click" Content="Undo" IsEnabled="False" ToolTipService.ToolTip="Undo (Ctrl+Z)">
+                <Button x:Name="UndoButton" Style="{StaticResource HeaderIcon}" Click="Undo_Click" IsEnabled="False" ToolTipService.ToolTip="Undo (Ctrl+Z)">
                     <Button.KeyboardAccelerators>
                         <KeyboardAccelerator Invoked="Undo_Invoked" Key="Z" Modifiers="Control" />
                     </Button.KeyboardAccelerators>
+                    <FontIcon FontSize="16" Glyph="&#xE7A7;" />
                 </Button>
-                <Button x:Name="RedoButton" Click="Redo_Click" Content="Redo" IsEnabled="False" ToolTipService.ToolTip="Redo (Ctrl+Y)">
+                <Button x:Name="RedoButton" Style="{StaticResource HeaderIcon}" Click="Redo_Click" IsEnabled="False" ToolTipService.ToolTip="Redo (Ctrl+Y)">
                     <Button.KeyboardAccelerators>
                         <KeyboardAccelerator Invoked="Redo_Invoked" Key="Y" Modifiers="Control" />
                         <KeyboardAccelerator Invoked="Redo_Invoked" Key="Z" Modifiers="Control,Shift" />
                     </Button.KeyboardAccelerators>
+                    <FontIcon FontSize="16" Glyph="&#xE7A6;" />
                 </Button>
-                <Button Click="Cancel_Click" Content="Cancel" />
+                <Button Click="Cancel_Click" Content="Cancel" Style="{StaticResource EditorChip}" />
+                <Button x:Name="ExtractAudioButton" Click="ExtractAudio_Click" Style="{StaticResource EditorChip}" ToolTipService.ToolTip="Extract audio">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon FontSize="14" Glyph="&#xE8D6;" />
+                        <TextBlock VerticalAlignment="Center" Text="Audio" />
+                    </StackPanel>
+                </Button>
                 <Button
                     x:Name="SaveButton"
+                    MinWidth="84"
                     Click="Save_Click"
                     Content="Save"
                     IsEnabled="False"
-                    Style="{StaticResource AccentButtonStyle}" />
+                    Style="{StaticResource EditorAccent}" />
             </StackPanel>
         </Grid>
 
@@ -63,213 +172,319 @@
             IsOpen="False"
             Severity="Error" />
 
-        <Grid Grid.Row="2">
-            <Border x:Name="VideoHost" Background="Black" CornerRadius="16" SizeChanged="VideoHost_SizeChanged" />
-            <controls:VideoCropSurface x:Name="CropSurface" CropChanged="CropSurface_Changed" />
-            <Border
-                Margin="16"
-                Padding="12"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                Background="#CC161616"
-                CornerRadius="12">
-                <StackPanel Spacing="8">
-                    <TextBlock
-                        x:Name="TimelineHint"
-                        Foreground="White"
-                        Text="Click the line to move the playhead."
-                        TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button x:Name="ModeSeekButton" Click="TimelineMode_Click" Content="Playhead" Tag="seek" />
-                        <Button x:Name="ModeTrimButton" Click="TimelineMode_Click" Content="Trim ends" Tag="trim" />
-                        <Button x:Name="ModeCutButton" Click="TimelineMode_Click" Content="Remove part" Tag="cut" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-            <controls:VideoPlaybackBar x:Name="Playback" Margin="16" VerticalAlignment="Bottom" />
+        <Grid Grid.Row="2" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid>
+                <Border x:Name="VideoHost" Background="Black" CornerRadius="20" SizeChanged="VideoHost_SizeChanged">
+                    <Grid>
+                        <Border
+                            x:Name="PictureHost"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform x:Name="PictureScale" />
+                                    <RotateTransform x:Name="PictureRotation" />
+                                </TransformGroup>
+                            </Border.RenderTransform>
+                        </Border>
+                    </Grid>
+                </Border>
+                <controls:VideoCropSurface x:Name="CropSurface" CropChanged="CropSurface_Changed" Visibility="Collapsed" />
+            </Grid>
+            <controls:VideoPlaybackBar x:Name="Playback" Grid.Row="1" />
         </Grid>
 
-        <ScrollViewer Grid.Row="2" Grid.Column="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="12">
-                <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Adjustments" />
-                <Border
-                    Padding="16"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                    <StackPanel Spacing="12">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Speed" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="1× is the original. The pitch rises and falls with the speed."
-                            TextWrapping="Wrap" />
-                        <TextBlock x:Name="SpeedLabel" Style="{StaticResource SubtitleTextBlockStyle}" Text="1×" />
-                        <TextBlock
-                            x:Name="DurationLabel"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Length stays the same until a speed is chosen."
-                            TextWrapping="Wrap" />
-                        <Slider
-                            x:Name="SpeedSlider"
-                            Maximum="4"
-                            Minimum="0.25"
-                            StepFrequency="0.05"
-                            Value="1"
-                            ValueChanged="SpeedSlider_ValueChanged" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Click="Preset_Click" Content="0.5x" Tag="0.5" />
-                            <Button Click="Preset_Click" Content="1x" Tag="1" />
-                            <Button Click="Preset_Click" Content="1.5x" Tag="1.5" />
-                            <Button Click="Preset_Click" Content="2x" Tag="2" />
-                            <Button Click="Preset_Click" Content="4x" Tag="4" />
+        <Grid Grid.Row="2" Grid.Column="1" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Padding="6" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="16">
+                <Grid ColumnSpacing="4" RowSpacing="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Button x:Name="ToolSpeedButton" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="speed" ToolTipService.ToolTip="Speed">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE945;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Speed" />
+                            <Ellipse x:Name="ToolSpeedMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
                         </StackPanel>
-                    </StackPanel>
-                </Border>
-                <Border
-                    Padding="16"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                    <StackPanel Spacing="12">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Volume" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="This is the loudness saved into the file. 100% keeps the original. The slider under the picture only changes what you hear while editing."
-                            TextWrapping="Wrap" />
-                        <TextBlock x:Name="VolumeLabel" Style="{StaticResource SubtitleTextBlockStyle}" Text="100%" />
-                        <Slider
-                            x:Name="VolumeSlider"
-                            Maximum="100"
-                            Minimum="0"
-                            StepFrequency="1"
-                            Value="100"
-                            ValueChanged="VolumeSlider_ValueChanged" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Click="VolumePreset_Click" Content="Mute" Tag="0" />
-                            <Button Click="VolumePreset_Click" Content="50%" Tag="50" />
-                            <Button Click="VolumePreset_Click" Content="100%" Tag="100" />
+                    </Button>
+                    <Button x:Name="ToolSoundButton" Grid.Column="1" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="sound" ToolTipService.ToolTip="Saved loudness">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE767;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Sound" />
+                            <Ellipse x:Name="ToolSoundMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
                         </StackPanel>
-                    </StackPanel>
-                </Border>
-                <Border
-                    Padding="16"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                    <StackPanel Spacing="12">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Crop" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Drag inside the rectangle to move it. Drag an edge or corner to resize it. The dark area is left out."
-                            TextWrapping="Wrap" />
-                        <TextBlock x:Name="CropSummary" Text="The whole picture is kept." TextWrapping="Wrap" />
-                        <Button
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            Click="ResetCrop_Click"
-                            Content="Reset selection" />
-                        <Button
-                            x:Name="PreviewCropButton"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            Click="PreviewCrop_Click"
-                            Content="Preview crop"
-                            IsEnabled="False" />
-                    </StackPanel>
-                </Border>
-                <Border
-                    Padding="16"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                    <StackPanel Spacing="12">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Trim" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Choose Trim ends, then drag a white handle. These buttons move that handle by a fixed amount."
-                            TextWrapping="Wrap" />
-                        <TextBlock x:Name="TrimSummary" Text="The whole video is kept." TextWrapping="Wrap" />
-                        <TextBlock x:Name="TrimStartLabel" Text="Start 0:00" />
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Button Click="NudgeTrim_Click" Content="−1s" Tag="start:-1000" />
-                            <Button Click="NudgeTrim_Click" Content="−0.1s" Tag="start:-100" />
-                            <Button Click="NudgeTrim_Click" Content="+0.1s" Tag="start:100" />
-                            <Button Click="NudgeTrim_Click" Content="+1s" Tag="start:1000" />
+                    </Button>
+                    <Button x:Name="ToolRotateButton" Grid.Column="2" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="rotate" ToolTipService.ToolTip="Rotate and flip">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE7AD;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Rotate" />
+                            <Ellipse x:Name="ToolRotateMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
                         </StackPanel>
-                        <Button Click="TrimStart_Click" HorizontalAlignment="Left" Content="Set start to playhead" />
-                        <TextBlock x:Name="TrimEndLabel" Text="End 0:00" />
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Button Click="NudgeTrim_Click" Content="−1s" Tag="end:-1000" />
-                            <Button Click="NudgeTrim_Click" Content="−0.1s" Tag="end:-100" />
-                            <Button Click="NudgeTrim_Click" Content="+0.1s" Tag="end:100" />
-                            <Button Click="NudgeTrim_Click" Content="+1s" Tag="end:1000" />
+                    </Button>
+                    <Button x:Name="ToolFadeButton" Grid.Column="3" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="fade" ToolTipService.ToolTip="Fade in and out">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE706;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Fade" />
+                            <Ellipse x:Name="ToolFadeMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Click="TrimEnd_Click" Content="Set end to playhead" />
-                            <Button Click="ResetTrim_Click" Content="Full video" />
+                    </Button>
+                    <Button x:Name="ToolCropButton" Grid.Row="1" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="crop" ToolTipService.ToolTip="Crop">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE7A8;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Crop" />
+                            <Ellipse x:Name="ToolCropMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
                         </StackPanel>
-                    </StackPanel>
-                </Border>
-                <Border
-                    Padding="16"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                    <StackPanel Spacing="12">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Remove section" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Choose Remove part, then drag across the piece to delete. A short click only moves the playhead."
-                            TextWrapping="Wrap" />
-                        <TextBlock x:Name="CutMarkLabel" Text="Nothing selected yet." TextWrapping="Wrap" />
-                        <TextBlock Text="From" />
-                        <TextBox
-                            x:Name="CutFromBox"
-                            PlaceholderText="0:00.0"
-                            LostFocus="CutTime_LostFocus"
-                            KeyDown="CutTime_KeyDown" />
-                        <TextBlock Text="To" />
-                        <TextBox
-                            x:Name="CutToBox"
-                            PlaceholderText="0:12.5"
-                            LostFocus="CutTime_LostFocus"
-                            KeyDown="CutTime_KeyDown" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Type minutes:seconds, such as 1:05.4. The yellow band on the timeline is this span."
-                            TextWrapping="Wrap" />
-                        <Button
-                            x:Name="SelectCutButton"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            Click="SelectCut_Click"
-                            Content="Drag on the timeline" />
-                        <Button
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            Click="MarkStart_Click"
-                            Content="Start at playhead" />
-                        <Button
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            Click="MarkEnd_Click"
-                            Content="End at playhead" />
-                        <Button
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Center"
-                            Click="RemoveCut_Click"
-                            Content="Remove this part"
-                            Style="{StaticResource AccentButtonStyle}" />
-                        <StackPanel x:Name="CutList" Spacing="8" />
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-        </ScrollViewer>
+                    </Button>
+                    <Button x:Name="ToolTrimButton" Grid.Row="1" Grid.Column="1" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="trim" ToolTipService.ToolTip="Trim the ends">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE894;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Trim" />
+                            <Ellipse x:Name="ToolTrimMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ToolCutButton" Grid.Row="1" Grid.Column="2" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="cut" ToolTipService.ToolTip="Remove a part">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE8C6;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Cut" />
+                            <Ellipse x:Name="ToolCutMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <Grid>
+                    <Border x:Name="SpeedPanel" Style="{StaticResource EditorCard}">
+                        <StackPanel Spacing="14">
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="1× keeps the original pitch." />
+                            <TextBlock x:Name="SpeedLabel" Style="{StaticResource TitleTextBlockStyle}" Text="1×" />
+                            <TextBlock x:Name="DurationLabel" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Length appears when the video opens." TextWrapping="Wrap" />
+                            <Slider x:Name="SpeedSlider" Maximum="4" Minimum="0.25" StepFrequency="0.05" Value="1" ValueChanged="SpeedSlider_ValueChanged" />
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button Click="Preset_Click" Content="0.5×" Style="{StaticResource EditorChip}" Tag="0.5" />
+                                <Button Grid.Column="1" Click="Preset_Click" Content="1×" Style="{StaticResource EditorChip}" Tag="1" />
+                                <Button Grid.Column="2" Click="Preset_Click" Content="1.5×" Style="{StaticResource EditorChip}" Tag="1.5" />
+                                <Button Grid.Column="3" Click="Preset_Click" Content="2×" Style="{StaticResource EditorChip}" Tag="2" />
+                                <Button Grid.Column="4" Click="Preset_Click" Content="4×" Style="{StaticResource EditorChip}" Tag="4" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="SoundPanel" Style="{StaticResource EditorCard}" Visibility="Collapsed">
+                        <StackPanel Spacing="14">
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Saved into the file. 100% is the original." TextWrapping="Wrap" />
+                            <TextBlock x:Name="VolumeLabel" Style="{StaticResource TitleTextBlockStyle}" Text="100%" />
+                            <Slider x:Name="VolumeSlider" Maximum="100" Minimum="0" StepFrequency="1" Value="100" ValueChanged="VolumeSlider_ValueChanged" />
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button Click="VolumePreset_Click" Content="Mute" Style="{StaticResource EditorChip}" Tag="0" />
+                                <Button Grid.Column="1" Click="VolumePreset_Click" Content="50%" Style="{StaticResource EditorChip}" Tag="50" />
+                                <Button Grid.Column="2" Click="VolumePreset_Click" Content="100%" Style="{StaticResource EditorChip}" Tag="100" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="RotatePanel" Style="{StaticResource EditorCard}" Visibility="Collapsed">
+                        <StackPanel Spacing="14">
+                            <TextBlock x:Name="OrientationSummary" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Original." TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="8" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Button Click="RotateLeft_Click" Style="{StaticResource EditorChip}">
+                                    <StackPanel HorizontalAlignment="Center" Spacing="4">
+                                        <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE7AD;" />
+                                        <TextBlock HorizontalAlignment="Center" Text="Left" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Column="1" Click="RotateRight_Click" Style="{StaticResource EditorChip}">
+                                    <StackPanel HorizontalAlignment="Center" Spacing="4">
+                                        <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE7AD;" RenderTransformOrigin="0.5,0.5">
+                                            <FontIcon.RenderTransform>
+                                                <ScaleTransform ScaleX="-1" />
+                                            </FontIcon.RenderTransform>
+                                        </FontIcon>
+                                        <TextBlock HorizontalAlignment="Center" Text="Right" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Row="1" Click="FlipHorizontal_Click" Style="{StaticResource EditorChip}">
+                                    <StackPanel HorizontalAlignment="Center" Spacing="4">
+                                        <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE7C1;" />
+                                        <TextBlock HorizontalAlignment="Center" Text="Flip H" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Row="1" Grid.Column="1" Click="FlipVertical_Click" Style="{StaticResource EditorChip}">
+                                    <StackPanel HorizontalAlignment="Center" Spacing="4">
+                                        <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE7C1;">
+                                            <FontIcon.RenderTransform>
+                                                <RotateTransform Angle="90" />
+                                            </FontIcon.RenderTransform>
+                                        </FontIcon>
+                                        <TextBlock HorizontalAlignment="Center" Text="Flip V" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <Button HorizontalAlignment="Stretch" Click="ResetOrientation_Click" Content="Reset" Style="{StaticResource EditorChip}" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="FadePanel" Style="{StaticResource EditorCard}" Visibility="Collapsed">
+                        <StackPanel Spacing="12">
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Start and end of the finished edit." />
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource QuietWell}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock FontWeight="SemiBold" Text="Video" />
+                                        <CheckBox x:Name="VideoFadeInBox" Checked="Fade_Changed" Content="In" Unchecked="Fade_Changed" />
+                                        <NumberBox x:Name="VideoFadeInSeconds" Header="Seconds" IsEnabled="False" Maximum="30" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                                        <CheckBox x:Name="VideoFadeOutBox" Checked="Fade_Changed" Content="Out" Unchecked="Fade_Changed" />
+                                        <NumberBox x:Name="VideoFadeOutSeconds" Header="Seconds" IsEnabled="False" Maximum="30" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource QuietWell}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock FontWeight="SemiBold" Text="Audio" />
+                                        <CheckBox x:Name="AudioFadeInBox" Checked="Fade_Changed" Content="In" Unchecked="Fade_Changed" />
+                                        <NumberBox x:Name="AudioFadeInSeconds" Header="Seconds" IsEnabled="False" Maximum="30" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                                        <CheckBox x:Name="AudioFadeOutBox" Checked="Fade_Changed" Content="Out" Unchecked="Fade_Changed" />
+                                        <NumberBox x:Name="AudioFadeOutSeconds" Header="Seconds" IsEnabled="False" Maximum="30" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="CropPanel" Style="{StaticResource EditorCard}" Visibility="Collapsed">
+                        <StackPanel Spacing="14">
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Drag the frame. The dark area is left out." TextWrapping="Wrap" />
+                            <Border Style="{StaticResource QuietWell}">
+                                <TextBlock x:Name="CropSummary" Text="The whole picture is kept." TextWrapping="Wrap" />
+                            </Border>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button Click="ResetCrop_Click" Content="Reset" Style="{StaticResource EditorChip}" />
+                                <Button x:Name="PreviewCropButton" Grid.Column="1" Click="PreviewCrop_Click" Content="Preview" IsEnabled="False" Style="{StaticResource EditorChip}" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="TrimPanel" Style="{StaticResource EditorCard}" Visibility="Collapsed">
+                        <StackPanel Spacing="12">
+                            <TextBlock x:Name="TrimSummary" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="The whole video is kept." TextWrapping="Wrap" />
+                            <Border Style="{StaticResource QuietWell}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock x:Name="TrimStartLabel" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Start 0:00" />
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Click="NudgeTrim_Click" Content="−1s" Style="{StaticResource EditorChip}" Tag="start:-1000" />
+                                        <Button Grid.Column="1" Click="NudgeTrim_Click" Content="−0.1s" Style="{StaticResource EditorChip}" Tag="start:-100" />
+                                        <Button Grid.Column="2" Click="NudgeTrim_Click" Content="+0.1s" Style="{StaticResource EditorChip}" Tag="start:100" />
+                                        <Button Grid.Column="3" Click="NudgeTrim_Click" Content="+1s" Style="{StaticResource EditorChip}" Tag="start:1000" />
+                                    </Grid>
+                                    <Button HorizontalAlignment="Stretch" Click="TrimStart_Click" Content="Start here" Style="{StaticResource EditorChip}" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource QuietWell}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock x:Name="TrimEndLabel" Style="{StaticResource BodyStrongTextBlockStyle}" Text="End 0:00" />
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Click="NudgeTrim_Click" Content="−1s" Style="{StaticResource EditorChip}" Tag="end:-1000" />
+                                        <Button Grid.Column="1" Click="NudgeTrim_Click" Content="−0.1s" Style="{StaticResource EditorChip}" Tag="end:-100" />
+                                        <Button Grid.Column="2" Click="NudgeTrim_Click" Content="+0.1s" Style="{StaticResource EditorChip}" Tag="end:100" />
+                                        <Button Grid.Column="3" Click="NudgeTrim_Click" Content="+1s" Style="{StaticResource EditorChip}" Tag="end:1000" />
+                                    </Grid>
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Click="TrimEnd_Click" Content="End here" Style="{StaticResource EditorChip}" />
+                                        <Button Grid.Column="1" Click="ResetTrim_Click" Content="Full" Style="{StaticResource EditorChip}" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="CutPanel" Style="{StaticResource EditorCard}" Visibility="Collapsed">
+                        <StackPanel Spacing="12">
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Drag across a part on the timeline. A short click moves the playhead." TextWrapping="Wrap" />
+                            <Border Style="{StaticResource QuietWell}">
+                                <TextBlock x:Name="CutMarkLabel" Text="Nothing selected yet." TextWrapping="Wrap" />
+                            </Border>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="CutFromBox" Header="From" PlaceholderText="0:00.0" LostFocus="CutTime_LostFocus" KeyDown="CutTime_KeyDown" />
+                                <TextBox x:Name="CutToBox" Grid.Column="1" Header="To" PlaceholderText="0:12.5" LostFocus="CutTime_LostFocus" KeyDown="CutTime_KeyDown" />
+                            </Grid>
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Use 1:05.4. The yellow band is this span." TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="8" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Button x:Name="SelectCutButton" Click="SelectCut_Click" Content="Timeline" Style="{StaticResource EditorChip}" />
+                                <Button Grid.Column="1" Click="MarkStart_Click" Content="Start here" Style="{StaticResource EditorChip}" />
+                                <Button Grid.Row="1" Click="MarkEnd_Click" Content="End here" Style="{StaticResource EditorChip}" />
+                                <Button Grid.Row="1" Grid.Column="1" Click="RemoveCut_Click" Content="Remove" Style="{StaticResource EditorAccent}" />
+                            </Grid>
+                            <StackPanel x:Name="CutList" Spacing="8" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
 
         <Grid
             x:Name="LeavePrompt"
@@ -278,18 +493,25 @@
             Padding="24"
             Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             Visibility="Collapsed">
-            <StackPanel MaxWidth="420" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
-                <TextBlock
-                    Text="These edits are not saved. Leave without keeping them?"
-                    TextAlignment="Center"
-                    TextWrapping="Wrap" />
-                <Button
-                    HorizontalAlignment="Stretch"
-                    Click="LeavePromptConfirm_Click"
-                    Content="Leave"
-                    Style="{StaticResource AccentButtonStyle}" />
-                <Button HorizontalAlignment="Stretch" Click="LeavePromptStay_Click" Content="Stay" />
-            </StackPanel>
+            <Border Padding="24" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="18" MaxWidth="420">
+                <StackPanel Spacing="12">
+                    <TextBlock
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="These edits are not saved."
+                        TextAlignment="Center" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Leave without keeping them?"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <Button
+                        HorizontalAlignment="Stretch"
+                        Click="LeavePromptConfirm_Click"
+                        Content="Leave"
+                        Style="{StaticResource EditorAccent}" />
+                    <Button HorizontalAlignment="Stretch" Click="LeavePromptStay_Click" Content="Stay" Style="{StaticResource EditorChip}" />
+                </StackPanel>
+            </Border>
         </Grid>
     </Grid>
 </Page>

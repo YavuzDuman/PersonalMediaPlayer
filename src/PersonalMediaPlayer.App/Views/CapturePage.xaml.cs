@@ -16,6 +16,7 @@ namespace PersonalMediaPlayer.App.Views;
 public sealed partial class CapturePage : Page
 {
     private bool _allowLeave;
+    private bool _closeWindow;
     private Type? _pendingPageType;
     private object? _pendingParameter;
     private bool _pendingIsBack;
@@ -74,6 +75,18 @@ public sealed partial class CapturePage : Page
         return false;
     }
 
+    internal bool TryHandleHostClose()
+    {
+        if (_allowLeave || !ViewModel.HasUnsaved)
+        {
+            return false;
+        }
+
+        _closeWindow = true;
+        DispatcherQueue.TryEnqueue(ShowLeavePrompt);
+        return true;
+    }
+
     protected override void OnNavigatingFrom(NavigatingCancelEventArgs e)
     {
         if (_allowLeave || !ViewModel.HasUnsaved)
@@ -99,6 +112,7 @@ public sealed partial class CapturePage : Page
 
     private void LeavePromptStay_Click(object sender, RoutedEventArgs e)
     {
+        _closeWindow = false;
         LeavePrompt.Visibility = Visibility.Collapsed;
     }
 
@@ -108,6 +122,13 @@ public sealed partial class CapturePage : Page
         ViewModel.Clear();
         Markup.Clear();
         _allowLeave = true;
+        if (_closeWindow)
+        {
+            _closeWindow = false;
+            App.MainAppWindow.Close();
+            return;
+        }
+
         ContinueNavigation();
     }
 

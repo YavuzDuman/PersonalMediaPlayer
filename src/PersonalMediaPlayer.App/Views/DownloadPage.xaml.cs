@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Download;
+using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core.Models;
 using PersonalMediaPlayer.App.Helpers;
 using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
@@ -31,6 +32,7 @@ public sealed partial class DownloadPage : Page
     private bool _audioOnly;
     private bool _downloading;
     private bool _allowLeave;
+    private bool _closeWindow;
     private bool _updatingSlider;
     private bool _dragging;
     private bool _ended;
@@ -73,6 +75,10 @@ public sealed partial class DownloadPage : Page
         Playback.BackButton.Click += (_, _) => Skip(-10_000);
         Playback.ForwardButton.Click += (_, _) => Skip(10_000);
         Playback.MuteButton.Click += Mute_Click;
+        var remembered = PlaybackVolume.Load();
+        _lastVolume = remembered.Audible;
+        Playback.VolumeSlider.Value = remembered.Level;
+        ApplyVolume();
         Playback.VolumeSlider.ValueChanged += Volume_Changed;
         Playback.SpeedCombo.SelectionChanged += (_, _) => _player?.SetRate(SelectedRate());
         Playback.FullScreenButton.Click += (_, _) => _ = ToggleFullScreenAsync();
@@ -92,6 +98,18 @@ public sealed partial class DownloadPage : Page
 
         ShowLeavePrompt();
         return false;
+    }
+
+    internal bool TryHandleHostClose()
+    {
+        if (_allowLeave || !HasUnsaved)
+        {
+            return false;
+        }
+
+        _closeWindow = true;
+        DispatcherQueue.TryEnqueue(ShowLeavePrompt);
+        return true;
     }
 
     protected override void OnNavigatingFrom(NavigatingCancelEventArgs e)
@@ -549,6 +567,7 @@ public sealed partial class DownloadPage : Page
             _lastVolume = e.NewValue;
         }
 
+        PlaybackVolume.Save(e.NewValue);
         ApplyVolume();
     }
 
@@ -914,7 +933,11 @@ public sealed partial class DownloadPage : Page
         LeavePrompt.Visibility = Visibility.Visible;
     }
 
-    private void LeavePromptStay_Click(object sender, RoutedEventArgs e) => LeavePrompt.Visibility = Visibility.Collapsed;
+    private void LeavePromptStay_Click(object sender, RoutedEventArgs e)
+    {
+        _closeWindow = false;
+        LeavePrompt.Visibility = Visibility.Collapsed;
+    }
 
     private void LeavePromptConfirm_Click(object sender, RoutedEventArgs e)
     {
@@ -943,6 +966,13 @@ public sealed partial class DownloadPage : Page
         ReleasePlayer();
         ResetToEntry();
         _allowLeave = true;
+        if (_closeWindow)
+        {
+            _closeWindow = false;
+            App.MainAppWindow.Close();
+            return;
+        }
+
         var moved = false;
         if (_pendingIsBack && Frame.CanGoBack)
         {

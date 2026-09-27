@@ -60,6 +60,10 @@ public sealed partial class VideoPlayerPage : Page
         Playback.SeekSlider.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnSeekReleased), handledEventsToo: true);
         Playback.SeekSlider.AddHandler(PointerCanceledEvent, new PointerEventHandler(OnSeekReleased), handledEventsToo: true);
         Playback.SeekSlider.ValueChanged += SeekSlider_ValueChanged;
+        var remembered = PlaybackVolume.Load();
+        _lastVolume = remembered.Audible;
+        Playback.VolumeSlider.Value = remembered.Level;
+        UpdateMuteIcon();
         Playback.VolumeSlider.ValueChanged += VolumeSlider_ValueChanged;
         Playback.MuteButton.Click += MuteButton_Click;
         Playback.BackButton.Click += RewindButton_Click;
@@ -363,6 +367,7 @@ public sealed partial class VideoPlayerPage : Page
             _lastVolume = e.NewValue;
         }
 
+        PlaybackVolume.Save(e.NewValue);
         ApplyVolumeToPlayer();
     }
 

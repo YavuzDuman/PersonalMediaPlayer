@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using PersonalMediaPlayer.App.Editing;
+using Windows.System;
 
 namespace PersonalMediaPlayer.App.Controls;
 
@@ -35,6 +36,10 @@ public sealed partial class VideoPlaybackBar : UserControl
     private double _cutAnchor;
     private List<(double Start, double End)> _removedFractions = [];
     private (double Start, double End)? _selection;
+    private static readonly double[] ZoomSteps = [1, 2, 4, 8, 16];
+    private int _zoomIndex;
+    private bool _timelineZoom;
+    private bool _layingZoom;
 
     public VideoPlaybackBar()
     {
@@ -52,12 +57,26 @@ public sealed partial class VideoPlaybackBar : UserControl
             TimelineHost.AddHandler(PointerExitedEvent, new PointerEventHandler(Timeline_Exited), true);
             TimelineHost.AddHandler(PointerCanceledEvent, new PointerEventHandler(Timeline_Released), true);
             TimelineHost.SizeChanged += (_, _) => DrawRemovedFractions();
+            TimelineScroll.AddHandler(PointerWheelChangedEvent, new PointerEventHandler(TimelineScroll_Wheel), true);
         };
         Unloaded += (_, _) =>
         {
             _hoverTimer.Stop();
             _thumbs.Dispose();
         };
+    }
+
+    public void UseTimelineZoom(bool enabled)
+    {
+        _timelineZoom = enabled;
+        ZoomBar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        if (!enabled && _zoomIndex != 0)
+        {
+            _zoomIndex = 0;
+            LayoutZoom(0);
+        }
+
+        UpdateZoomLabel();
     }
 
     public void SetHoverSource(string? path)
@@ -145,6 +164,8 @@ public sealed partial class VideoPlaybackBar : UserControl
         TrimEndThumb.Height = enabled ? 32 : 22;
         TrimCanvas.Background = enabled ? new SolidColorBrush(Colors.Transparent) : null;
         TrimCanvas.IsHitTestVisible = enabled && TrimCanvas.Visibility == Visibility.Visible;
+        TrimStartThumb.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        TrimEndThumb.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         if (!enabled)
         {
             _trimDrag = TrimHandle.None;
@@ -338,6 +359,93 @@ public sealed partial class VideoPlaybackBar : UserControl
     {
         var time = TimeSpan.FromMilliseconds(Math.Max(0, milliseconds));
         return time.TotalHours >= 1 ? time.ToString(@"h\:mm\:ss") : time.ToString(@"m\:ss");
+    }
+
+    private void ZoomOut_Click(object sender, RoutedEventArgs e) => StepZoom(-1);
+
+    private void ZoomIn_Click(object sender, RoutedEventArgs e) => StepZoom(1);
+
+    private void TimelineScroll_Wheel(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_timelineZoom || !e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        StepZoom(e.GetCurrentPoint(TimelineScroll).Properties.MouseWheelDelta > 0 ? 1 : -1);
+    }
+
+    private void TimelineScroll_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (!_layingZoom)
+        {
+            LayoutZoom(ViewCenterFraction());
+        }
+    }
+
+    private void StepZoom(int direction)
+    {
+        var next = Math.Clamp(_zoomIndex + direction, 0, ZoomSteps.Length - 1);
+        if (next == _zoomIndex)
+        {
+            return;
+        }
+
+        _zoomIndex = next;
+        LayoutZoom(ViewCenterFraction());
+    }
+
+    private double ViewCenterFraction()
+    {
+        var width = TimelineHost.ActualWidth;
+        var viewport = TimelineScroll.ViewportWidth;
+        if (width <= 1 || viewport <= 1)
+        {
+            return 0;
+        }
+
+        return Math.Clamp((TimelineScroll.HorizontalOffset + viewport / 2) / width, 0, 1);
+    }
+
+    private void LayoutZoom(double anchorFraction)
+    {
+        var viewport = TimelineScroll.ViewportWidth;
+        if (viewport <= 1 || _layingZoom)
+        {
+            UpdateZoomLabel();
+            return;
+        }
+
+        _layingZoom = true;
+        try
+        {
+            var zoom = ZoomSteps[_zoomIndex];
+            var width = Math.Max(viewport, viewport * zoom);
+            TimelineHost.Width = width;
+            UpdateZoomLabel();
+            TimelineHost.UpdateLayout();
+            var offset = anchorFraction * width - viewport / 2;
+            TimelineScroll.ChangeView(Math.Clamp(offset, 0, Math.Max(0, width - viewport)), null, null, true);
+            DrawRemovedFractions();
+            ArrangeTrim();
+        }
+        finally
+        {
+            _layingZoom = false;
+        }
+    }
+
+    private void UpdateZoomLabel()
+    {
+        if (ZoomLabel is null)
+        {
+            return;
+        }
+
+        ZoomLabel.Text = $"{ZoomSteps[_zoomIndex]:0}×";
+        ZoomOutButton.IsEnabled = _zoomIndex > 0;
+        ZoomInButton.IsEnabled = _zoomIndex < ZoomSteps.Length - 1;
     }
 
     private void TrimCanvas_SizeChanged(object sender, SizeChangedEventArgs e) => ArrangeTrim();

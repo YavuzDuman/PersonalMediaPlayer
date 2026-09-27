@@ -78,10 +78,10 @@ internal static class VideoTrimmer
         await composition.RenderToFileAsync(destination, MediaTrimmingPreference.Precise, ProfileMatching(probe));
     }
 
-    public static Task RenderAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> removed, TimeSpan? keepStart = null, TimeSpan? keepEnd = null, (int X, int Y, int Width, int Height)? crop = null)
-        => RenderCompositionAsync(sourcePath, destinationPath, removed, keepStart, keepEnd, crop);
+    public static Task RenderAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> removed, TimeSpan? keepStart = null, TimeSpan? keepEnd = null, (int X, int Y, int Width, int Height)? crop = null, string? videoFilters = null)
+        => RenderCompositionAsync(sourcePath, destinationPath, removed, keepStart, keepEnd, crop, videoFilters);
 
-    private static async Task RenderCompositionAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> removed, TimeSpan? keepStart, TimeSpan? keepEnd, (int X, int Y, int Width, int Height)? crop)
+    private static async Task RenderCompositionAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> removed, TimeSpan? keepStart, TimeSpan? keepEnd, (int X, int Y, int Width, int Height)? crop, string? videoFilters = null)
     {
         List<(TimeSpan Start, TimeSpan End)> kept;
         var frameWidth = 0;
@@ -106,7 +106,7 @@ internal static class VideoTrimmer
                 throw new InvalidOperationException("Keep at least half a second.");
             }
 
-            if (crop is { Width: >= 2, Height: >= 2 })
+            if (crop is { Width: >= 2, Height: >= 2 } || !string.IsNullOrEmpty(videoFilters))
             {
                 var frame = probe.GetVideoEncodingProperties();
                 frameWidth = (int)frame.Width;
@@ -143,14 +143,24 @@ internal static class VideoTrimmer
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
-        await WriteCropAsync(sourcePath, destinationPath, kept, crop!.Value, frameWidth, frameHeight);
+        await WriteCropAsync(sourcePath, destinationPath, kept, crop, frameWidth, frameHeight, videoFilters);
     }
 
-    private static async Task WriteCropAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height) crop, int frameWidth, int frameHeight)
+    private static async Task WriteCropAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height)? crop, int frameWidth, int frameHeight, string? videoFilters)
     {
-        if (await TryFfmpegCropAsync(sourcePath, destinationPath, kept, crop))
+        if (await TryFfmpegCropAsync(sourcePath, destinationPath, kept, crop, videoFilters))
         {
             return;
+        }
+
+        if (!string.IsNullOrEmpty(videoFilters))
+        {
+            throw new InvalidOperationException("The rotated video could not be written.");
+        }
+
+        if (crop is not { Width: >= 2, Height: >= 2 } pixels)
+        {
+            throw new InvalidOperationException("The edited video could not be written.");
         }
 
         if (File.Exists(destinationPath))
@@ -161,10 +171,10 @@ internal static class VideoTrimmer
         var width = Math.Max(1, frameWidth);
         var height = Math.Max(1, frameHeight);
         var fractions = new VideoSpeedEncoder.VideoCrop(
-            crop.X / (double)width,
-            crop.Y / (double)height,
-            (crop.X + crop.Width) / (double)width,
-            (crop.Y + crop.Height) / (double)height);
+            pixels.X / (double)width,
+            pixels.Y / (double)height,
+            (pixels.X + pixels.Width) / (double)width,
+            (pixels.Y + pixels.Height) / (double)height);
         var keep = kept.Select(span => (span.Start.Ticks, span.End.Ticks)).ToArray();
         await Task.Run(() => VideoSpeedEncoder.Write(sourcePath, destinationPath, 1, 1, fractions, keep));
         if (!File.Exists(destinationPath) || new FileInfo(destinationPath).Length < 1024)
@@ -173,7 +183,7 @@ internal static class VideoTrimmer
         }
     }
 
-    private static async Task<bool> TryFfmpegCropAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height) crop)
+    private static async Task<bool> TryFfmpegCropAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height)? crop, string? videoFilters)
     {
         var ffmpeg = FindFfmpeg();
         if (ffmpeg is null)
@@ -188,8 +198,8 @@ internal static class VideoTrimmer
 
         foreach (var encoder in new[] { "h264_mf", "h264_nvenc", "h264_qsv", "h264_amf", "libx264" })
         {
-            if (await RunFfmpegAsync(ffmpeg, sourcePath, destinationPath, kept, crop, encoder, audio: true)
-                || await RunFfmpegAsync(ffmpeg, sourcePath, destinationPath, kept, crop, encoder, audio: false))
+            if (await RunFfmpegAsync(ffmpeg, sourcePath, destinationPath, kept, crop, videoFilters, encoder, audio: true)
+                || await RunFfmpegAsync(ffmpeg, sourcePath, destinationPath, kept, crop, videoFilters, encoder, audio: false))
             {
                 return true;
             }
@@ -198,7 +208,7 @@ internal static class VideoTrimmer
         return false;
     }
 
-    private static async Task<bool> RunFfmpegAsync(string ffmpeg, string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height) crop, string encoder, bool audio)
+    private static async Task<bool> RunFfmpegAsync(string ffmpeg, string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height)? crop, string? videoFilters, string encoder, bool audio)
     {
         if (File.Exists(destinationPath))
         {
@@ -219,7 +229,7 @@ internal static class VideoTrimmer
         startInfo.ArgumentList.Add("-i");
         startInfo.ArgumentList.Add(sourcePath);
         startInfo.ArgumentList.Add("-filter_complex");
-        startInfo.ArgumentList.Add(CropGraph(kept, crop, audio));
+        startInfo.ArgumentList.Add(CropGraph(kept, crop, videoFilters, audio));
         startInfo.ArgumentList.Add("-map");
         startInfo.ArgumentList.Add("[v]");
         if (audio)
@@ -255,17 +265,28 @@ internal static class VideoTrimmer
         return process.ExitCode == 0 && File.Exists(destinationPath) && new FileInfo(destinationPath).Length >= 1024;
     }
 
-    private static string CropGraph(IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height) crop, bool audio)
+    private static string CropGraph(IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height)? crop, string? videoFilters, bool audio)
     {
         var culture = CultureInfo.InvariantCulture;
-        var cropFilter = string.Create(culture, $"crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}");
+        var picture = videoFilters ?? string.Empty;
+        if (crop is { Width: >= 2, Height: >= 2 } pixels)
+        {
+            if (picture.Length > 0)
+            {
+                picture += ",";
+            }
+
+            picture += string.Create(culture, $"crop={pixels.Width}:{pixels.Height}:{pixels.X}:{pixels.Y}");
+        }
+
         var parts = new List<string>();
         var inputs = new List<string>();
         for (var index = 0; index < kept.Count; index++)
         {
             var start = kept[index].Start.TotalSeconds.ToString("0.000", culture);
             var end = kept[index].End.TotalSeconds.ToString("0.000", culture);
-            parts.Add($"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS,{cropFilter}[v{index}]");
+            var filters = string.IsNullOrEmpty(picture) ? string.Empty : "," + picture;
+            parts.Add($"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS{filters}[v{index}]");
             inputs.Add($"[v{index}]");
             if (audio)
             {
@@ -275,6 +296,291 @@ internal static class VideoTrimmer
         }
 
         parts.Add($"{string.Join(string.Empty, inputs)}concat=n={kept.Count}:v=1:a={(audio ? 1 : 0)}[v]{(audio ? "[a]" : string.Empty)}");
+        return string.Join(';', parts);
+    }
+
+    public static async Task ApplyFadesAsync(string sourcePath, string destinationPath, double durationSeconds, double videoFadeIn, double videoFadeOut, double audioFadeIn, double audioFadeOut)
+    {
+        var ffmpeg = FindFfmpeg() ?? throw new InvalidOperationException("A fade needs ffmpeg, and it is not available.");
+        var duration = Math.Max(0.1, durationSeconds);
+        var video = videoFadeIn > 0 || videoFadeOut > 0;
+        var audio = audioFadeIn > 0 || audioFadeOut > 0;
+        string? error = null;
+        if (video)
+        {
+            foreach (var encoder in new[] { "h264_mf", "h264_nvenc", "h264_qsv", "h264_amf", "libx264" })
+            {
+                var (ok, detail) = await RunFadeAsync(ffmpeg, sourcePath, destinationPath, duration, videoFadeIn, videoFadeOut, audioFadeIn, audioFadeOut, encoder, keepAudio: true);
+                if (ok)
+                {
+                    return;
+                }
+
+                error = detail;
+                if (!audio && MissingAudio(detail))
+                {
+                    var silent = await RunFadeAsync(ffmpeg, sourcePath, destinationPath, duration, videoFadeIn, videoFadeOut, 0, 0, encoder, keepAudio: false);
+                    if (silent.Ok)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+        else
+        {
+            var copied = await RunFadeAsync(ffmpeg, sourcePath, destinationPath, duration, 0, 0, audioFadeIn, audioFadeOut, "copy", keepAudio: true);
+            if (copied.Ok)
+            {
+                return;
+            }
+
+            error = copied.Error;
+        }
+
+        throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "The fade could not be saved." : error);
+    }
+
+    private static async Task<(bool Ok, string? Error)> RunFadeAsync(string ffmpeg, string sourcePath, string destinationPath, double duration, double videoFadeIn, double videoFadeOut, double audioFadeIn, double audioFadeOut, string encoder, bool keepAudio)
+    {
+        if (File.Exists(destinationPath))
+        {
+            File.Delete(destinationPath);
+        }
+
+        var start = new ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add("-y");
+        start.ArgumentList.Add("-hide_banner");
+        start.ArgumentList.Add("-loglevel");
+        start.ArgumentList.Add("error");
+        start.ArgumentList.Add("-i");
+        start.ArgumentList.Add(sourcePath);
+        if (videoFadeIn > 0 || videoFadeOut > 0)
+        {
+            start.ArgumentList.Add("-vf");
+            start.ArgumentList.Add(VideoFadeFilter(duration, videoFadeIn, videoFadeOut));
+            start.ArgumentList.Add("-c:v");
+            start.ArgumentList.Add(encoder);
+            if (encoder == "libx264")
+            {
+                start.ArgumentList.Add("-preset");
+                start.ArgumentList.Add("veryfast");
+                start.ArgumentList.Add("-crf");
+                start.ArgumentList.Add("20");
+            }
+        }
+        else
+        {
+            start.ArgumentList.Add("-c:v");
+            start.ArgumentList.Add("copy");
+        }
+
+        if (!keepAudio)
+        {
+            start.ArgumentList.Add("-an");
+        }
+        else if (audioFadeIn > 0 || audioFadeOut > 0)
+        {
+            start.ArgumentList.Add("-af");
+            start.ArgumentList.Add(AudioFadeFilter(duration, audioFadeIn, audioFadeOut));
+            start.ArgumentList.Add("-c:a");
+            start.ArgumentList.Add("aac");
+        }
+        else
+        {
+            start.ArgumentList.Add("-c:a");
+            start.ArgumentList.Add("copy");
+        }
+
+        start.ArgumentList.Add(destinationPath);
+        using var process = Process.Start(start);
+        if (process is null)
+        {
+            return (false, "The fade could not be started.");
+        }
+
+        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode == 0 && File.Exists(destinationPath) && new FileInfo(destinationPath).Length >= 1024)
+        {
+            return (true, null);
+        }
+
+        return (false, string.IsNullOrWhiteSpace(error) ? "The fade could not be saved." : TrimError(error));
+    }
+
+    public static async Task ExtractAudioAsync(string sourcePath, string destinationPath, TimeSpan duration, IReadOnlyList<(TimeSpan Start, TimeSpan End)> removed, TimeSpan? keepStart, TimeSpan? keepEnd, double speed, double volume, int sampleRate, double fadeInSeconds = 0, double fadeOutSeconds = 0)
+    {
+        var ffmpeg = FindFfmpeg() ?? throw new InvalidOperationException("Audio export needs ffmpeg, and it is not available.");
+        var kept = KeptSpans(duration, removed);
+        if (keepStart is not null || keepEnd is not null)
+        {
+            var from = keepStart ?? TimeSpan.Zero;
+            var to = keepEnd ?? duration;
+            kept = kept
+                .Select(span => (Start: span.Start < from ? from : span.Start, End: span.End > to ? to : span.End))
+                .Where(span => span.End > span.Start)
+                .ToList();
+        }
+
+        if (kept.Count == 0 || kept.Sum(span => (span.End - span.Start).TotalMilliseconds) < 400)
+        {
+            throw new InvalidOperationException("Keep at least half a second.");
+        }
+
+        var outputSeconds = kept.Sum(span => (span.End - span.Start).TotalSeconds) / Math.Max(0.25, speed);
+        var graph = AudioGraph(kept, sampleRate, speed, volume, outputSeconds, fadeInSeconds, fadeOutSeconds);
+        var wav = destinationPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase);
+        var start = new ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add("-y");
+        start.ArgumentList.Add("-hide_banner");
+        start.ArgumentList.Add("-loglevel");
+        start.ArgumentList.Add("error");
+        start.ArgumentList.Add("-i");
+        start.ArgumentList.Add(sourcePath);
+        start.ArgumentList.Add("-filter_complex");
+        start.ArgumentList.Add(graph);
+        start.ArgumentList.Add("-map");
+        start.ArgumentList.Add("[a]");
+        start.ArgumentList.Add("-vn");
+        if (wav)
+        {
+            start.ArgumentList.Add("-c:a");
+            start.ArgumentList.Add("pcm_s16le");
+        }
+        else
+        {
+            start.ArgumentList.Add("-c:a");
+            start.ArgumentList.Add("libmp3lame");
+            start.ArgumentList.Add("-q:a");
+            start.ArgumentList.Add("2");
+        }
+
+        start.ArgumentList.Add(destinationPath);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Audio export could not be started.");
+        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0 || !File.Exists(destinationPath) || new FileInfo(destinationPath).Length < 128)
+        {
+            if (error.Contains("does not contain any stream", StringComparison.OrdinalIgnoreCase)
+                || error.Contains("matches no streams", StringComparison.OrdinalIgnoreCase)
+                || error.Contains("Output file does not contain any stream", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("This video has no audio track.");
+            }
+
+            var detail = error.Trim();
+            if (detail.Length > 280)
+            {
+                detail = detail[^280..];
+            }
+
+            throw new InvalidOperationException(detail.Length == 0 ? "The audio could not be saved." : detail);
+        }
+    }
+
+    private static string VideoFadeFilter(double duration, double fadeIn, double fadeOut)
+    {
+        var culture = CultureInfo.InvariantCulture;
+        var filters = new List<string>();
+        if (fadeIn > 0)
+        {
+            filters.Add(string.Create(culture, $"fade=t=in:st=0:d={Math.Min(fadeIn, duration):0.###}"));
+        }
+
+        if (fadeOut > 0)
+        {
+            var length = Math.Min(fadeOut, duration);
+            filters.Add(string.Create(culture, $"fade=t=out:st={Math.Max(0, duration - length):0.###}:d={length:0.###}"));
+        }
+
+        return string.Join(',', filters);
+    }
+
+    private static string AudioFadeFilter(double duration, double fadeIn, double fadeOut)
+    {
+        var culture = CultureInfo.InvariantCulture;
+        var filters = new List<string>();
+        if (fadeIn > 0)
+        {
+            filters.Add(string.Create(culture, $"afade=t=in:st=0:d={Math.Min(fadeIn, duration):0.###}"));
+        }
+
+        if (fadeOut > 0)
+        {
+            var length = Math.Min(fadeOut, duration);
+            filters.Add(string.Create(culture, $"afade=t=out:st={Math.Max(0, duration - length):0.###}:d={length:0.###}"));
+        }
+
+        return string.Join(',', filters);
+    }
+
+    private static bool MissingAudio(string? error)
+        => error is not null
+            && (error.Contains("does not contain any stream", StringComparison.OrdinalIgnoreCase)
+                || error.Contains("matches no streams", StringComparison.OrdinalIgnoreCase)
+                || error.Contains("no audio", StringComparison.OrdinalIgnoreCase));
+
+    private static string TrimError(string error)
+    {
+        var detail = error.Trim();
+        return detail.Length > 280 ? detail[^280..] : detail;
+    }
+
+    private static string AudioGraph(IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, int sampleRate, double speed, double volume, double outputSeconds, double fadeInSeconds, double fadeOutSeconds)
+    {
+        var culture = CultureInfo.InvariantCulture;
+        var extras = new List<string>();
+        if (Math.Abs(speed - 1d) > 0.02)
+        {
+            var rate = Math.Max(8000, sampleRate);
+            extras.Add(string.Create(culture, $"asetrate={rate * speed:0}"));
+            extras.Add(string.Create(culture, $"aresample={rate}"));
+        }
+
+        if (volume <= 0.001)
+        {
+            extras.Add("volume=0");
+        }
+        else if (Math.Abs(volume - 1d) > 0.005)
+        {
+            extras.Add(string.Create(culture, $"volume={volume:0.###}"));
+        }
+
+        var tail = extras.Count == 0 ? string.Empty : "," + string.Join(',', extras);
+        var parts = new List<string>();
+        var inputs = new List<string>();
+        for (var index = 0; index < kept.Count; index++)
+        {
+            var start = kept[index].Start.TotalSeconds.ToString("0.000", culture);
+            var end = kept[index].End.TotalSeconds.ToString("0.000", culture);
+            parts.Add($"[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS{tail}[a{index}]");
+            inputs.Add($"[a{index}]");
+        }
+
+        var fade = AudioFadeFilter(Math.Max(0.1, outputSeconds), fadeInSeconds, fadeOutSeconds);
+        if (string.IsNullOrEmpty(fade))
+        {
+            parts.Add($"{string.Join(string.Empty, inputs)}concat=n={kept.Count}:v=0:a=1[a]");
+        }
+        else
+        {
+            parts.Add($"{string.Join(string.Empty, inputs)}concat=n={kept.Count}:v=0:a=1[af]");
+            parts.Add($"[af]{fade}[a]");
+        }
+
         return string.Join(';', parts);
     }
 

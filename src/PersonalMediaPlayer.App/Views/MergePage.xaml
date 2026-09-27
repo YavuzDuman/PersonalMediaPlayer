@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="PersonalMediaPlayer.App.Views.MergePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PersonalMediaPlayer.App.Controls">
+
+    <Grid Padding="24,8,24,24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="2" VerticalAlignment="Center">
+                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Merge videos" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Add clips, drag them into order, then save one video."
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <ProgressRing x:Name="BusyRing" Width="20" Height="20" IsActive="False" />
+                <Button Click="Add_Click" Content="Add videos" Style="{StaticResource AccentButtonStyle}" />
+                <Button x:Name="MergeButton" Click="Merge_Click" Content="Merge" IsEnabled="False" />
+            </StackPanel>
+        </Grid>
+
+        <InfoBar
+            x:Name="StatusBar"
+            Grid.Row="1"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <Border
+            Grid.Row="2"
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="16">
+            <StackPanel Spacing="10">
+                <TextBlock x:Name="SummaryText" Style="{StaticResource BodyStrongTextBlockStyle}" Text="No videos yet" />
+                <Grid x:Name="TimelineBar" Height="48" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="Drag the white handles to choose what each clip keeps. Click the bright part to play there." />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="3" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="380" />
+            </Grid.ColumnDefinitions>
+            <Grid RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Border x:Name="VideoHost" MinHeight="280" Background="Black" CornerRadius="16">
+                    <TextBlock
+                        x:Name="PreviewHint"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Foreground="White"
+                        Text="The preview plays your clips in this order."
+                        TextWrapping="Wrap" />
+                </Border>
+                <controls:VideoPlaybackBar x:Name="Playback" Grid.Row="1" />
+            </Grid>
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12">
+                <Border
+                    x:Name="TrimCard"
+                    Padding="14"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16"
+                    Visibility="Collapsed">
+                    <StackPanel Spacing="8">
+                        <TextBlock x:Name="TrimName" Style="{StaticResource BodyStrongTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Preview and the saved video use this span." />
+                        <TextBox x:Name="TrimStartBox" Header="Start" LostFocus="TrimTime_LostFocus" KeyDown="TrimTime_KeyDown" />
+                        <TextBox x:Name="TrimEndBox" Header="End" LostFocus="TrimTime_LostFocus" KeyDown="TrimTime_KeyDown" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Click="TrimStartHere_Click" Content="Start here" />
+                            <Button Grid.Column="1" Click="TrimEndHere_Click" Content="End here" />
+                            <Button Grid.Column="2" Click="TrimFull_Click" Content="Full" />
+                        </Grid>
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Fades sit on this clip. Its fade out meets the next clip’s fade in."
+                            TextWrapping="Wrap" />
+                        <TextBlock FontWeight="SemiBold" Text="Video" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox x:Name="VideoFadeInBox" Checked="Fade_Changed" Content="In" Unchecked="Fade_Changed" />
+                            <CheckBox x:Name="VideoFadeOutBox" Grid.Column="1" Checked="Fade_Changed" Content="Out" Unchecked="Fade_Changed" />
+                        </Grid>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <NumberBox x:Name="VideoFadeInSeconds" Header="In seconds" IsEnabled="False" Maximum="10" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                            <NumberBox x:Name="VideoFadeOutSeconds" Grid.Column="1" Header="Out seconds" IsEnabled="False" Maximum="10" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                        </Grid>
+                        <TextBlock FontWeight="SemiBold" Text="Audio" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox x:Name="AudioFadeInBox" Checked="Fade_Changed" Content="In" Unchecked="Fade_Changed" />
+                            <CheckBox x:Name="AudioFadeOutBox" Grid.Column="1" Checked="Fade_Changed" Content="Out" Unchecked="Fade_Changed" />
+                        </Grid>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <NumberBox x:Name="AudioFadeInSeconds" Header="In seconds" IsEnabled="False" Maximum="10" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                            <NumberBox x:Name="AudioFadeOutSeconds" Grid.Column="1" Header="Out seconds" IsEnabled="False" Maximum="10" Minimum="0.1" SmallChange="0.1" SpinButtonPlacementMode="Inline" Value="1" ValueChanged="Fade_Changed" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            <ListView
+                x:Name="ClipList"
+                AllowDrop="True"
+                CanDragItems="True"
+                CanReorderItems="True"
+                DragItemsCompleted="Clips_Reordered"
+                IsItemClickEnabled="True"
+                ItemClick="Clip_Click"
+                SelectionMode="None"
+                Visibility="Collapsed">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Padding="4,8" RowSpacing="6">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="36" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="36" Height="36" VerticalAlignment="Top" Background="{Binding Swatch}" CornerRadius="10">
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontWeight="SemiBold"
+                                        Foreground="White"
+                                        Text="{Binding Order}" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock
+                                        MaxLines="2"
+                                        Text="{Binding Name}"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="Wrap" />
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{Binding Detail}"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4">
+                                <Button Padding="10,4" Click="MoveUp_Click" ToolTipService.ToolTip="Move up">
+                                    <FontIcon FontSize="14" Glyph="&#xE70E;" />
+                                </Button>
+                                <Button Padding="10,4" Click="MoveDown_Click" ToolTipService.ToolTip="Move down">
+                                    <FontIcon FontSize="14" Glyph="&#xE70D;" />
+                                </Button>
+                                <Button Padding="10,4" Click="Duplicate_Click" ToolTipService.ToolTip="Duplicate this clip">
+                                    <FontIcon FontSize="14" Glyph="&#xE8C8;" />
+                                </Button>
+                                <Button Padding="10,4" Click="Remove_Click" ToolTipService.ToolTip="Remove">
+                                    <FontIcon FontSize="14" Glyph="&#xE74D;" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <Grid
+            x:Name="LeavePrompt"
+            Grid.RowSpan="4"
+            Padding="24"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Visibility="Collapsed">
+            <Border
+                MaxWidth="420"
+                Padding="24"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="18">
+                <StackPanel Spacing="12">
+                    <TextBlock
+                        x:Name="LeaveTitle"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="These videos are not saved as one file."
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        x:Name="LeaveDetail"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Save them before leaving, or discard this merge."
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <Button
+                        x:Name="LeaveSaveButton"
+                        HorizontalAlignment="Stretch"
+                        Click="LeaveSave_Click"
+                        Content="Save"
+                        Style="{StaticResource AccentButtonStyle}" />
+                    <Button HorizontalAlignment="Stretch" Click="LeaveDiscard_Click" Content="Discard" />
+                    <Button HorizontalAlignment="Stretch" Click="LeaveStay_Click" Content="Stay" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

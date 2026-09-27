@@ -97,6 +97,10 @@ public sealed partial class RecordingsPage : Page
         Playback.SeekSlider.AddHandler(PointerReleasedEvent, new PointerEventHandler(PreviewSeek_Released), true);
         Playback.SeekSlider.AddHandler(PointerCanceledEvent, new PointerEventHandler(PreviewSeek_Released), true);
         Playback.SeekSlider.ValueChanged += PreviewSeek_ValueChanged;
+        var remembered = PlaybackVolume.Load();
+        _lastPreviewVolume = remembered.Audible;
+        Playback.VolumeSlider.Value = remembered.Level;
+        ApplyPreviewVolume();
         Playback.VolumeSlider.ValueChanged += VolumeSlider_ValueChanged;
         Playback.BackButton.Click += BackTen_Click;
         Playback.ForwardButton.Click += ForwardTen_Click;
@@ -1228,6 +1232,7 @@ public sealed partial class RecordingsPage : Page
             _lastPreviewVolume = e.NewValue;
         }
 
+        PlaybackVolume.Save(e.NewValue);
         ApplyPreviewVolume();
     }
 
