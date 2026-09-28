@@ -150,6 +150,7 @@
                     <Border Background="Black" CornerRadius="16">
                         <Grid>
                             <Border x:Name="VideoHost" />
+                            <controls:HoverCaptions x:Name="Captions" />
                             <StackPanel
                                 x:Name="AudioMark"
                                 HorizontalAlignment="Center"

@@ -11,11 +11,14 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     private string? _error;
     private string? _filePath;
 
-    public DownloadQueueItem(string title, string url, DownloadQuality quality)
+    public DownloadQueueItem(string title, string url, DownloadQuality quality, DownloadSubtitle? subtitle = null)
     {
         Title = title;
         Url = url;
         Quality = quality;
+        SubtitleLanguage = subtitle?.Language;
+        SubtitleAutomatic = subtitle?.Automatic == true;
+        SubtitleLabel = subtitle?.Language is null ? null : subtitle.Label;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -25,6 +28,12 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     public string Url { get; }
 
     public DownloadQuality Quality { get; }
+
+    public string? SubtitleLanguage { get; }
+
+    public bool SubtitleAutomatic { get; }
+
+    public string? SubtitleLabel { get; }
 
     public string Status
     {
@@ -87,7 +96,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
         "Downloading" => $"Downloading {Progress:0}%",
         "Paused" => $"Paused · {Progress:0}%",
         "Failed" => Error ?? "Failed",
-        _ => $"{Status} · {Quality.Label}"
+        _ => string.IsNullOrWhiteSpace(SubtitleLabel) ? $"{Status} · {Quality.Label}" : $"{Status} · {Quality.Label} · {SubtitleLabel}"
     };
 
     public bool CanCancel => Status is "Queued" or "Downloading" or "Paused";

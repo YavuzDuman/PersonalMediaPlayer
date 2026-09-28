@@ -14,11 +14,12 @@ Personal Media Player is a Windows-only C# app. The solution has the app, the li
 src/PersonalMediaPlayer.App/
 ├── Views/            Shell, Library, preview, photo editor, video editor, Download, Merge, Capture, Recordings, Settings
 ├── ViewModels/       Page state. CommunityToolkit.Mvvm
-├── Controls/         Media card, folder row, markup surface, video bar, crop surface
+├── Controls/         Media card, folder row, markup surface, video bar, hover captions, crop surface
 ├── Capture/          Screenshots, OCR, recording, system audio
-├── Download/         YouTube lookup, queue, history
+├── Download/         YouTube lookup, queue, history, subtitle choice
 ├── Editing/          Photo render, trim, section removal, speed and volume encode, fades, orientation, audio extract, merge, frame grab, timeline thumbnails
 ├── Playback/         Favorites, bookmarks, resume position, listening volume
+├── Subtitles/        Cue loading, the English–Turkish word list, and phrase matching
 └── Helpers/          Pickers, clipboard, theme, zoom
 
 src/PersonalMediaPlayer.Core/
@@ -73,6 +74,7 @@ These files sit next to `Library`, still under `%LocalAppData%\PersonalMediaPlay
 | `download-queue.json` | Unfinished downloads: link, quality, progress, and the partial file path. Restored as paused |
 | `download-history.json` | Saved downloads: file name, link, quality, date, and location. Removing a row does not delete the file |
 | `playback-volume.json` | Listening level and the last audible level. Shared by the player, editor preview, download preview, recordings preview, and Merge |
+| `subtitle-cache/` | One extracted `.srt` per video, used when no subtitle file sits beside the media |
 | `tools/` | `yt-dlp.exe`, `ffmpeg.exe`, and `deno.exe` when a download, a crop, a fade, an audio extract, or a merge needs them |
 
 Renaming a library file updates album membership, favorites, bookmarks, and the screenshot text key. YouTube requests use IPv4. The first lookup downloads `yt-dlp` if it is missing. Deno is downloaded only when no JavaScript runtime is already available.
@@ -81,7 +83,9 @@ Renaming a library file updates album membership, favorites, bookmarks, and the 
 
 Screenshots and recordings use Windows Graphics Capture. A selected recording area captures one monitor and keeps only the dragged rectangle. Speaker audio is WASAPI loopback of the default render device. There is no microphone. Gaps where the speakers send nothing are filled with silence so the track stays aligned with the pictures.
 
-Video playback uses LibVLC (`LibVLCSharp.WinUI` and `VideoLAN.LibVLC.Windows`). The hover frame on the timeline comes from a separate muted `Windows.Media.Playback.MediaPlayer`, so hovering does not seek the LibVLC player. That player is released before a save so it does not keep the file open. A failed save creates the next player only after a new surface exists.
+Video playback uses LibVLC (`LibVLCSharp.WinUI` and `VideoLAN.LibVLC.Windows`). LibVLC is started with `--no-sub-autodetect-file`, and each media gets `:no-sub-autodetect-file`, so a `.srt` beside the video is not opened as a second caption track. The hover frame on the timeline comes from a separate muted `Windows.Media.Playback.MediaPlayer`, so hovering does not seek the LibVLC player. That player is released before a save so it does not keep the file open. A failed save creates the next player only after a new surface exists.
+
+Captions in the download preview and the saved-video player are drawn by `HoverCaptions`, above the playback bar. `SubtitleCues` reads a sibling `.srt` whose name starts with the video name, or extracts stream `0:s:0` with `ffmpeg` into `subtitle-cache`. The **CC** button turns that text on and off and calls `SetSpu(-1)`, so LibVLC does not paint a second copy. Hovering a word calls `TurkishDictionary`. A phrase of two to four words in the current line is checked first, from `Assets/en-tr-phrases.json`. Otherwise the word is looked up in `Assets/en-tr.json`. Both files ship with the app. Contractions keep their apostrophe. An ending such as `-ing` tries the base with a final `e` before the bare stem, and a stem shorter than three letters is ignored. Nothing is sent off the PC.
 
 OCR uses `Windows.Media.Ocr`. The image may be scaled up and given more contrast first. Each installed OCR language is tried, and the result with the most words is kept.
 
@@ -91,7 +95,7 @@ Editor fades are applied after the other edits, on the finished timeline. A vide
 
 Merge reads each file with `ffmpeg`, then joins the kept spans in `VideoMerger`. Every clip is trimmed, faded, scaled into one even frame no wider than 1920 pixels, and set to 30 fps. Audio is 48 kHz stereo. A clip with no audio gets silence for the kept length so the next clip stays in time. Hardware H.264 encoders are tried first, then `libx264`. The preview clock is the player time minus that clip’s trim start, added to the kept lengths before it. A seek holds the slider until playback is near that time.
 
-Download shells out to `yt-dlp` over IPv4. A queue item remembers its output path, so pause and a later resume continue the partial file. History thumbnails are YouTube image URLs derived from the saved link. **Open** builds a `MediaItem` for that path and navigates to the video player. It does not launch another app.
+Download shells out to `yt-dlp` over IPv4. Lookup reads uploaded tracks from `subtitles`, then the spoken-language automatic caption from `automatic_captions`. A track whose download URL contains `tlang` is a translation and is left out. The chosen language is stored on the queue item. A video download asks `yt-dlp` for `--write-subs` or `--write-auto-subs`, then `--embed-subs` and `--convert-subs srt`. Audio-only items skip that. A queue item remembers its output path, so pause and a later resume continue the partial file. History thumbnails are YouTube image URLs derived from the saved link. **Open** builds a `MediaItem` for that path and navigates to the video player. It does not launch another app.
 
 Bookmarks are stored as times on the source file. An overwrite remaps them: a mark inside a removed span is dropped, earlier removed time is subtracted, and the remaining time is divided by the speed.
 

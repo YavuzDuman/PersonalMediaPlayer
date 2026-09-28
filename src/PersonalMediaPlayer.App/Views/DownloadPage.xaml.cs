@@ -27,6 +27,7 @@ public sealed partial class DownloadPage : Page
     private DownloadQueueItem? _previewItem;
     private bool _pumping;
     private DownloadListing? _listing;
+    private DownloadSubtitle? _subtitle;
     private string? _lookedUpUrl;
     private string? _previewPath;
     private bool _audioOnly;
@@ -67,6 +68,7 @@ public sealed partial class DownloadPage : Page
         HistoryList.ItemsSource = _history;
         EmptyHistory.Visibility = _history.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         _timer.Tick += (_, _) => UpdateClock();
+        Playback.SubtitlesChanged += (_, shown) => Captions.SetShown(shown);
         Playback.SeekSlider.AddHandler(PointerPressedEvent, new PointerEventHandler(Seek_Pressed), true);
         Playback.SeekSlider.AddHandler(PointerReleasedEvent, new PointerEventHandler(Seek_Released), true);
         Playback.SeekSlider.AddHandler(PointerCanceledEvent, new PointerEventHandler(Seek_Released), true);
@@ -179,6 +181,7 @@ public sealed partial class DownloadPage : Page
         var token = _lookup.Token;
         _lookedUpUrl = null;
         _listing = null;
+        _subtitle = null;
         LookupButton.IsEnabled = false;
         DownloadButton.IsEnabled = false;
         LookupRing.IsActive = true;
@@ -187,6 +190,12 @@ public sealed partial class DownloadPage : Page
         try
         {
             var listing = await YoutubeDownloader.ListAsync(uri.AbsoluteUri, new Progress<string>(text => DownloadStatus.Text = text), token);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _subtitle = await AskSubtitleAsync(listing.Subtitles);
             _listing = listing;
             _lookedUpUrl = LinkBox.Text;
             TitleText.Text = listing.Title;
@@ -225,7 +234,7 @@ public sealed partial class DownloadPage : Page
             return;
         }
 
-        var added = new DownloadQueueItem(_listing.Title, uri.AbsoluteUri, quality);
+        var added = new DownloadQueueItem(_listing.Title, uri.AbsoluteUri, quality, quality.AudioOnly ? null : _subtitle);
         Remember(added);
         _queue.Add(added);
         DownloadQueueStore.Save(_queue);
@@ -233,6 +242,7 @@ public sealed partial class DownloadPage : Page
         LinkBox.Text = string.Empty;
         _lookedUpUrl = null;
         _listing = null;
+        _subtitle = null;
         QualityPanel.Visibility = Visibility.Collapsed;
         DownloadButton.IsEnabled = false;
         _ = PumpAsync();
@@ -261,6 +271,7 @@ public sealed partial class DownloadPage : Page
                     var path = await YoutubeDownloader.DownloadAsync(
                         item.Url,
                         item.Quality,
+                        item.SubtitleLanguage is null ? null : new DownloadSubtitle(item.SubtitleLanguage, item.SubtitleLabel ?? item.SubtitleLanguage, item.SubtitleAutomatic),
                         item.Title,
                         item.OutputPath,
                         new Progress<double>(value => DispatcherQueue.TryEnqueue(() => item.Report(value))),
@@ -340,6 +351,53 @@ public sealed partial class DownloadPage : Page
         _ = PumpAsync();
     }
 
+    private async Task<DownloadSubtitle?> AskSubtitleAsync(IReadOnlyList<DownloadSubtitle> tracks)
+    {
+        if (tracks.Count == 0)
+        {
+            return null;
+        }
+
+        var choices = new List<DownloadSubtitle> { new(null, "No subtitles", false) };
+        choices.AddRange(tracks);
+        var languages = new ComboBox
+        {
+            Header = "Language",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ItemsSource = choices,
+            DisplayMemberPath = nameof(DownloadSubtitle.Label),
+            SelectedIndex = 0
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Include subtitles?",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Width = 360,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Choose an uploaded subtitle, or the video’s original automatic caption. Translated languages are not listed. Audio-only downloads stay without subtitles.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    languages
+                }
+            },
+            PrimaryButtonText = "Continue",
+            CloseButtonText = "No subtitles",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return null;
+        }
+
+        return languages.SelectedItem as DownloadSubtitle;
+    }
+
     private void RetryItem_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not DownloadQueueItem item || !item.CanRetry)
@@ -368,7 +426,7 @@ public sealed partial class DownloadPage : Page
 
         _previewItem = item;
         _audioOnly = item.Quality.AudioOnly;
-        _listing = new DownloadListing(item.Title, [item.Quality]);
+        _listing = new DownloadListing(item.Title, [item.Quality], []);
         ShowPreview(item.FilePath, item.Title);
     }
 
@@ -387,7 +445,7 @@ public sealed partial class DownloadPage : Page
         ResetBar();
         if (_audioOnly)
         {
-            _libVlc = new LibVLC("--intf", "dummy");
+            _libVlc = new LibVLC("--intf", "dummy", "--no-sub-autodetect-file");
             _player = new VlcMediaPlayer(_libVlc);
             HookPlayer();
             ApplyVolume();
@@ -415,7 +473,7 @@ public sealed partial class DownloadPage : Page
 
     private void VideoView_Initialized(object? sender, InitializedEventArgs e)
     {
-        _libVlc = new LibVLC(false, e.SwapChainOptions);
+        _libVlc = new LibVLC(false, e.SwapChainOptions.Concat(new[] { "--no-sub-autodetect-file" }).ToArray());
         _player = new VlcMediaPlayer(_libVlc);
         HookPlayer();
         if (_videoView is not null)
@@ -439,7 +497,11 @@ public sealed partial class DownloadPage : Page
         }
 
         _player.LengthChanged += Player_LengthChanged;
-        _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(UpdatePlayIcon);
+        _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            Playback.UseSubtitles(_player!);
+            UpdatePlayIcon();
+        });
         _player.Paused += (_, _) => DispatcherQueue.TryEnqueue(UpdatePlayIcon);
         _player.EndReached += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -458,6 +520,14 @@ public sealed partial class DownloadPage : Page
         _ended = false;
         _media?.Dispose();
         _media = new Media(_libVlc, path, FromType.FromPath);
+        _media.AddOption(":no-sub-autodetect-file");
+        _media.AddOption(":sub-track=0");
+        Captions.Load(path);
+        if (Captions.HasCues)
+        {
+            Playback.OfferCaptions();
+        }
+
         _media.Parse(MediaParseOptions.ParseLocal);
         ApplyDuration(_media.Duration);
         _player.Play(_media);
@@ -466,7 +536,14 @@ public sealed partial class DownloadPage : Page
     }
 
     private void Player_LengthChanged(object? sender, MediaPlayerLengthChangedEventArgs args)
-        => DispatcherQueue.TryEnqueue(() => ApplyDuration(args.Length));
+        => DispatcherQueue.TryEnqueue(() =>
+        {
+            ApplyDuration(args.Length);
+            if (_player is not null)
+            {
+                Playback.UseSubtitles(_player);
+            }
+        });
 
     private void Play_Click(object sender, RoutedEventArgs e)
     {
@@ -609,6 +686,7 @@ public sealed partial class DownloadPage : Page
         }
 
         Playback.PositionText.Text = Format(Math.Max(0, _player.Time));
+        Captions.SetTime(_player.Time);
         if (_hasDuration && _durationMs > 0)
         {
             _updatingSlider = true;

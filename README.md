@@ -62,11 +62,11 @@ flowchart LR
 | --- | --- |
 | **Library** | Import, search, album, favorite, slideshow, and find duplicate files |
 | **Photos** | Draw, blur, crop, rotate, compare with the original, and read a selected area |
-| **Videos** | Play, hover the timeline for a frame, bookmark, resume, trim, edit, and grab a still |
+| **Videos** | Play, hover the timeline for a frame, bookmark, resume, trim, edit, grab a still, and hover caption words for a Turkish meaning |
 | **Merge** | Order clips, trim and fade each one, preview the sequence, and save one video |
 | **Capture** | Shoot an area, window, monitor, every display, or turn a text file into an image |
 | **Recordings** | Record a monitor, a window, or a rectangle, with optional speaker audio |
-| **Download** | Queue YouTube, Shorts, and music links, preview, then save into the library or any PC folder |
+| **Download** | Queue YouTube, Shorts, and music links, choose an uploaded subtitle or the original automatic caption, preview, then save into the library or any PC folder |
 | **Settings** | Theme, library folder, screenshot delay, cursor, and the shortcut list |
 
 Details for each screen are in the [user guide](docs/guide.md).
@@ -99,7 +99,7 @@ Search covers the name, the type, the album, and words read from a screenshot. A
 | --- | --- | --- |
 | Pen, arrow, rectangle, text, blur, crop | Shared control bar on the picture | Area, window, monitor, all displays, fullscreen |
 | Read the whole shot, or only the box you drag | Hover shows a frame and a time. Click or drag seeks | Text file drawn as one tall image |
-| Slider compares the original and the saved file | Bookmarks, resume, replay, and an editor for speed, sound, rotate, fade, crop, trim, and cuts | Speaker audio on a recording. No microphone |
+| Slider compares the original and the saved file | Bookmarks, resume, replay, captions with hover meanings, and an editor for speed, sound, rotate, fade, crop, trim, and cuts | Speaker audio on a recording. No microphone |
 | Restore puts the backup back | Still frame of the current moment | Shortcuts work while the app is in the background |
 
 </div>

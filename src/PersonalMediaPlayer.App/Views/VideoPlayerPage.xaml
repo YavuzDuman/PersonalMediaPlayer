@@ -67,7 +67,10 @@
 
         <Grid Grid.Row="1">
             <Border x:Name="VideoHost" Background="Black" CornerRadius="16">
-                <lvs:VideoView x:Name="VideoView" Initialized="VideoView_Initialized" />
+                <Grid>
+                    <lvs:VideoView x:Name="VideoView" Initialized="VideoView_Initialized" />
+                    <controls:HoverCaptions x:Name="Captions" />
+                </Grid>
             </Border>
             <controls:VideoPlaybackBar
                 x:Name="Playback"

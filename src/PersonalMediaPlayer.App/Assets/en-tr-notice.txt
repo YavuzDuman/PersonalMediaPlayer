@@ -1,0 +1,12 @@
+English–Turkish hover glosses in en-tr.json are generated from two lexicons.
+
+Wiktionary English–Turkish translations (2015-01-02 extract by Matthias Buchmeier),
+licensed under CC BY-SA 3.0 and the GNU Free Documentation License.
+https://en.wiktionary.org/
+
+FreeDict eng-tur, from Mehmet Ali Vardar's gtksozluk2, licensed under the GNU GPL.
+https://github.com/freedict/fd-dictionaries/tree/master/eng-tur
+
+Closed-class contractions (don't, I'm, and similar) are resolved in code.
+Content words come from the lexicon file.
+Multi-word phrases in en-tr-phrases.json come from the same two lexicons.

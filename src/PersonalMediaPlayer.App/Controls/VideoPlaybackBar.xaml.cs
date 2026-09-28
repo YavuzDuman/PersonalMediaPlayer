@@ -1,3 +1,4 @@
+using LibVLCSharp.Shared;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -38,6 +39,9 @@ public sealed partial class VideoPlaybackBar : UserControl
     private (double Start, double End)? _selection;
     private static readonly double[] ZoomSteps = [1, 2, 4, 8, 16];
     private int _zoomIndex;
+    private MediaPlayer? _subtitlePlayer;
+    private int _subtitleTrack = -1;
+    private bool _subtitlesOn = true;
     private bool _timelineZoom;
     private bool _layingZoom;
 
@@ -64,6 +68,99 @@ public sealed partial class VideoPlaybackBar : UserControl
             _hoverTimer.Stop();
             _thumbs.Dispose();
         };
+    }
+
+    public void UseSubtitles(MediaPlayer player)
+    {
+        _subtitlePlayer = player;
+        ApplySubtitles();
+    }
+
+    public void ClearSubtitles()
+    {
+        _subtitlePlayer = null;
+        _subtitleTrack = -1;
+        SubtitleButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void Subtitle_Click(object sender, RoutedEventArgs e)
+    {
+        var tracks = SubtitleTracks();
+        if (tracks.Count > 1)
+        {
+            var menu = new MenuFlyout();
+            var off = new MenuFlyoutItem { Text = "Off" };
+            off.Click += (_, _) =>
+            {
+                _subtitlesOn = false;
+                ApplySubtitles();
+            };
+            menu.Items.Add(off);
+            foreach (var track in tracks)
+            {
+                var item = new MenuFlyoutItem { Text = string.IsNullOrWhiteSpace(track.Name) ? "Subtitles" : track.Name };
+                var id = track.Id;
+                item.Click += (_, _) =>
+                {
+                    _subtitleTrack = id;
+                    _subtitlesOn = true;
+                    ApplySubtitles();
+                };
+                menu.Items.Add(item);
+            }
+
+            menu.ShowAt(SubtitleButton);
+            return;
+        }
+
+        _subtitlesOn = !_subtitlesOn;
+        ApplySubtitles();
+    }
+
+    private void ApplySubtitles()
+    {
+        var tracks = SubtitleTracks();
+        if (_subtitlePlayer is null || tracks.Count == 0)
+        {
+            SubtitleButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (tracks.All(track => track.Id != _subtitleTrack))
+        {
+            _subtitleTrack = tracks[0].Id;
+        }
+
+        SubtitleButton.Visibility = Visibility.Visible;
+        var selected = tracks.First(track => track.Id == _subtitleTrack);
+        var name = string.IsNullOrWhiteSpace(selected.Name) ? "Subtitles" : selected.Name;
+        SubtitleText.Text = _subtitlesOn ? "CC" : "Off";
+        SubtitleButton.Opacity = _subtitlesOn ? 1 : 0.45;
+        ToolTipService.SetToolTip(SubtitleButton, _subtitlesOn ? $"Hide {name}" : tracks.Count > 1 ? "Choose subtitles" : $"Show {name}");
+        _subtitlePlayer.SetSpu(-1);
+        SubtitlesChanged?.Invoke(this, _subtitlesOn);
+    }
+
+    public event EventHandler<bool>? SubtitlesChanged;
+
+    public void OfferCaptions()
+    {
+        _subtitlesOn = true;
+        SubtitleButton.Visibility = Visibility.Visible;
+        SubtitleText.Text = "CC";
+        SubtitleButton.Opacity = 1;
+        ToolTipService.SetToolTip(SubtitleButton, "Hide subtitles");
+        SubtitlesChanged?.Invoke(this, true);
+    }
+
+    private List<(int Id, string Name)> SubtitleTracks()
+    {
+        if (_subtitlePlayer is null)
+        {
+            return [];
+        }
+
+        return _subtitlePlayer.SpuDescription.Where(track => track.Id >= 0).Select(track => (track.Id, track.Name ?? string.Empty)).ToList();
     }
 
     public void UseTimelineZoom(bool enabled)

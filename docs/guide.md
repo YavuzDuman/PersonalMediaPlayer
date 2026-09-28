@@ -52,6 +52,10 @@ Hover the timeline to see a small frame and the time under the pointer. Playback
 
 The player resumes a video that was left in the middle, and it can play again after the end. **Trim** on the player drags the ends of the timeline, previews that span, and saves a new file at the source size. The camera button saves a still of the current moment and opens it as a screenshot preview. **Restore original** is available after an overwrite that replaced the video.
 
+**CC** appears on the bar, to the left of speed, when the video has captions. It is on the download preview and on a saved video. The words sit above the bar. **CC** hides them, and shows them again. One caption track toggles. More than one opens a list. Playback does not pause. A subtitle file sitting next to the video is not painted as a second track.
+
+Hover a word for its Turkish meaning. The meaning sits just above that word. If the words around it are a known phrase, such as “of course” or “a little”, the phrase meaning is shown. “can't” and “I've” are looked up with the apostrophe still in the word. A word ending in “-ing”, such as “using”, follows the base word when that base is at least three letters. The word list and the phrase list are stored in the app. Hovering does not use the internet, and it does not send the subtitle anywhere.
+
 **Edit** opens the editor. The picture fills the left side. The playback bar sits under the picture, so it does not cover the crop frame. The right side is one tool at a time. **Speed** is open when you arrive. A dot under a button means that edit is already set.
 
 | Tool | What it edits |
@@ -79,6 +83,8 @@ The volume slider on the bar is only for listening. **Sound** is what Save write
 ## Download
 
 Paste a YouTube, Shorts, `youtu.be`, or YouTube Music link and press **Look up**. The page lists each quality with its size. An estimate is marked **about**. **Audio only** is included when the clip has a separate audio track. **Add to queue** stays off until the text in the box matches the looked-up link exactly, including capital letters.
+
+When the video has subtitles, Look up asks whether to include one. The list has the uploaded languages and, when YouTube has it, the original-language automatic caption. That automatic choice is marked **Automatic**. Translated automatic languages are not listed. **No subtitles** leaves them out. An audio-only download does not embed subtitles. The preview and the saved video use the same **CC** button and the same hover meanings as the player.
 
 The queue downloads one item at a time. Each row shows waiting, a download percentage, paused, ready, failed, or cancelled.
 

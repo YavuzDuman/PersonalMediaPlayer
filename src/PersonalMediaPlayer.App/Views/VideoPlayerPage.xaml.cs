@@ -55,6 +55,7 @@ public sealed partial class VideoPlayerPage : Page
         InitializeComponent();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _timer.Tick += (_, _) => UpdateClockAndBar();
+        Playback.SubtitlesChanged += (_, shown) => Captions.SetShown(shown);
 
         Playback.SeekSlider.AddHandler(PointerPressedEvent, new PointerEventHandler(OnSeekPressed), handledEventsToo: true);
         Playback.SeekSlider.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnSeekReleased), handledEventsToo: true);
@@ -250,7 +251,7 @@ public sealed partial class VideoPlayerPage : Page
             return;
         }
 
-        _libVlc = new LibVLC(enableDebugLogs: false, _swapChainOptions);
+        _libVlc = new LibVLC(enableDebugLogs: false, _swapChainOptions.Concat(new[] { "--no-sub-autodetect-file" }).ToArray());
         _player = new VlcMediaPlayer(_libVlc);
         _player.LengthChanged += Player_LengthChanged;
         HookPlayer();
@@ -278,13 +279,28 @@ public sealed partial class VideoPlayerPage : Page
         media.Parse(MediaParseOptions.ParseLocal);
         ApplyDuration(media.Duration, "media-parse");
         _ended = false;
+        media.AddOption(":no-sub-autodetect-file");
+        media.AddOption(":sub-track=0");
+        Captions.Load(path);
+        if (Captions.HasCues)
+        {
+            Playback.OfferCaptions();
+        }
+
         _player.Play(media);
         ApplyRateToPlayer();
     }
 
     private void Player_LengthChanged(object? sender, MediaPlayerLengthChangedEventArgs e)
     {
-        DispatcherQueue.TryEnqueue(() => ApplyDuration(e.Length, "vlc-length"));
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            ApplyDuration(e.Length, "vlc-length");
+            if (_player is not null)
+            {
+                Playback.UseSubtitles(_player);
+            }
+        });
     }
 
     private void PlayPauseButton_Click(object sender, RoutedEventArgs e)
@@ -571,6 +587,7 @@ public sealed partial class VideoPlayerPage : Page
         _updatingSlider = false;
         UpdatePlayIcon();
         RememberPosition(force: false);
+        Captions.SetTime(_player.Time);
     }
 
     private void HookPlayer()
@@ -580,7 +597,11 @@ public sealed partial class VideoPlayerPage : Page
             return;
         }
 
-        _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(UpdatePlayIcon);
+        _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            Playback.UseSubtitles(_player!);
+            UpdatePlayIcon();
+        });
         _player.Paused += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
             RememberPosition(force: true);
@@ -1126,7 +1147,7 @@ public sealed partial class VideoPlayerPage : Page
             return;
         }
 
-        _libVlc = new LibVLC(enableDebugLogs: false, _swapChainOptions);
+        _libVlc = new LibVLC(enableDebugLogs: false, _swapChainOptions.Concat(new[] { "--no-sub-autodetect-file" }).ToArray());
         _player = new VlcMediaPlayer(_libVlc);
         _player.LengthChanged += Player_LengthChanged;
         HookPlayer();

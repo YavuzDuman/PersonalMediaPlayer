@@ -28,7 +28,10 @@ internal static class DownloadQueueStore
                 }
 
                 var ready = entry.Status == "Ready" && !string.IsNullOrWhiteSpace(entry.FilePath) && File.Exists(entry.FilePath);
-                var item = new DownloadQueueItem(entry.Title ?? "Video", entry.Url, new DownloadQuality(entry.QualityLabel ?? "Video", entry.Format, entry.AudioOnly));
+                var subtitle = string.IsNullOrWhiteSpace(entry.SubtitleLanguage)
+                    ? null
+                    : new DownloadSubtitle(entry.SubtitleLanguage, entry.SubtitleLabel ?? entry.SubtitleLanguage, entry.SubtitleAutomatic);
+                var item = new DownloadQueueItem(entry.Title ?? "Video", entry.Url, new DownloadQuality(entry.QualityLabel ?? "Video", entry.Format, entry.AudioOnly), subtitle);
                 item.Restore(ready ? "Ready" : "Paused", entry.Progress, ready ? entry.FilePath : null, entry.OutputPath);
                 items.Add(item);
             }
@@ -54,6 +57,9 @@ internal static class DownloadQueueStore
                     QualityLabel = item.Quality.Label,
                     Format = item.Quality.Format,
                     AudioOnly = item.Quality.AudioOnly,
+                    SubtitleLanguage = item.SubtitleLanguage,
+                    SubtitleAutomatic = item.SubtitleAutomatic,
+                    SubtitleLabel = item.SubtitleLabel,
                     Status = item.Status is "Ready" ? "Ready" : "Paused",
                     Progress = item.Progress,
                     FilePath = item.Status == "Ready" ? item.FilePath : null,
@@ -80,6 +86,12 @@ internal static class DownloadQueueStore
         public string? Format { get; set; }
 
         public bool AudioOnly { get; set; }
+
+        public string? SubtitleLanguage { get; set; }
+
+        public bool SubtitleAutomatic { get; set; }
+
+        public string? SubtitleLabel { get; set; }
 
         public string? Status { get; set; }
 
