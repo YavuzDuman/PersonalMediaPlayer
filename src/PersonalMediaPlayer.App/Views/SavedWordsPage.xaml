@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="PersonalMediaPlayer.App.Views.SavedWordsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="24,8,24,24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <StackPanel x:Name="ThemeInk" IsHitTestVisible="False" Visibility="Collapsed">
+            <TextBlock x:Name="PrimaryInk" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+            <TextBlock x:Name="SecondaryInk" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Border x:Name="HoverInk" Background="{ThemeResource SubtleFillColorSecondaryBrush}" />
+            <Border x:Name="LineInk" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" />
+        </StackPanel>
+
+        <StackPanel Spacing="12">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Saved words" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Click a word to open its video. The list stays open beside the video." />
+                </StackPanel>
+                <AutoSuggestBox
+                    x:Name="SearchBox"
+                    Grid.Column="1"
+                    Width="240"
+                    VerticalAlignment="Center"
+                    PlaceholderText="Search words"
+                    QueryIcon="Find"
+                    TextChanged="Search_TextChanged" />
+                <TextBlock
+                    x:Name="CountText"
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+            <InfoBar
+                x:Name="StatusBar"
+                IsClosable="True"
+                IsOpen="False"
+                Visibility="Collapsed" />
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <TextBlock
+                x:Name="EmptyText"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap" />
+            <Border
+                x:Name="ListHost"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="WordList" />
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

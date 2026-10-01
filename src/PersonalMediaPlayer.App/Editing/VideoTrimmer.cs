@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using PersonalMediaPlayer.App.Subtitles;
 using Windows.Media.Editing;
 using Windows.Media.MediaProperties;
 using Windows.Media.Transcoding;
@@ -40,6 +41,7 @@ internal static class VideoTrimmer
         var destination = await folder.CreateFileAsync(Path.GetFileName(destinationPath), CreationCollisionOption.ReplaceExisting);
         var profile = ProfileMatching(clip);
         await composition.RenderToFileAsync(destination, MediaTrimmingPreference.Precise, profile);
+        await SubtitleEdit.CarryAsync(sourcePath, destinationPath, [(Milliseconds(start), Milliseconds(end))]);
     }
 
     public static async Task RemoveSectionsAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> removed, TimeSpan? keepStart = null, TimeSpan? keepEnd = null)
@@ -76,6 +78,7 @@ internal static class VideoTrimmer
         var folder = await StorageFolder.GetFolderFromPathAsync(folderPath);
         var destination = await folder.CreateFileAsync(Path.GetFileName(destinationPath), CreationCollisionOption.ReplaceExisting);
         await composition.RenderToFileAsync(destination, MediaTrimmingPreference.Precise, ProfileMatching(probe));
+        await SubtitleEdit.CarryAsync(sourcePath, destinationPath, Milliseconds(kept));
     }
 
     public static Task RenderAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> removed, TimeSpan? keepStart = null, TimeSpan? keepEnd = null, (int X, int Y, int Width, int Height)? crop = null, string? videoFilters = null)
@@ -137,6 +140,7 @@ internal static class VideoTrimmer
                     }
                 }
 
+                await SubtitleEdit.CarryAsync(sourcePath, destinationPath, Milliseconds(kept));
                 return;
             }
         }
@@ -150,6 +154,7 @@ internal static class VideoTrimmer
     {
         if (await TryFfmpegCropAsync(sourcePath, destinationPath, kept, crop, videoFilters))
         {
+            await SubtitleEdit.CarryAsync(sourcePath, destinationPath, Milliseconds(kept));
             return;
         }
 
@@ -181,6 +186,8 @@ internal static class VideoTrimmer
         {
             throw new InvalidOperationException("The edited video could not be written.");
         }
+
+        await SubtitleEdit.CarryAsync(sourcePath, destinationPath, Milliseconds(kept));
     }
 
     private static async Task<bool> TryFfmpegCropAsync(string sourcePath, string destinationPath, IReadOnlyList<(TimeSpan Start, TimeSpan End)> kept, (int X, int Y, int Width, int Height)? crop, string? videoFilters)
@@ -313,6 +320,7 @@ internal static class VideoTrimmer
                 var (ok, detail) = await RunFadeAsync(ffmpeg, sourcePath, destinationPath, duration, videoFadeIn, videoFadeOut, audioFadeIn, audioFadeOut, encoder, keepAudio: true);
                 if (ok)
                 {
+                    await SubtitleEdit.CarryAsync(sourcePath, destinationPath);
                     return;
                 }
 
@@ -322,6 +330,7 @@ internal static class VideoTrimmer
                     var silent = await RunFadeAsync(ffmpeg, sourcePath, destinationPath, duration, videoFadeIn, videoFadeOut, 0, 0, encoder, keepAudio: false);
                     if (silent.Ok)
                     {
+                        await SubtitleEdit.CarryAsync(sourcePath, destinationPath);
                         return;
                     }
                 }
@@ -332,6 +341,7 @@ internal static class VideoTrimmer
             var copied = await RunFadeAsync(ffmpeg, sourcePath, destinationPath, duration, 0, 0, audioFadeIn, audioFadeOut, "copy", keepAudio: true);
             if (copied.Ok)
             {
+                await SubtitleEdit.CarryAsync(sourcePath, destinationPath);
                 return;
             }
 
@@ -686,6 +696,12 @@ internal static class VideoTrimmer
         return merged;
     }
 
+    private static long Milliseconds(TimeSpan time)
+        => (long)Math.Round(time.TotalMilliseconds);
+
+    private static (long StartMs, long EndMs)[] Milliseconds(IReadOnlyList<(TimeSpan Start, TimeSpan End)> spans)
+        => spans.Select(span => (Milliseconds(span.Start), Milliseconds(span.End))).ToArray();
+
     public static async Task ChangeSpeedAsync(string sourcePath, string destinationPath, double rate, double volume, VideoSpeedEncoder.VideoCrop? crop = null, IReadOnlyList<(long Start, long End)>? keep = null)
     {
         if (rate < 0.25 || rate > 4)
@@ -708,6 +724,11 @@ internal static class VideoTrimmer
         {
             throw new InvalidOperationException("The edited video could not be written.");
         }
+
+        var spans = keep is { Count: > 0 }
+            ? keep.Select(span => ((long)TimeSpan.FromTicks(span.Start).TotalMilliseconds, (long)TimeSpan.FromTicks(span.End).TotalMilliseconds)).ToArray()
+            : null;
+        await SubtitleEdit.CarryAsync(sourcePath, destinationPath, spans, rate);
     }
 
     private static MediaEncodingProfile ProfileMatching(MediaClip clip)

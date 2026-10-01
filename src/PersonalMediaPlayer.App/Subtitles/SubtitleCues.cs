@@ -106,16 +106,20 @@ internal static class SubtitleCues
     {
         milliseconds = 0;
         var clock = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? text;
-        var match = Regex.Match(clock, @"(\d+):(\d+):(\d+)[,.](\d+)");
+        var match = Regex.Match(clock, @"^(?:(\d+):)?(\d+):(\d+)[,.](\d+)");
         if (!match.Success)
         {
             return false;
         }
 
-        milliseconds = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) * 3_600_000L
-            + int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture) * 60_000L
-            + int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture) * 1_000L
-            + int.Parse(match.Groups[4].Value.PadRight(3, '0')[..3], CultureInfo.InvariantCulture);
+        var hours = match.Groups[1].Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : 0;
+        var minutes = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        var seconds = int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
+        var fraction = match.Groups[4].Value.PadRight(3, '0');
+        milliseconds = hours * 3_600_000L
+            + minutes * 60_000L
+            + seconds * 1_000L
+            + int.Parse(fraction[..3], CultureInfo.InvariantCulture);
         return true;
     }
 

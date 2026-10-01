@@ -29,7 +29,8 @@
                 <TextBlock
                     x:Name="AddedText"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}" />
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextWrapping="Wrap" />
             </StackPanel>
             <StackPanel
                 x:Name="WatchActions"
@@ -37,7 +38,29 @@
                 Orientation="Horizontal"
                 Spacing="8"
                 VerticalAlignment="Center">
-                <Button Click="EditVideo_Click" Style="{StaticResource AccentButtonStyle}">
+                <Button x:Name="SaveCopyButton" Click="SaveCopy_Click" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE896;" />
+                        <TextBlock x:Name="SaveCopyLabel" Text="Save a copy" />
+                    </StackPanel>
+                </Button>
+                <Button
+                    x:Name="PlaylistButton"
+                    Click="PlaylistButton_Click"
+                    ToolTipService.ToolTip="Playlist"
+                    Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE93F;" />
+                        <TextBlock Text="Playlist" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="WordsButton" Click="WordsButton_Click" ToolTipService.ToolTip="Saved words">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE82D;" />
+                        <TextBlock Text="Words" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="EditButton" Click="EditVideo_Click" Style="{StaticResource AccentButtonStyle}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon FontSize="16" Glyph="&#xE70F;" />
                         <TextBlock Text="Edit" />
@@ -65,7 +88,13 @@
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid>
             <Border x:Name="VideoHost" Background="Black" CornerRadius="16">
                 <Grid>
                     <lvs:VideoView x:Name="VideoView" Initialized="VideoView_Initialized" />
@@ -109,6 +138,9 @@
                     </ScrollViewer>
                 </Border>
             </Grid>
+            </Grid>
+            <controls:PlaylistPanel x:Name="PlaylistPanel" Grid.Column="1" Visibility="Collapsed" />
+            <controls:SavedWordsPanel x:Name="WordsPanel" Grid.Column="2" />
         </Grid>
 
         <Grid

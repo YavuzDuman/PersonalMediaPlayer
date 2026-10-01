@@ -12,6 +12,7 @@ using Windows.ApplicationModel.DataTransfer;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Editing;
 using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Models;
 using WinRT.Interop;
 using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
@@ -2007,6 +2008,9 @@ public sealed partial class RecordingsPage : Page
 
             var renamed = App.MediaLibrary.RenameItem(item.FilePath, box.Text);
             PlaybackBookmarks.Move(item.FilePath, renamed.FilePath);
+            PlaybackProgress.Move(item.FilePath, renamed.FilePath);
+            SavedWords.Move(item.FilePath, renamed.FilePath);
+            Playlists.MoveFile(item.FilePath, renamed.FilePath);
             MediaFavorites.Move(item.FilePath, renamed.FilePath);
             ScreenshotTextIndex.Move(item.FilePath, renamed.FilePath);
             if (string.Equals(_previewPath, item.FilePath, StringComparison.OrdinalIgnoreCase))

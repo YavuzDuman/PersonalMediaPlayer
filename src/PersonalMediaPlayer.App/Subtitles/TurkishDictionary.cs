@@ -62,10 +62,16 @@ internal static class TurkishDictionary
     private static Dictionary<string, string>? _words;
     private static Dictionary<string, string>? _phrases;
 
+    public readonly record struct PhraseHit(int Start, int Length, string Turkish);
+
     public static string? Lookup(string word, IReadOnlyList<string> line, int index)
     {
-        var phrase = MatchPhrase(line, index);
-        return phrase ?? Lookup(word);
+        return FindPhrase(line, index)?.Turkish ?? Lookup(word);
+    }
+
+    public static PhraseHit? FindPhrase(IReadOnlyList<string> line, int index)
+    {
+        return MatchPhrase(line, index);
     }
 
     public static string? Lookup(string word)
@@ -94,7 +100,7 @@ internal static class TurkishDictionary
         return Find(key.Replace("'", string.Empty, StringComparison.Ordinal));
     }
 
-    private static string? MatchPhrase(IReadOnlyList<string> line, int index)
+    private static PhraseHit? MatchPhrase(IReadOnlyList<string> line, int index)
     {
         if (index < 0 || index >= line.Count)
         {
@@ -137,7 +143,7 @@ internal static class TurkishDictionary
                 var key = string.Join(' ', tokens[start..(start + length)]);
                 if (phrases.TryGetValue(key, out var meaning))
                 {
-                    return meaning;
+                    return new PhraseHit(start, length, meaning);
                 }
             }
         }

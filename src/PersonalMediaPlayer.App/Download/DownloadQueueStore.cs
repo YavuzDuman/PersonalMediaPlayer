@@ -28,11 +28,13 @@ internal static class DownloadQueueStore
                 }
 
                 var ready = entry.Status == "Ready" && !string.IsNullOrWhiteSpace(entry.FilePath) && File.Exists(entry.FilePath);
+                var queued = string.Equals(entry.Status, "Queued", StringComparison.Ordinal);
                 var subtitle = string.IsNullOrWhiteSpace(entry.SubtitleLanguage)
                     ? null
-                    : new DownloadSubtitle(entry.SubtitleLanguage, entry.SubtitleLabel ?? entry.SubtitleLanguage, entry.SubtitleAutomatic);
+                    : new DownloadSubtitle(entry.SubtitleLanguage, entry.SubtitleLabel ?? entry.SubtitleLanguage, entry.SubtitleAutomatic, entry.SubtitleTranslated);
                 var item = new DownloadQueueItem(entry.Title ?? "Video", entry.Url, new DownloadQuality(entry.QualityLabel ?? "Video", entry.Format, entry.AudioOnly), subtitle);
-                item.Restore(ready ? "Ready" : "Paused", entry.Progress, ready ? entry.FilePath : null, entry.OutputPath);
+                var status = ready ? "Ready" : queued ? "Queued" : "Paused";
+                item.Restore(status, entry.Progress, ready ? entry.FilePath : null, entry.OutputPath);
                 items.Add(item);
             }
 
@@ -59,8 +61,14 @@ internal static class DownloadQueueStore
                     AudioOnly = item.Quality.AudioOnly,
                     SubtitleLanguage = item.SubtitleLanguage,
                     SubtitleAutomatic = item.SubtitleAutomatic,
+                    SubtitleTranslated = item.SubtitleTranslated,
                     SubtitleLabel = item.SubtitleLabel,
-                    Status = item.Status is "Ready" ? "Ready" : "Paused",
+                    Status = item.Status switch
+                    {
+                        "Ready" => "Ready",
+                        "Queued" => "Queued",
+                        _ => "Paused"
+                    },
                     Progress = item.Progress,
                     FilePath = item.Status == "Ready" ? item.FilePath : null,
                     OutputPath = item.OutputPath
@@ -90,6 +98,8 @@ internal static class DownloadQueueStore
         public string? SubtitleLanguage { get; set; }
 
         public bool SubtitleAutomatic { get; set; }
+
+        public bool SubtitleTranslated { get; set; }
 
         public string? SubtitleLabel { get; set; }
 

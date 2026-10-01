@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using PersonalMediaPlayer.App.Subtitles;
 
 namespace PersonalMediaPlayer.App.Editing;
 
@@ -50,6 +51,7 @@ internal static class VideoMerger
             var (ok, detail) = await RunAsync(ffmpeg, clips, destination, width, height, encoder, cancellationToken);
             if (ok)
             {
+                await SubtitleEdit.CarryJoinAsync(destination, clips.Select(CaptionSpan).ToArray());
                 return;
             }
 
@@ -57,6 +59,16 @@ internal static class VideoMerger
         }
 
         throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "The videos could not be joined." : error);
+    }
+
+    private static (string Path, long StartMs, long EndMs) CaptionSpan(MergeSource clip)
+    {
+        var start = (long)Math.Round(Math.Max(0, clip.TrimStartSeconds) * 1000);
+        var endSeconds = clip.TrimEndSeconds > clip.TrimStartSeconds
+            ? Math.Min(clip.TrimEndSeconds, clip.DurationSeconds)
+            : clip.DurationSeconds;
+        var end = (long)Math.Round(Math.Max(endSeconds, clip.TrimStartSeconds) * 1000);
+        return (clip.Path, start, Math.Max(start, end));
     }
 
     private static (int Width, int Height) TargetSize(IReadOnlyList<MergeSource> clips)

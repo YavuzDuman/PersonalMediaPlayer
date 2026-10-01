@@ -1,17 +1,22 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Helpers;
+using PersonalMediaPlayer.App.Playback;
 
 namespace PersonalMediaPlayer.App.Views;
 
 public sealed partial class ShellPage : UserControl
 {
+    private StreamOpenRequest? _heldStream;
+
     public ShellPage()
     {
         InitializeComponent();
         NavigationHelper.ContentFrame = NavFrame;
         NavigationHelper.RequestCapture = OpenCapture;
+        NavFrame.Navigated += NavFrame_Navigated;
     }
 
     public Frame ContentFrame => NavFrame;
@@ -66,7 +71,11 @@ public sealed partial class ShellPage : UserControl
             if (item.Tag as string == "library")
             {
                 NavView.SelectedItem = item;
-                NavigateToSection(typeof(LibraryPage));
+                if (NavFrame.Content is null)
+                {
+                    NavigateToSection(typeof(LibraryPage));
+                }
+
                 break;
             }
         }
@@ -89,6 +98,12 @@ public sealed partial class ShellPage : UserControl
         {
             case "library":
                 NavigateToSection(typeof(LibraryPage));
+                break;
+            case "playlists":
+                NavigateToSection(typeof(PlaylistsPage));
+                break;
+            case "words":
+                NavigateToSection(typeof(SavedWordsPage));
                 break;
             case "recordings":
                 NavigateToSection(typeof(RecordingsPage));
@@ -123,43 +138,7 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
-        if (NavFrame.Content is RecordingsPage recordings && !recordings.PrepareToLeave(typeof(CapturePage), kind, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is CapturePage capture && !capture.PrepareToLeave(typeof(CapturePage), kind, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is VideoPlayerPage video && !video.PrepareToLeave(typeof(CapturePage), kind, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is VideoEditorPage editor && !editor.PrepareToLeave(typeof(CapturePage), kind, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is MediaPreviewPage preview && !preview.PrepareToLeave(typeof(CapturePage), kind, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(typeof(CapturePage), kind, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is MergePage merge && !merge.PrepareToLeave(typeof(CapturePage), kind, back: false))
+        if (!TryLeaveFor(typeof(CapturePage), kind))
         {
             SyncNavSelection();
             return;
@@ -227,43 +206,7 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
-        if (NavFrame.Content is RecordingsPage recordings && !recordings.PrepareToLeave(pageType, null, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is CapturePage capture && !capture.PrepareToLeave(pageType, null, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is VideoPlayerPage video && !video.PrepareToLeave(pageType, null, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is VideoEditorPage editor && !editor.PrepareToLeave(pageType, null, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is MediaPreviewPage preview && !preview.PrepareToLeave(pageType, null, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(pageType, null, back: false))
-        {
-            SyncNavSelection();
-            return;
-        }
-
-        if (NavFrame.Content is MergePage merge && !merge.PrepareToLeave(pageType, null, back: false))
+        if (!TryLeaveFor(pageType, null))
         {
             SyncNavSelection();
             return;
@@ -276,6 +219,76 @@ public sealed partial class ShellPage : UserControl
         }
 
         SyncNavSelection();
+    }
+
+    private bool TryLeaveFor(Type pageType, object? parameter)
+    {
+        if (NavFrame.Content is RecordingsPage recordings && !recordings.PrepareToLeave(pageType, parameter, back: false))
+        {
+            return false;
+        }
+
+        if (NavFrame.Content is CapturePage capture && !capture.PrepareToLeave(pageType, parameter, back: false))
+        {
+            return false;
+        }
+
+        if (NavFrame.Content is VideoPlayerPage video && !video.PrepareToLeave(pageType, parameter, back: false))
+        {
+            return false;
+        }
+
+        if (NavFrame.Content is VideoEditorPage editor && !editor.PrepareToLeave(pageType, parameter, back: false))
+        {
+            return false;
+        }
+
+        if (NavFrame.Content is MediaPreviewPage preview && !preview.PrepareToLeave(pageType, parameter, back: false))
+        {
+            return false;
+        }
+
+        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(pageType, parameter, back: false))
+        {
+            return false;
+        }
+
+        if (NavFrame.Content is MergePage merge && !merge.PrepareToLeave(pageType, parameter, back: false))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    internal void OpenStream(StreamOpenRequest request)
+    {
+        _heldStream = request;
+        if (!TryLeaveFor(typeof(VideoPlayerPage), request))
+        {
+            return;
+        }
+
+        // The player is not a section, so Back returns to the page that was open.
+        NavFrame.Navigate(typeof(VideoPlayerPage), request);
+    }
+
+    private void NavFrame_Navigated(object sender, NavigationEventArgs e)
+    {
+        // Stay keeps the address. A later leave can replace the page's pending destination.
+        if (_heldStream is not StreamOpenRequest held)
+        {
+            return;
+        }
+
+        if (e.Parameter is StreamOpenRequest)
+        {
+            _heldStream = null;
+            return;
+        }
+
+        _heldStream = null;
+        DispatcherQueue.TryEnqueue(() => OpenStream(held));
     }
 
     private void SelectNavTag(string tag)
@@ -299,15 +312,19 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
-        var tag = type == typeof(CapturePage)
-            ? "capture"
-            : type == typeof(RecordingsPage)
-                ? "recordings"
-                : type == typeof(DownloadPage)
-                    ? "download"
-                    : type == typeof(MergePage)
-                        ? "merge"
-                        : "library";
+        var tag = type == typeof(PlaylistsPage)
+            ? "playlists"
+            : type == typeof(SavedWordsPage)
+            ? "words"
+            : type == typeof(CapturePage)
+                ? "capture"
+                : type == typeof(RecordingsPage)
+                    ? "recordings"
+                    : type == typeof(DownloadPage)
+                        ? "download"
+                        : type == typeof(MergePage)
+                            ? "merge"
+                            : "library";
         SelectNavTag(tag);
     }
 }

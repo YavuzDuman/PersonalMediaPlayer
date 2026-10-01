@@ -23,6 +23,16 @@
                     <FontIcon Glyph="&#xEB9F;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem Content="Playlists" Tag="playlists">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE93F;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem Content="Saved words" Tag="words">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE82D;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem Content="Recordings" Tag="recordings">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE714;" />

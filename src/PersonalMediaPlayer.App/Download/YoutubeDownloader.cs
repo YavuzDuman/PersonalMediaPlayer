@@ -4,8 +4,11 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Globalization;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using PersonalMediaPlayer.App.Playback;
 
 [assembly: InternalsVisibleTo("PersonalMediaPlayer.Tests")]
 
@@ -13,12 +16,25 @@ namespace PersonalMediaPlayer.App.Download;
 
 public sealed record DownloadQuality(string Label, string Format, bool AudioOnly);
 
-public sealed record DownloadSubtitle(string? Language, string Label, bool Automatic);
+public sealed record DownloadSubtitle(string? Language, string Label, bool Automatic, bool Translated = false);
 
 public sealed record DownloadListing(string Title, IReadOnlyList<DownloadQuality> Qualities, IReadOnlyList<DownloadSubtitle> Subtitles);
 
+public sealed record PlaylistVideo(string Title, string Url, string? Length);
+
+public sealed record PlaylistListing(string Title, IReadOnlyList<PlaylistVideo> Videos, int TotalCount);
+
+internal sealed record PlaybackSource(string Title, Uri Media, Uri? Audio, DownloadQuality Quality, IReadOnlyList<DownloadSubtitle> Subtitles);
+
 internal static class YoutubeDownloader
 {
+    internal const string LicenseProtectedMessage = "This video is protected by a license and stays in the browser.";
+
+    internal const string NoPlayableStreamMessage = "This page did not offer a playable stream.";
+
+    // YouTube rejects a translated caption until this lookup's session is about a minute old.
+    // The wait has to happen inside the same run that downloads the caption.
+    private const int TranslatedSubtitleDelaySeconds = 65;
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
     private static readonly Regex ProgressPattern = new(@"\[download\]\s+(?<percent>\d+(?:\.\d+)?)%", RegexOptions.Compiled);
 
@@ -59,11 +75,173 @@ internal static class YoutubeDownloader
     internal static bool SameLinkText(string lookedUp, string current)
         => string.Equals(lookedUp.Trim(), current.Trim(), StringComparison.Ordinal);
 
+    internal const int PlaylistListLimit = 200;
+
+    public static bool IsPlaylist(string text)
+    {
+        if (!TryNormalize(text, out var uri))
+        {
+            return false;
+        }
+
+        if (uri.AbsolutePath.Contains("/playlist", StringComparison.OrdinalIgnoreCase))
+        {
+            return !string.IsNullOrEmpty(Query(uri, "list"));
+        }
+
+        var list = Query(uri, "list");
+        var video = Query(uri, "v");
+        var shortVideo = uri.Host.Contains("youtu.be", StringComparison.OrdinalIgnoreCase)
+            && uri.AbsolutePath.Trim('/').Length > 0;
+        return !string.IsNullOrEmpty(list) && string.IsNullOrEmpty(video) && !shortVideo;
+    }
+
+    public static IReadOnlyList<DownloadQuality> PlaylistQualities()
+        =>
+        [
+            new DownloadQuality("Best available", "bestvideo+bestaudio/best", false),
+            new DownloadQuality("1080p", "bestvideo[height<=1080]+bestaudio/best[height<=1080]", false),
+            new DownloadQuality("720p", "bestvideo[height<=720]+bestaudio/best[height<=720]", false),
+            new DownloadQuality("480p", "bestvideo[height<=480]+bestaudio/best[height<=480]", false),
+            new DownloadQuality("360p", "bestvideo[height<=360]+bestaudio/best[height<=360]", false),
+            new DownloadQuality("Audio only", "bestaudio/best", true)
+        ];
+
+    public static async Task<PlaylistListing> ListPlaylistAsync(string url, IProgress<string>? status, CancellationToken cancellationToken)
+    {
+        status?.Report("Reading the playlist…");
+        var ytdlp = await EnsureYtDlpAsync(status, cancellationToken);
+        var runtime = await EnsureJsRuntimeAsync(status, cancellationToken);
+        var args = new List<string>
+        {
+            "--yes-playlist",
+            "--flat-playlist",
+            "--no-warnings",
+            "-4",
+            "--playlist-end",
+            PlaylistListLimit.ToString(CultureInfo.InvariantCulture)
+        };
+        if (runtime is not null)
+        {
+            args.Add("--js-runtimes");
+            args.Add(runtime);
+        }
+
+        args.Add("--dump-single-json");
+        args.Add(url);
+        var json = await RunAsync(ytdlp, args, null, cancellationToken);
+        return ReadPlaylist(JsonBody(json));
+    }
+
+    internal static PlaylistListing ReadPlaylist(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var title = Text(root, "title");
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = "Playlist";
+        }
+
+        var videos = new List<PlaylistVideo>();
+        if (root.TryGetProperty("entries", out var entries) && entries.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var address = EntryUrl(entry);
+                if (address is null)
+                {
+                    continue;
+                }
+
+                var name = Text(entry, "title");
+                videos.Add(new PlaylistVideo(
+                    string.IsNullOrWhiteSpace(name) ? "Video" : name.Trim(),
+                    address,
+                    LengthLabel(entry)));
+            }
+        }
+
+        if (videos.Count == 0)
+        {
+            throw new InvalidOperationException("This playlist has no videos.");
+        }
+
+        var total = videos.Count;
+        if (root.TryGetProperty("playlist_count", out var count) && count.TryGetInt32(out var listed) && listed > total)
+        {
+            total = listed;
+        }
+
+        return new PlaylistListing(title.Trim(), videos, total);
+    }
+
+    private static string? EntryUrl(JsonElement entry)
+    {
+        foreach (var name in new[] { "webpage_url", "url" })
+        {
+            var text = Text(entry, name);
+            if (text is not null && text.StartsWith("http", StringComparison.OrdinalIgnoreCase) && TryNormalize(text, out var uri))
+            {
+                return uri.AbsoluteUri;
+            }
+        }
+
+        var id = Text(entry, "id");
+        if (string.IsNullOrWhiteSpace(id) || id.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-'))
+        {
+            return null;
+        }
+
+        return "https://www.youtube.com/watch?v=" + id;
+    }
+
+    private static string? LengthLabel(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("duration", out var duration) || duration.ValueKind != JsonValueKind.Number || !duration.TryGetDouble(out var seconds) || seconds <= 0)
+        {
+            return null;
+        }
+
+        var total = (int)Math.Round(seconds);
+        var hours = total / 3600;
+        var minutes = total % 3600 / 60;
+        var secs = total % 60;
+        return hours > 0
+            ? string.Create(CultureInfo.InvariantCulture, $"{hours}:{minutes:00}:{secs:00}")
+            : string.Create(CultureInfo.InvariantCulture, $"{minutes}:{secs:00}");
+    }
+
+    private static string? Query(Uri uri, string key)
+    {
+        var query = uri.Query;
+        if (query.StartsWith('?'))
+        {
+            query = query[1..];
+        }
+
+        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var split = part.Split('=', 2);
+            if (split.Length == 2 && split[0].Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.UnescapeDataString(split[1]);
+            }
+        }
+
+        return null;
+    }
+
     public static async Task<DownloadListing> ListAsync(string url, IProgress<string>? status, CancellationToken cancellationToken)
     {
         var ytdlp = await EnsureYtDlpAsync(status, cancellationToken);
         var runtime = await EnsureJsRuntimeAsync(status, cancellationToken);
-        var json = await RunAsync(ytdlp, CommonArgs(runtime, "--dump-single-json", url), null, cancellationToken);
+        var json = await RunAsync(ytdlp, CommonArgs(runtime, "--write-auto-subs", "--dump-single-json", url), null, cancellationToken);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var title = root.TryGetProperty("title", out var titleElement) ? titleElement.GetString() : null;
@@ -73,6 +251,178 @@ internal static class YoutubeDownloader
         }
 
         return new DownloadListing(title, ReadQualities(root), ReadSubtitles(root));
+    }
+
+    internal static async Task<PlaybackSource> ResolvePlaybackAsync(string url, IProgress<string>? status, CancellationToken cancellationToken)
+    {
+        var ytdlp = await EnsureYtDlpAsync(status, cancellationToken);
+        var runtime = await EnsureJsRuntimeAsync(status, cancellationToken);
+        string json;
+        try
+        {
+            json = await RunAsync(ytdlp, CommonArgs(runtime, "--write-auto-subs", "--dump-single-json", url), null, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (MentionsDrm(ex.Message))
+        {
+            throw new InvalidOperationException(LicenseProtectedMessage, ex);
+        }
+
+        try
+        {
+            return ReadPlayback(JsonBody(json));
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("The page lookup did not return a video.");
+        }
+    }
+
+    internal static PlaybackSource ReadPlayback(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var title = root.TryGetProperty("title", out var titleElement) ? titleElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = "Video";
+        }
+
+        var candidates = new List<PlayCandidate>();
+        var sawDrmVideo = false;
+        if (root.TryGetProperty("formats", out var formats) && formats.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var format in formats.EnumerateArray())
+            {
+                if (IsStoryboard(format) || IsImage(format))
+                {
+                    continue;
+                }
+
+                var videoCodec = Text(format, "vcodec");
+                var audioCodec = Text(format, "acodec");
+                var hasVideo = HasCodec(videoCodec) && !videoCodec!.Equals("images", StringComparison.OrdinalIgnoreCase);
+                var hasAudio = HasCodec(audioCodec);
+                if (!hasVideo && !hasAudio)
+                {
+                    continue;
+                }
+
+                if (IsDrm(format))
+                {
+                    if (hasVideo)
+                    {
+                        sawDrmVideo = true;
+                    }
+
+                    continue;
+                }
+
+                var address = PlayableAddress(format);
+                if (address is null)
+                {
+                    continue;
+                }
+
+                var height = 0;
+                if (hasVideo && format.TryGetProperty("height", out var heightElement) && heightElement.ValueKind == JsonValueKind.Number)
+                {
+                    height = heightElement.GetInt32();
+                }
+
+                var protocol = Text(format, "protocol");
+                var extension = Text(format, "ext");
+                var score = format.TryGetProperty("tbr", out var rate) && rate.ValueKind == JsonValueKind.Number ? rate.GetDouble() : 0;
+                var rank = hasVideo
+                    ? FormatRank(protocol, extension, videoCodec, hasAudio)
+                    : FormatRank(protocol, extension, audioCodec, true);
+                candidates.Add(new PlayCandidate(height, rank, score, address, hasVideo, hasAudio, IsFragmented(format)));
+            }
+        }
+
+        // LibVLC stays at time zero on a DASH file URL, so a manifest or progressive file wins when one exists.
+        var playable = candidates.Any(item => item.Video && !item.Fragmented)
+            ? candidates.Where(item => !item.Fragmented)
+            : candidates;
+        var combined = Best(playable.Where(item => item.Video && item.Audio));
+        var picture = Best(playable.Where(item => item.Video && !item.Audio));
+        var sound = Best(playable.Where(item => !item.Video && item.Audio));
+        if (combined is null && picture is null)
+        {
+            throw new InvalidOperationException(sawDrmVideo ? LicenseProtectedMessage : NoPlayableStreamMessage);
+        }
+
+        PlayCandidate chosen;
+        Uri? audio = null;
+        if (picture is PlayCandidate silent && sound is PlayCandidate track && (combined is not PlayCandidate both || silent.Height > both.Height))
+        {
+            chosen = silent;
+            audio = track.Address;
+        }
+        else if (combined is PlayCandidate ready)
+        {
+            chosen = ready;
+        }
+        else
+        {
+            chosen = picture!.Value;
+        }
+
+        var qualities = ReadQualities(root);
+        var quality = qualities.FirstOrDefault(item => !item.AudioOnly)
+            ?? new DownloadQuality("Best available", "bestvideo+bestaudio/best", false);
+        return new PlaybackSource(title, chosen.Address, audio, quality, ReadSubtitles(root));
+    }
+
+    internal static async Task<string?> FetchSubtitleAsync(string pageUrl, DownloadSubtitle subtitle, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(subtitle.Language))
+        {
+            return null;
+        }
+
+        var cache = PageSubtitlePath(pageUrl, subtitle.Language);
+        if (File.Exists(cache) && new FileInfo(cache).Length > 0)
+        {
+            return cache;
+        }
+
+        var ytdlp = await EnsureYtDlpAsync(null, cancellationToken);
+        var runtime = await EnsureJsRuntimeAsync(null, cancellationToken);
+        var folder = Path.Combine(Path.GetTempPath(), "PersonalMediaPlayer-subs", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var arguments = CommonArgs(runtime, "--skip-download");
+            AddSubtitleRequest(arguments, subtitle);
+            arguments.Add("--sub-format");
+            arguments.Add("vtt/srt/best");
+            arguments.Add("-o");
+            arguments.Add(Path.Combine(folder, "caption"));
+            arguments.Add(pageUrl);
+            try
+            {
+                await RunAsync(ytdlp, arguments, null, cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                // A subtitle file can still be on disk when yt-dlp exits with a warning.
+            }
+
+            return StoreSubtitle(folder, cache);
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(folder))
+                {
+                    Directory.Delete(folder, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+            }
+        }
     }
 
     public static string CreateOutputPath(bool audioOnly)
@@ -107,9 +457,7 @@ internal static class YoutubeDownloader
 
         if (subtitle?.Language is not null && !quality.AudioOnly)
         {
-            arguments.Add(subtitle.Automatic ? "--write-auto-subs" : "--write-subs");
-            arguments.Add("--sub-langs");
-            arguments.Add(subtitle.Language);
+            AddSubtitleRequest(arguments, subtitle);
             arguments.Add("--embed-subs");
             arguments.Add("--convert-subs");
             arguments.Add("srt");
@@ -326,7 +674,7 @@ internal static class YoutubeDownloader
         var found = new List<DownloadSubtitle>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         AddTracks(root, "subtitles", automatic: false, seen, found);
-        AddOriginalAutomatic(root, seen, found);
+        AddAutomatic(root, seen, found);
         return found;
     }
 
@@ -344,12 +692,11 @@ internal static class YoutubeDownloader
                 continue;
             }
 
-            var name = LanguageName(language.Name, language.Value);
-            found.Add(new DownloadSubtitle(language.Name, automatic ? name + " · Automatic" : name, automatic));
+            found.Add(new DownloadSubtitle(language.Name, LanguageLabels.ForCaption(language.Name, GivenName(language.Value), automatic), automatic));
         }
     }
 
-    private static void AddOriginalAutomatic(JsonElement root, HashSet<string> seen, List<DownloadSubtitle> found)
+    private static void AddAutomatic(JsonElement root, HashSet<string> seen, List<DownloadSubtitle> found)
     {
         if (!root.TryGetProperty("automatic_captions", out var map) || map.ValueKind != JsonValueKind.Object)
         {
@@ -359,24 +706,92 @@ internal static class YoutubeDownloader
         var videoLanguage = root.TryGetProperty("language", out var language) && language.ValueKind == JsonValueKind.String
             ? language.GetString()
             : null;
-        JsonProperty? chosen = null;
+        JsonProperty? spoken = null;
+        var rest = new List<JsonProperty>();
         foreach (var entry in map.EnumerateObject())
         {
-            if (!IsSpokenAutomatic(entry.Name, videoLanguage, entry.Value))
+            if (entry.Name.Contains("live_chat", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            if (chosen is null || entry.Name.EndsWith("-orig", StringComparison.OrdinalIgnoreCase))
+            if (IsSpokenAutomatic(entry.Name, videoLanguage, entry.Value))
             {
-                chosen = entry;
+                if (spoken is null || entry.Name.EndsWith("-orig", StringComparison.OrdinalIgnoreCase))
+                {
+                    spoken = entry;
+                }
+
+                continue;
+            }
+
+            rest.Add(entry);
+        }
+
+        var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (spoken is { } original)
+        {
+            groups.Add(LanguageLabels.Group(original.Name, GivenName(original.Value)));
+            if (seen.Add(original.Name))
+            {
+                found.Add(new DownloadSubtitle(original.Name, LanguageLabels.ForCaption(original.Name, GivenName(original.Value), true), true));
             }
         }
 
-        if (chosen is { } original && seen.Add(original.Name))
+        var winners = new Dictionary<string, JsonProperty>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in rest)
         {
-            found.Add(new DownloadSubtitle(original.Name, AutomaticLabel(original.Name, original.Value), true));
+            var group = LanguageLabels.Group(entry.Name, GivenName(entry.Value));
+            if (groups.Contains(group))
+            {
+                continue;
+            }
+
+            if (!winners.TryGetValue(group, out var current) || PrefersCaption(entry, current))
+            {
+                winners[group] = entry;
+            }
         }
+
+        foreach (var entry in winners.Values
+            .Select(entry => (Entry: entry, Label: LanguageLabels.ForCaption(entry.Name, GivenName(entry.Value), true)))
+            .OrderBy(item => item.Label, StringComparer.InvariantCultureIgnoreCase))
+        {
+            if (!seen.Add(entry.Entry.Name))
+            {
+                continue;
+            }
+
+            found.Add(new DownloadSubtitle(entry.Entry.Name, entry.Label, true, IsForeignTranslation(entry.Entry.Value)));
+        }
+    }
+
+    private static bool PrefersCaption(JsonProperty candidate, JsonProperty current)
+    {
+        var candidateTranslated = IsForeignTranslation(candidate.Value);
+        var currentTranslated = IsForeignTranslation(current.Value);
+        if (candidateTranslated != currentTranslated)
+        {
+            return !candidateTranslated;
+        }
+
+        var group = LanguageLabels.Group(candidate.Name, GivenName(candidate.Value));
+        var candidateBase = candidate.Name.Equals(group, StringComparison.OrdinalIgnoreCase);
+        var currentBase = current.Name.Equals(group, StringComparison.OrdinalIgnoreCase);
+        return candidateBase && !currentBase;
+    }
+
+    private static void AddSubtitleRequest(List<string> arguments, DownloadSubtitle subtitle)
+    {
+        if (subtitle.Translated)
+        {
+            arguments.Add("--sleep-subtitles");
+            arguments.Add(TranslatedSubtitleDelaySeconds.ToString(CultureInfo.InvariantCulture));
+        }
+
+        arguments.Add(subtitle.Automatic ? "--write-auto-subs" : "--write-subs");
+        arguments.Add("--sub-langs");
+        arguments.Add(subtitle.Language!);
     }
 
     private static bool IsSpokenAutomatic(string code, string? videoLanguage, JsonElement formats)
@@ -418,18 +833,25 @@ internal static class YoutubeDownloader
         => code.Equals(videoLanguage, StringComparison.OrdinalIgnoreCase)
             || code.Split('-')[0].Equals(videoLanguage.Split('-')[0], StringComparison.OrdinalIgnoreCase);
 
-    private static string AutomaticLabel(string code, JsonElement formats)
+    private static string? GivenName(JsonElement formats)
     {
-        var name = LanguageName(code, formats);
-        foreach (var suffix in new[] { " (original)", " (auto-generated)", " (automatic)" })
+        if (formats.ValueKind != JsonValueKind.Array)
         {
-            if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-            {
-                name = name[..^suffix.Length];
-            }
+            return null;
         }
 
-        return name.Trim() + " · Automatic";
+        foreach (var format in formats.EnumerateArray())
+        {
+            var given = Text(format, "name");
+            if (string.IsNullOrWhiteSpace(given) || given.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return given;
+        }
+
+        return null;
     }
 
     private static string? QueryValue(string url, string key)
@@ -450,45 +872,6 @@ internal static class YoutubeDownloader
         }
 
         return null;
-    }
-
-    private static string LanguageName(string code, JsonElement formats)
-    {
-        if (formats.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var format in formats.EnumerateArray())
-            {
-                var given = Text(format, "name");
-                if (!string.IsNullOrWhiteSpace(given))
-                {
-                    return given;
-                }
-            }
-        }
-
-        var baseCode = code.Split('-')[0];
-        var known = baseCode.ToLowerInvariant() switch
-        {
-            "en" => "English",
-            "tr" => "Turkish",
-            "de" => "German",
-            "fr" => "French",
-            "es" => "Spanish",
-            "it" => "Italian",
-            "pt" => "Portuguese",
-            "ru" => "Russian",
-            "ar" => "Arabic",
-            "ja" => "Japanese",
-            "ko" => "Korean",
-            "zh" => "Chinese",
-            "hi" => "Hindi",
-            "nl" => "Dutch",
-            "pl" => "Polish",
-            "sv" => "Swedish",
-            "uk" => "Ukrainian",
-            _ => code
-        };
-        return code.Contains("orig", StringComparison.OrdinalIgnoreCase) ? known + " (original)" : known;
     }
 
     private static async Task<string> EnsureYtDlpAsync(IProgress<string>? status, CancellationToken cancellationToken)
@@ -628,6 +1011,137 @@ internal static class YoutubeDownloader
 
     private static string? Text(JsonElement element, string name)
         => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private readonly record struct PlayCandidate(int Height, int Rank, double Score, Uri Address, bool Video, bool Audio, bool Fragmented);
+
+    private static bool IsFragmented(JsonElement format)
+    {
+        var protocol = Text(format, "protocol");
+        var container = Text(format, "container");
+        if (protocol?.Contains("dash", StringComparison.OrdinalIgnoreCase) == true
+            || container?.Contains("dash", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+
+        return format.TryGetProperty("init_range", out var range) && range.ValueKind == JsonValueKind.Object;
+    }
+
+    private static PlayCandidate? Best(IEnumerable<PlayCandidate> items)
+    {
+        PlayCandidate? best = null;
+        foreach (var item in items)
+        {
+            if (best is not PlayCandidate current
+                || item.Height > current.Height
+                || (item.Height == current.Height && (item.Rank > current.Rank || (item.Rank == current.Rank && item.Score > current.Score))))
+            {
+                best = item;
+            }
+        }
+
+        return best;
+    }
+
+    private static bool IsStoryboard(JsonElement format)
+        => Text(format, "format_note")?.Contains("storyboard", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsImage(JsonElement format)
+    {
+        var codec = Text(format, "vcodec");
+        var extension = Text(format, "ext");
+        return codec?.Equals("images", StringComparison.OrdinalIgnoreCase) == true
+            || extension is "jpg" or "jpeg" or "png" or "webp" or "mhtml";
+    }
+
+    private static bool HasCodec(string? codec)
+        => !string.IsNullOrEmpty(codec) && !codec.Equals("none", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDrm(JsonElement format)
+    {
+        if (format.TryGetProperty("has_drm", out var flag))
+        {
+            if (flag.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (flag.ValueKind == JsonValueKind.Number && flag.TryGetInt32(out var number) && number != 0)
+            {
+                return true;
+            }
+        }
+
+        return Text(format, "protocol")?.Contains("drm", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static Uri? PlayableAddress(JsonElement format)
+    {
+        var protocol = Text(format, "protocol");
+        var extension = Text(format, "ext");
+        var manifest = Text(format, "manifest_url");
+        var direct = Text(format, "url");
+        var hls = protocol?.Contains("m3u8", StringComparison.OrdinalIgnoreCase) == true
+            || extension?.Equals("m3u8", StringComparison.OrdinalIgnoreCase) == true;
+        var chosen = hls && !string.IsNullOrWhiteSpace(manifest) ? manifest : direct;
+        if (string.IsNullOrWhiteSpace(chosen))
+        {
+            chosen = manifest ?? direct;
+        }
+
+        if (string.IsNullOrWhiteSpace(chosen) || !Uri.TryCreate(chosen, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        return uri.Scheme is "http" or "https" ? uri : null;
+    }
+
+    private static bool MentionsDrm(string message)
+        => message.Contains("DRM", StringComparison.OrdinalIgnoreCase);
+
+    private static string JsonBody(string output)
+    {
+        var start = output.IndexOf('{');
+        var end = output.LastIndexOf('}');
+        return start >= 0 && end > start ? output[start..(end + 1)] : output;
+    }
+
+    private static string PageSubtitlePath(string pageUrl, string language)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(pageUrl + "\n" + language))).ToLowerInvariant();
+        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersonalMediaPlayer", "subtitle-cache");
+        return Path.Combine(folder, "page-" + hash + ".vtt");
+    }
+
+    private static string? StoreSubtitle(string folder, string cache)
+    {
+        if (!Directory.Exists(folder))
+        {
+            return null;
+        }
+
+        var produced = Directory.EnumerateFiles(folder)
+            .Where(path => path.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
+            .Select(path => new FileInfo(path))
+            .Where(info => info.Length > 0)
+            .OrderByDescending(info => info.Extension.Equals(".vtt", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(info => info.Length)
+            .FirstOrDefault();
+        if (produced is null)
+        {
+            return null;
+        }
+
+        var directory = Path.GetDirectoryName(cache);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.Copy(produced.FullName, cache, overwrite: true);
+        return cache;
+    }
 
     private static int FormatRank(string? protocol, string? extension, string? codec, bool hasAudio)
     {

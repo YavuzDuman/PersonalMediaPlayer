@@ -7,12 +7,23 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="LibVLCSharp" Version="3.10.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\YoutubeDownloader.cs" Link="YoutubeDownloader.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleCues.cs" Link="SubtitleCues.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleEdit.cs" Link="SubtitleEdit.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SavedWords.cs" Link="SavedWords.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamLink.cs" Link="StreamLink.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackProgress.cs" Link="PlaybackProgress.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamRetry.cs" Link="StreamRetry.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamHandoff.cs" Link="StreamHandoff.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\HlsMaster.cs" Link="HlsMaster.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\LanguageLabels.cs" Link="LanguageLabels.cs" />
   </ItemGroup>
 </Project>

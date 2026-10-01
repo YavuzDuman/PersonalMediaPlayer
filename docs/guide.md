@@ -1,6 +1,6 @@
 # Using Personal Media Player
 
-The window has six places: **Library**, **Recordings**, **Download**, **Merge**, **Capture**, and **Settings**.
+The window has eight places: **Library**, **Playlists**, **Saved words**, **Recordings**, **Download**, **Merge**, **Capture**, and **Settings**.
 
 Your files live under `%LocalAppData%\PersonalMediaPlayer\Library`. Settings can open that folder. Import copies a file into the library, so later changes to the original on disk do not change the copy.
 
@@ -32,7 +32,27 @@ Search matches the name, the type, the album, and text previously read from a sc
 
 **Slideshow** plays the photos in the current view, starting from the selected photo. Left and Right change the photo. Esc leaves the slideshow.
 
+**Continue watching** appears above the folders when a video was left in the middle. A place is kept after 5 seconds, and it is dropped in the last 10 seconds or when the video ends. Up to 16 items are shown, newest first. A library file opens at that time. A stream that came from a page is looked up again and continues when that stream can seek. Renaming a library video or a recording keeps its place.
+
+**Open link** asks for an `http` or `https` address that is already the video. The app checks the response, then plays it. The address can leave off a file ending. A web page shows an error and Library stays open. The video is played here and is kept out of the library. While the check runs, the page says **Checking the link…**, and the rest of the window still accepts input.
+
 Deleting from All media, Photos, Videos, This month, Screenshots, Recordings, or Duplicates moves the file to Recently deleted. Deleting from an album you created only removes it from that album. Restore and permanent delete are on the Recently deleted page. Items older than 7 days are removed on the next launch.
+
+## Playlists
+
+Playlists collect library videos and play them in order. Type a name and press **Create**, then **Add videos**. The picker hides videos already in that list, and you can select several. **Play** starts the first one. **Rename** and **Delete** apply to the list. Removing a video takes it out of the list and leaves the file in the library.
+
+Each row can move up, move down, or leave the list. A file that is gone says **Not on this PC**.
+
+Opening a playlist video shows the rest beside the player: **Previous**, **Next**, and **Play the next video when this one ends**. That switch stays off until you turn it on. Clicking a row switches video without leaving the player. Renaming a library video, a recording, or a saved download keeps it in the playlist.
+
+## Saved words
+
+Click a caption word. A card shows the English word or phrase, the Turkish meaning, and the sentence. The small hover tip still hides when the pointer leaves. The card stays until **Close** or a click outside it. Playback continues.
+
+**Save** stores the word on this PC, with the video, the cue time, and the audio and caption languages selected at that moment. Opening the word later goes to the same moment and restores those languages. A word saved on a stream stores the page, or the direct video address, and opens that address again. On the same page, choosing the word seeks there. A stream that cannot seek shows **This stream cannot seek.**
+
+The **Saved words** page lists one word per line, grouped by video. The columns are the word, the Turkish meaning, the sentence, and the time. Search matches the English word and the Turkish meaning. Click a word to open its video. The list stays open beside the player, and the matching word is highlighted. Remove asks first. A word saved before it had a place stays in the list. Saving it again while that video is open fills in the place and time. A missing file stays listed. **Words** on the player opens the same list beside the video.
 
 ## Photos
 
@@ -44,7 +64,7 @@ Open a photo to mark it. The tools sit under the picture: pen, highlight, arrow,
 
 ## Videos
 
-The player, a recording preview, a download preview, and Merge use the same bar: time, timeline, mute, volume, skip 10 seconds, play, and, where it applies, speed and full screen. The listening volume is remembered on this PC. Mute is remembered too. That level is only what you hear. It is not written into a saved file.
+The player, a recording preview, a download preview, and Merge use the same bar: time, timeline, mute, volume, skip 10 seconds, play, and full screen where that page has it. The gear just left of full screen is **Playback**. It holds speed. On the player it also holds quality, audio language, captions, and section repeat. Editor and Merge keep speed on their own tools, so the gear stays hidden there. `F` toggles full screen on the player when the cursor is outside a text box. The listening volume is remembered on this PC. Mute is remembered too. That level is only what you hear. It is not written into a saved file.
 
 Hover the timeline to see a small frame and the time under the pointer. Playback stays where it is until you click or drag.
 
@@ -52,7 +72,11 @@ Hover the timeline to see a small frame and the time under the pointer. Playback
 
 The player resumes a video that was left in the middle, and it can play again after the end. **Trim** on the player drags the ends of the timeline, previews that span, and saves a new file at the source size. The camera button saves a still of the current moment and opens it as a screenshot preview. **Restore original** is available after an overwrite that replaced the video.
 
-**CC** appears on the bar, to the left of speed, when the video has captions. It is on the download preview and on a saved video. The words sit above the bar. **CC** hides them, and shows them again. One caption track toggles. More than one opens a list. Playback does not pause. A subtitle file sitting next to the video is not painted as a second track.
+**CC** is inside the gear when the video has captions. It is on the download preview and on a saved video. The words sit above the bar. **CC** hides them, and shows them again. One caption track toggles. More than one opens a list. Playback does not pause. A subtitle file sitting next to the video is not painted as a second track.
+
+Uploaded captions are listed first. YouTube automatic captions follow, including translations, with one English name for each language. A translation can take about a minute the first time you choose it. A caption already stored on this PC opens immediately. Audio names in the gear are English as well. An original track and a dubbed track keep that word.
+
+**Start** and **End** in the gear mark a section, and playback loops between them. The marks need at least 0.4 seconds between them. **Clear** removes the loop.
 
 Hover a word for its Turkish meaning. The meaning sits just above that word. If the words around it are a known phrase, such as “of course” or “a little”, the phrase meaning is shown. “can't” and “I've” are looked up with the apostrophe still in the word. A word ending in “-ing”, such as “using”, follows the base word when that base is at least three letters. The word list and the phrase list are stored in the app. Hovering does not use the internet, and it does not send the subtitle anywhere.
 
@@ -80,11 +104,35 @@ The volume slider on the bar is only for listening. **Sound** is what Save write
 
 **Save** asks for a new file or an overwrite. Overwrite keeps the previous file with your other originals, and bookmarks move onto the new times. A mark inside a removed span is dropped. Save as new names the copy from the changes you made: speed, loudness, rotation, flips, fades, `crop`, `trim`, and `cut`, in that order. A second copy of the same name is `2`, then `3`. Cancel, or leaving with unsaved changes, asks you to stay or leave. Closing the window asks the same question. A save that is still running keeps the window open until it finishes.
 
+Save keeps the first caption track. Trim, cut, and speed move the cue times with the picture. Fade, crop, and rotate leave the cue times where they are. The captions are written back into the saved MP4. A video with no captions is unchanged. If that caption step cannot finish, the picture is still saved.
+
+## Watch a link
+
+**Open link** on Library plays a direct video address after the check described above. The browser can send a page into the same player.
+
+`extension/` is a Chrome and Edge package. Load that folder unpacked. It is left out of the app build. The toolbar action is **Open in Personal Media Player**.
+
+| Page | What opens |
+| --- | --- |
+| One direct video | That file. Playback starts at the current time when the stream can seek |
+| Several direct videos | A picker, then the video you choose |
+| A tab that is itself a video file | That address |
+| A page that hides the file, such as YouTube | The page is resolved and played as a stream. The window says **Opening…** |
+| Nothing the app can play | The action stays off, titled **This page has no direct video file yet.** |
+
+The app keeps one window. A second open uses that window. A page that needs a license shows **This video is protected by a license and stays in the browser.** The extension asks only for the tab address.
+
+On a stream, **Edit**, **Trim**, **Restore original**, the still-frame button, and **Playlist** are hidden. **Words** stays. Bookmarks and **Save a copy** appear when the stream was opened from a page. **Save a copy** adds that page to the Download queue and leaves the stream playing. The download starts when Download is opened. A stream that cannot seek keeps play, pause, volume, speed, and full screen, and leaves the timeline and section repeat off. The line under the title says **Streaming**, or **Streaming. This video cannot seek.** Reaching the end and pressing play looks a page up again. A direct file is checked again and starts from the beginning.
+
+Playback settings on a resolved stream can change quality and audio language. Captions for that page use the same list as Download.
+
 ## Download
 
 Paste a YouTube, Shorts, `youtu.be`, or YouTube Music link and press **Look up**. The page lists each quality with its size. An estimate is marked **about**. **Audio only** is included when the clip has a separate audio track. **Add to queue** stays off until the text in the box matches the looked-up link exactly, including capital letters.
 
-When the video has subtitles, Look up asks whether to include one. The list has the uploaded languages and, when YouTube has it, the original-language automatic caption. That automatic choice is marked **Automatic**. Translated automatic languages are not listed. **No subtitles** leaves them out. An audio-only download does not embed subtitles. The preview and the saved video use the same **CC** button and the same hover meanings as the player.
+A playlist address, or a link that has `list=` and no video id, lists up to 200 episodes. Check the ones to add and pick one quality for all of them: Best available, 1080p, 720p, 480p, 360p, or Audio only. **Add to queue** puts each chosen episode on its own. Captions are chosen on a single video. A normal watch link stays one video, including a watch link that also carries `list=`.
+
+When a single video has subtitles, Look up asks whether to include one. Uploaded captions come first, then YouTube’s automatic captions, including translations, with one English name per language. A translation can take about a minute. **No subtitles** leaves them out. An audio-only download stays without subtitles. The preview and the saved video use the same **CC** control and the same hover meanings as the player.
 
 The queue downloads one item at a time. Each row shows waiting, a download percentage, paused, ready, failed, or cancelled.
 
@@ -112,7 +160,7 @@ Each clip is a numbered row and a block on the bar. A wider block is a longer so
 
 The preview on the left plays the kept parts in order. The slider under the picture covers the whole joined length. Seeking and the 10-second skips stay inside those kept parts, and a paused preview stays paused. A fade out at the end of one clip meets the fade in at the start of the next. Picture and sound fades are separate, from 0.1 to 10 seconds.
 
-**Merge** asks for a name and a place. **A folder in this app** puts the MP4 in Library, in an album you already have, or in a new album. **A folder on this PC** opens the system save dialog. The clips you picked stay where they are. Picture and sound are joined clip by clip at the same frame size, 30 frames a second, with stereo sound. A clip with no audio gets silence for its kept length so the next clip still starts on time.
+**Merge** asks for a name and a place. **A folder in this app** puts the MP4 in Library, in an album you already have, or in a new album. **A folder on this PC** opens the system save dialog. The clips you picked stay where they are. Picture and sound are joined clip by clip at the same frame size, 30 frames a second, with stereo sound. A clip with no audio gets silence for its kept length so the next clip still starts on time. The first caption track of each clip is kept. Its cue times follow that clip’s in and out points, then those captions are joined in order and written into the saved MP4.
 
 Leaving Merge before the video is saved asks you to **Save**, **Discard**, or **Stay**. Closing the window asks the same question. If a join is already running, the choice is **Stay** or **Discard**.
 

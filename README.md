@@ -34,6 +34,8 @@ flowchart LR
   subgraph shell [Shell]
     direction TB
     Library
+    Playlists
+    Words[Saved words]
     Recordings
     Download
     Merge
@@ -42,8 +44,12 @@ flowchart LR
   end
 
   Library --> Views[Albums and smart views]
+  Library --> Link[Open a direct link]
   Views --> Photo[Photo preview]
   Views --> Player[Video player]
+  Link --> Player
+  Playlists --> Player
+  Words --> Player
   Player --> Editor[Video editor]
   Capture --> Shot[Screenshot preview]
   Recordings --> Take[Recording preview]
@@ -60,13 +66,15 @@ flowchart LR
 
 | Area | What you do there |
 | --- | --- |
-| **Library** | Import, search, album, favorite, slideshow, and find duplicate files |
+| **Library** | Import, search, album, favorite, slideshow, continue a video you left, open a direct link, and find duplicate files |
+| **Playlists** | Collect library videos and play them in order |
+| **Saved words** | Open a caption word you saved, at that moment, with the audio and captions from then |
 | **Photos** | Draw, blur, crop, rotate, compare with the original, and read a selected area |
-| **Videos** | Play, hover the timeline for a frame, bookmark, resume, trim, edit, grab a still, and hover caption words for a Turkish meaning |
-| **Merge** | Order clips, trim and fade each one, preview the sequence, and save one video |
+| **Videos** | Play a file or a stream, hover the timeline for a frame, bookmark, resume, trim, edit, grab a still, and save caption words with a Turkish meaning |
+| **Merge** | Order clips, trim and fade each one, preview the sequence, and save one video. The first caption track comes along |
 | **Capture** | Shoot an area, window, monitor, every display, or turn a text file into an image |
 | **Recordings** | Record a monitor, a window, or a rectangle, with optional speaker audio |
-| **Download** | Queue YouTube, Shorts, and music links, choose an uploaded subtitle or the original automatic caption, preview, then save into the library or any PC folder |
+| **Download** | Queue a YouTube video or the playlist episodes you check, choose an uploaded subtitle or an automatic caption, preview, then save into the library or any PC folder |
 | **Settings** | Theme, library folder, screenshot delay, cursor, and the shortcut list |
 
 Details for each screen are in the [user guide](docs/guide.md).
@@ -99,12 +107,14 @@ Search covers the name, the type, the album, and words read from a screenshot. A
 | --- | --- | --- |
 | Pen, arrow, rectangle, text, blur, crop | Shared control bar on the picture | Area, window, monitor, all displays, fullscreen |
 | Read the whole shot, or only the box you drag | Hover shows a frame and a time. Click or drag seeks | Text file drawn as one tall image |
-| Slider compares the original and the saved file | Bookmarks, resume, replay, captions with hover meanings, and an editor for speed, sound, rotate, fade, crop, trim, and cuts | Speaker audio on a recording. No microphone |
+| Slider compares the original and the saved file | Bookmarks, resume, replay, captions with hover meanings, playback settings for quality, audio, and a repeated section, and an editor for speed, sound, rotate, fade, crop, trim, and cuts | Speaker audio on a recording. No microphone |
 | Restore puts the backup back | Still frame of the current moment | Shortcuts work while the app is in the background |
 
 </div>
 
 Leaving a screenshot, a marked photo, a trimmed video, an open video edit, an unsaved recording, an unfinished download, or an unsaved merge asks you to stay or leave before the page changes. Closing the window with X asks the same question when that work is still open.
+
+**Open link** on Library plays a direct video address and leaves the library unchanged. The unpacked extension in `extension/` can send a page video, or a page such as YouTube, into that same player. **Save a copy** queues the page on Download and leaves the stream playing. A video that needs a license stays in the browser. Load the extension unpacked in Chrome or Edge. The app build does not include it.
 
 ## Screenshot shortcuts
 

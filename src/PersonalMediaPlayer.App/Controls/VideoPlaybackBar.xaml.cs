@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using PersonalMediaPlayer.App.Editing;
+using Windows.Foundation;
 using Windows.System;
 
 namespace PersonalMediaPlayer.App.Controls;
@@ -42,12 +43,42 @@ public sealed partial class VideoPlaybackBar : UserControl
     private MediaPlayer? _subtitlePlayer;
     private int _subtitleTrack = -1;
     private bool _subtitlesOn = true;
+    private List<(int Id, string Name)>? _captionChoices;
+    private int _announcedCaption = int.MinValue;
     private bool _timelineZoom;
     private bool _layingZoom;
+    private bool _sectionRepeat;
+    private double? _markA;
+    private double? _markB;
+    private bool _suppressSettingsOpen;
+    private int _openLists;
+    private bool _fillingChoices;
+
+    public event EventHandler? SectionARequested;
+
+    public event EventHandler? SectionBRequested;
+
+    public event EventHandler? SectionClearRequested;
 
     public VideoPlaybackBar()
     {
         InitializeComponent();
+        SpeedCombo.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => UpdateSettingsButton());
+        SettingsButton.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(Settings_Pressed), true);
+        SettingsButton.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(Settings_Released), true);
+        SettingsButton.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(Settings_Canceled), true);
+        WatchCombo(SpeedCombo);
+        WatchCombo(QualityCombo);
+        WatchCombo(AudioCombo);
+        WatchCombo(CaptionCombo);
+        SettingsPopup.Closed += (_, _) =>
+        {
+            if (_openLists > 0)
+            {
+                SettingsPopup.IsOpen = true;
+            }
+        };
+        UpdateSettingsButton();
         _hoverTimer.Tick += (_, _) =>
         {
             _hoverTimer.Stop();
@@ -60,14 +91,132 @@ public sealed partial class VideoPlaybackBar : UserControl
             TimelineHost.AddHandler(PointerReleasedEvent, new PointerEventHandler(Timeline_Released), true);
             TimelineHost.AddHandler(PointerExitedEvent, new PointerEventHandler(Timeline_Exited), true);
             TimelineHost.AddHandler(PointerCanceledEvent, new PointerEventHandler(Timeline_Released), true);
-            TimelineHost.SizeChanged += (_, _) => DrawRemovedFractions();
+            TimelineHost.SizeChanged += (_, _) =>
+            {
+                DrawRemovedFractions();
+                ArrangeRepeat();
+            };
             TimelineScroll.AddHandler(PointerWheelChangedEvent, new PointerEventHandler(TimelineScroll_Wheel), true);
         };
         Unloaded += (_, _) =>
         {
             _hoverTimer.Stop();
             _thumbs.Dispose();
+            CloseSettings();
         };
+    }
+
+    private void Settings_Pressed(object sender, PointerRoutedEventArgs e)
+    {
+        _suppressSettingsOpen = SettingsPopup.IsOpen;
+    }
+
+    private void Settings_Released(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(SettingsButton).Position;
+        var onButton = point.X >= 0 && point.Y >= 0
+            && point.X <= SettingsButton.ActualWidth
+            && point.Y <= SettingsButton.ActualHeight;
+        if (!onButton)
+        {
+            _suppressSettingsOpen = false;
+        }
+    }
+
+    private void Settings_Canceled(object sender, PointerRoutedEventArgs e) => _suppressSettingsOpen = false;
+
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingsOpen)
+        {
+            _suppressSettingsOpen = false;
+            SettingsPopup.IsOpen = false;
+            return;
+        }
+
+        if (SettingsPopup.IsOpen)
+        {
+            SettingsPopup.IsOpen = false;
+            return;
+        }
+
+        OpenSettings();
+    }
+
+    public void CloseSettings()
+    {
+        _suppressSettingsOpen = false;
+        _openLists = 0;
+        SettingsPopup.IsLightDismissEnabled = true;
+        SettingsPopup.IsOpen = false;
+    }
+
+    private void OpenSettings()
+    {
+        PlaceSettings();
+        SettingsPopup.IsOpen = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (SettingsPopup.IsOpen)
+            {
+                PlaceSettings();
+            }
+        });
+    }
+
+    private void PlaceSettings()
+    {
+        SettingsCard.Measure(new Size(320, 800));
+        var width = SettingsCard.ActualWidth > 1 ? SettingsCard.ActualWidth : SettingsCard.DesiredSize.Width;
+        var height = SettingsCard.ActualHeight > 1 ? SettingsCard.ActualHeight : SettingsCard.DesiredSize.Height;
+        if (width <= 1)
+        {
+            width = 300;
+        }
+
+        if (height <= 1)
+        {
+            height = 280;
+        }
+
+        var origin = SettingsButton.TransformToVisual(this).TransformPoint(new Point(0, 0));
+        var buttonWidth = SettingsButton.ActualWidth > 1 ? SettingsButton.ActualWidth : 44;
+        SettingsPopup.HorizontalOffset = Math.Max(0, origin.X + buttonWidth - width);
+        SettingsPopup.VerticalOffset = origin.Y - height - 8;
+    }
+
+    private void WatchCombo(ComboBox combo)
+    {
+        combo.DropDownOpened += (_, _) =>
+        {
+            _openLists++;
+            SettingsPopup.IsLightDismissEnabled = false;
+        };
+        combo.DropDownClosed += (_, _) =>
+        {
+            _openLists = Math.Max(0, _openLists - 1);
+            if (_openLists == 0)
+            {
+                SettingsPopup.IsLightDismissEnabled = true;
+            }
+        };
+    }
+
+    private void UpdateSettingsButton()
+    {
+        var speed = SpeedCombo.Visibility == Visibility.Visible;
+        var captions = SubtitleButton.Visibility == Visibility.Visible || CaptionCombo.Visibility == Visibility.Visible;
+        var repeat = RepeatButtons.Visibility == Visibility.Visible;
+        CaptionRow.Visibility = captions ? Visibility.Visible : Visibility.Collapsed;
+        SpeedRow.Visibility = speed ? Visibility.Visible : Visibility.Collapsed;
+        var quality = QualityRow.Visibility == Visibility.Visible;
+        var audio = AudioRow.Visibility == Visibility.Visible;
+        var available = speed || captions || repeat || quality || audio;
+        SettingsButton.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+        if (!available)
+        {
+            CloseSettings();
+        }
     }
 
     public void UseSubtitles(MediaPlayer player)
@@ -80,7 +229,10 @@ public sealed partial class VideoPlaybackBar : UserControl
     {
         _subtitlePlayer = null;
         _subtitleTrack = -1;
+        _captionChoices = null;
+        _announcedCaption = int.MinValue;
         SubtitleButton.Visibility = Visibility.Collapsed;
+        UpdateSettingsButton();
     }
 
     private void Subtitle_Click(object sender, RoutedEventArgs e)
@@ -109,6 +261,8 @@ public sealed partial class VideoPlaybackBar : UserControl
                 menu.Items.Add(item);
             }
 
+            SettingsPopup.IsLightDismissEnabled = false;
+            menu.Closed += (_, _) => SettingsPopup.IsLightDismissEnabled = true;
             menu.ShowAt(SubtitleButton);
             return;
         }
@@ -120,9 +274,11 @@ public sealed partial class VideoPlaybackBar : UserControl
     private void ApplySubtitles()
     {
         var tracks = SubtitleTracks();
-        if (_subtitlePlayer is null || tracks.Count == 0)
+        if (tracks.Count == 0 || (_subtitlePlayer is null && _captionChoices is null))
         {
             SubtitleButton.Visibility = Visibility.Collapsed;
+            CaptionCombo.Visibility = Visibility.Collapsed;
+            UpdateSettingsButton();
             return;
         }
 
@@ -131,36 +287,249 @@ public sealed partial class VideoPlaybackBar : UserControl
             _subtitleTrack = tracks[0].Id;
         }
 
-        SubtitleButton.Visibility = Visibility.Visible;
         var selected = tracks.First(track => track.Id == _subtitleTrack);
         var name = string.IsNullOrWhiteSpace(selected.Name) ? "Subtitles" : selected.Name;
-        SubtitleText.Text = _subtitlesOn ? "CC" : "Off";
-        SubtitleButton.Opacity = _subtitlesOn ? 1 : 0.45;
-        ToolTipService.SetToolTip(SubtitleButton, _subtitlesOn ? $"Hide {name}" : tracks.Count > 1 ? "Choose subtitles" : $"Show {name}");
-        _subtitlePlayer.SetSpu(-1);
+        if (_captionChoices is { Count: > 0 })
+        {
+            ShowCaptionCombo(tracks);
+            SubtitleButton.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            CaptionCombo.Visibility = Visibility.Collapsed;
+            SubtitleButton.Visibility = Visibility.Visible;
+            SubtitleText.Text = _subtitlesOn ? "CC" : "Off";
+            SubtitleButton.Opacity = _subtitlesOn ? 1 : 0.45;
+            ToolTipService.SetToolTip(SubtitleButton, _subtitlesOn ? $"Hide {name}" : tracks.Count > 1 ? "Choose subtitles" : $"Show {name}");
+        }
+
+        _subtitlePlayer?.SetSpu(-1);
         SubtitlesChanged?.Invoke(this, _subtitlesOn);
+        AnnounceCaption();
+        UpdateSettingsButton();
     }
 
+    public event EventHandler<int>? QualityChosen;
+
+    public event EventHandler<int>? AudioChosen;
+
+    public void OfferQualityChoices(IReadOnlyList<string> labels, int selectedIndex)
+        => FillChoice(QualityCombo, QualityRow, labels, selectedIndex);
+
+    public void OfferAudioChoices(IReadOnlyList<string> labels, int selectedIndex)
+        => FillChoice(AudioCombo, AudioRow, labels, selectedIndex);
+
+    public void ClearQualityChoices() => ClearChoice(QualityCombo, QualityRow);
+
+    public void ClearAudioChoices() => ClearChoice(AudioCombo, AudioRow);
+
     public event EventHandler<bool>? SubtitlesChanged;
+
+    public event EventHandler<int>? CaptionChosen;
 
     public void OfferCaptions()
     {
         _subtitlesOn = true;
+        CaptionCombo.Visibility = Visibility.Collapsed;
         SubtitleButton.Visibility = Visibility.Visible;
         SubtitleText.Text = "CC";
         SubtitleButton.Opacity = 1;
         ToolTipService.SetToolTip(SubtitleButton, "Hide subtitles");
         SubtitlesChanged?.Invoke(this, true);
+        UpdateSettingsButton();
+    }
+
+    public void ClearHoverCaptions()
+    {
+        _captionChoices = null;
+        _announcedCaption = int.MinValue;
+        ApplySubtitles();
+    }
+
+    public void OfferCaptionChoices(IReadOnlyList<string> names, int selectedIndex = 0)
+    {
+        var choices = new List<(int Id, string Name)>();
+        for (var index = 0; index < names.Count; index++)
+        {
+            var name = string.IsNullOrWhiteSpace(names[index]) ? "Subtitles" : names[index];
+            choices.Add((index, name));
+        }
+
+        _captionChoices = choices.Count == 0 ? null : choices;
+        _announcedCaption = int.MinValue;
+        _subtitleTrack = choices.Count == 0 ? -1 : Math.Clamp(selectedIndex, 0, choices.Count - 1);
+        _subtitlesOn = choices.Count > 0;
+        ApplySubtitles();
+    }
+
+    private void AnnounceCaption()
+    {
+        if (_captionChoices is null)
+        {
+            return;
+        }
+
+        var chosen = _subtitlesOn ? _subtitleTrack : -1;
+        if (chosen == _announcedCaption)
+        {
+            return;
+        }
+
+        _announcedCaption = chosen;
+        CaptionChosen?.Invoke(this, chosen);
     }
 
     private List<(int Id, string Name)> SubtitleTracks()
     {
+        if (_captionChoices is { Count: > 0 })
+        {
+            return _captionChoices;
+        }
+
         if (_subtitlePlayer is null)
         {
             return [];
         }
 
         return _subtitlePlayer.SpuDescription.Where(track => track.Id >= 0).Select(track => (track.Id, track.Name ?? string.Empty)).ToList();
+    }
+
+    private void QualityCombo_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingChoices || QualityCombo.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        QualityChosen?.Invoke(this, QualityCombo.SelectedIndex);
+    }
+
+    private void AudioCombo_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingChoices || AudioCombo.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        AudioChosen?.Invoke(this, AudioCombo.SelectedIndex);
+    }
+
+    private void CaptionCombo_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingChoices || CaptionCombo.SelectedIndex < 0 || _captionChoices is null)
+        {
+            return;
+        }
+
+        if (CaptionCombo.SelectedIndex == 0)
+        {
+            _subtitlesOn = false;
+        }
+        else
+        {
+            var tracks = SubtitleTracks();
+            var index = CaptionCombo.SelectedIndex - 1;
+            if (index < 0 || index >= tracks.Count)
+            {
+                return;
+            }
+
+            _subtitleTrack = tracks[index].Id;
+            _subtitlesOn = true;
+        }
+
+        ApplySubtitles();
+    }
+
+    private void ShowCaptionCombo(List<(int Id, string Name)> tracks)
+    {
+        var labels = new List<string> { "Off" };
+        foreach (var track in tracks)
+        {
+            labels.Add(string.IsNullOrWhiteSpace(track.Name) ? "Subtitles" : track.Name);
+        }
+
+        var selected = 0;
+        if (_subtitlesOn)
+        {
+            var index = tracks.FindIndex(track => track.Id == _subtitleTrack);
+            selected = index < 0 ? 1 : index + 1;
+        }
+
+        if (SameLabels(CaptionCombo, labels) && CaptionCombo.SelectedIndex == selected && CaptionCombo.Visibility == Visibility.Visible)
+        {
+            return;
+        }
+
+        _fillingChoices = true;
+        CaptionCombo.Items.Clear();
+        foreach (var label in labels)
+        {
+            CaptionCombo.Items.Add(label);
+        }
+
+        CaptionCombo.SelectedIndex = selected;
+        CaptionCombo.Visibility = Visibility.Visible;
+        _fillingChoices = false;
+    }
+
+    private void FillChoice(ComboBox combo, StackPanel row, IReadOnlyList<string> labels, int selectedIndex)
+    {
+        if (labels.Count == 0)
+        {
+            ClearChoice(combo, row);
+            return;
+        }
+
+        var selected = Math.Clamp(selectedIndex, 0, labels.Count - 1);
+        if (SameLabels(combo, labels) && combo.SelectedIndex == selected && row.Visibility == Visibility.Visible)
+        {
+            return;
+        }
+
+        _fillingChoices = true;
+        combo.Items.Clear();
+        foreach (var label in labels)
+        {
+            combo.Items.Add(label);
+        }
+
+        combo.SelectedIndex = selected;
+        row.Visibility = Visibility.Visible;
+        _fillingChoices = false;
+        UpdateSettingsButton();
+    }
+
+    private void ClearChoice(ComboBox combo, StackPanel row)
+    {
+        if (combo.Items.Count == 0 && row.Visibility == Visibility.Collapsed)
+        {
+            return;
+        }
+
+        _fillingChoices = true;
+        combo.Items.Clear();
+        row.Visibility = Visibility.Collapsed;
+        _fillingChoices = false;
+        UpdateSettingsButton();
+    }
+
+    private static bool SameLabels(ComboBox combo, IReadOnlyList<string> labels)
+    {
+        if (combo.Items.Count != labels.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < labels.Count; i++)
+        {
+            if (!string.Equals(combo.Items[i] as string, labels[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public void UseTimelineZoom(bool enabled)
@@ -240,6 +609,96 @@ public sealed partial class VideoPlaybackBar : UserControl
         DrawRemovedFractions();
     }
 
+    public void UseSectionRepeat(bool enabled)
+    {
+        _sectionRepeat = enabled;
+        if (!enabled)
+        {
+            _markA = null;
+            _markB = null;
+        }
+
+        UpdateRepeatChrome();
+    }
+
+    public void SetSectionPrompt(string hint, string startTip, string endTip)
+    {
+        RepeatHint.Text = hint;
+        ToolTipService.SetToolTip(RepeatAButton, startTip);
+        ToolTipService.SetToolTip(RepeatBButton, endTip);
+    }
+
+    public void SetSectionMarks(double? a, double? b)
+    {
+        _markA = a is double start ? Math.Clamp(start, 0, 1) : null;
+        _markB = b is double end ? Math.Clamp(end, 0, 1) : null;
+        if (_markA is null && _markB is null)
+        {
+            SetSectionPrompt("Repeat a section", "Mark where the repeat starts", "Mark where the repeat ends");
+        }
+
+        UpdateRepeatChrome();
+    }
+
+    private void RepeatA_Click(object sender, RoutedEventArgs e) => SectionARequested?.Invoke(this, EventArgs.Empty);
+
+    private void RepeatB_Click(object sender, RoutedEventArgs e) => SectionBRequested?.Invoke(this, EventArgs.Empty);
+
+    private void RepeatClear_Click(object sender, RoutedEventArgs e) => SectionClearRequested?.Invoke(this, EventArgs.Empty);
+
+    private void UpdateRepeatChrome()
+    {
+        var trimming = TrimCanvas.Visibility == Visibility.Visible;
+        RepeatButtons.Visibility = _sectionRepeat && !trimming ? Visibility.Visible : Visibility.Collapsed;
+        RepeatClearButton.Visibility = _markA is not null || _markB is not null ? Visibility.Visible : Visibility.Collapsed;
+        Style? accent = Application.Current.Resources.TryGetValue("AccentButtonStyle", out var style) ? style as Style : null;
+        RepeatAButton.Style = _markA is null && _markB is not null ? accent : null;
+        RepeatBButton.Style = _markB is null && _markA is not null ? accent : null;
+        ArrangeRepeat();
+        UpdateSettingsButton();
+    }
+
+    private void ArrangeRepeat()
+    {
+        var width = TimelineHost.ActualWidth;
+        var trimming = TrimCanvas.Visibility == Visibility.Visible;
+        if (!_sectionRepeat || trimming || width <= 1 || (_markA is null && _markB is null))
+        {
+            RepeatCanvas.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        RepeatCanvas.Visibility = Visibility.Visible;
+        PlaceRepeatMark(RepeatMarkA, _markA, width);
+        PlaceRepeatMark(RepeatMarkB, _markB, width);
+        if (_markA is double start && _markB is double end)
+        {
+            var left = Math.Min(start, end) * width;
+            var right = Math.Max(start, end) * width;
+            Canvas.SetLeft(RepeatSpan, left);
+            Canvas.SetTop(RepeatSpan, 12);
+            RepeatSpan.Width = Math.Max(0, right - left);
+            RepeatSpan.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            RepeatSpan.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private static void PlaceRepeatMark(FrameworkElement mark, double? fraction, double width)
+    {
+        if (fraction is not double value)
+        {
+            mark.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        mark.Visibility = Visibility.Visible;
+        Canvas.SetLeft(mark, Math.Clamp(value * width - 9, 0, Math.Max(0, width - 18)));
+        Canvas.SetTop(mark, 3);
+    }
+
     public void BeginTrim(bool passThrough = false)
     {
         _trimPassThrough = passThrough;
@@ -250,6 +709,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         TrimCanvas.IsHitTestVisible = true;
         SeekSlider.IsHitTestVisible = passThrough && !_cutPicking;
         ArrangeTrim();
+        UpdateRepeatChrome();
     }
 
     public void SetTrimInteractive(bool enabled)
@@ -288,6 +748,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         TrimCanvas.Visibility = Visibility.Collapsed;
         TrimCanvas.IsHitTestVisible = false;
         SeekSlider.IsHitTestVisible = !_cutPicking;
+        UpdateRepeatChrome();
     }
 
     private void Timeline_Moved(object sender, PointerRoutedEventArgs e)

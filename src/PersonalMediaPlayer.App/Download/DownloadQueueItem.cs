@@ -18,6 +18,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
         Quality = quality;
         SubtitleLanguage = subtitle?.Language;
         SubtitleAutomatic = subtitle?.Automatic == true;
+        SubtitleTranslated = subtitle?.Translated == true;
         SubtitleLabel = subtitle?.Language is null ? null : subtitle.Label;
     }
 
@@ -32,6 +33,8 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     public string? SubtitleLanguage { get; }
 
     public bool SubtitleAutomatic { get; }
+
+    public bool SubtitleTranslated { get; }
 
     public string? SubtitleLabel { get; }
 

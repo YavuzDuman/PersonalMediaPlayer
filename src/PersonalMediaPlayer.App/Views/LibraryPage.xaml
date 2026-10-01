@@ -22,6 +22,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -73,6 +74,7 @@
                         <TextBlock Text="Import" />
                     </StackPanel>
                 </Button>
+                <Button Click="OpenLink_Click" Content="Open link" />
                 <Button Click="NewFolder_Click" Content="New folder" />
                 <Button Click="AddTo_Click" Content="Add to" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" />
                 <Button Click="MoveTo_Click" Content="Move to" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" />
@@ -88,7 +90,18 @@
             Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
             Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
 
-        <Grid Grid.Row="2" ColumnSpacing="16">
+        <StackPanel x:Name="ContinueSection" Grid.Row="2" Spacing="8" Visibility="Collapsed">
+            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Continue watching" />
+            <ScrollViewer
+                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Enabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalScrollMode="Disabled">
+                <StackPanel x:Name="ContinueList" Orientation="Horizontal" Spacing="12" />
+            </ScrollViewer>
+        </StackPanel>
+
+        <Grid Grid.Row="3" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="260" />
                 <ColumnDefinition Width="*" />
@@ -220,7 +233,7 @@
 
         <Grid
             x:Name="Slideshow"
-            Grid.RowSpan="3"
+            Grid.RowSpan="4"
             Background="Black"
             IsTabStop="True"
             KeyDown="Slideshow_KeyDown"

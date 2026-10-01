@@ -7,7 +7,9 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Capture;
+using PersonalMediaPlayer.App.Controls;
 using PersonalMediaPlayer.App.Helpers;
+using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.App.ViewModels;
 using PersonalMediaPlayer.Core.Models;
 using MediaCard = PersonalMediaPlayer.App.Controls.MediaCard;
@@ -22,6 +24,8 @@ public sealed partial class LibraryPage : Page
     private readonly CollectionViewSource _duplicateSource = new() { IsSourceGrouped = true };
     private List<MediaItem> _slides = [];
     private int _slideIndex;
+    private int _linkGeneration;
+    private CancellationTokenSource? _linkCheck;
 
     public LibraryPage()
     {
@@ -43,13 +47,79 @@ public sealed partial class LibraryPage : Page
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         await ViewModel.LoadAsync();
+        ShowContinue();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _linkGeneration++;
+        _linkCheck?.Cancel();
         if (Slideshow.Visibility == Visibility.Visible)
         {
             CloseSlideshow();
+        }
+    }
+
+    private async void OpenLink_Click(object sender, RoutedEventArgs e)
+    {
+        var address = new TextBox { PlaceholderText = "https://…", MinWidth = 420 };
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Paste a video address. It plays here and is not saved.",
+            TextWrapping = TextWrapping.Wrap
+        });
+        panel.Children.Add(address);
+        var dialog = new ContentDialog
+        {
+            Title = "Open link",
+            Content = panel,
+            PrimaryButtonText = "Open",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        if (!StreamLink.TryNormalize(address.Text, out var url))
+        {
+            ViewModel.ShowStatus(StreamLink.EnterAddressMessage, InfoBarSeverity.Error);
+            return;
+        }
+
+        var generation = ++_linkGeneration;
+        _linkCheck?.Cancel();
+        _linkCheck = new CancellationTokenSource();
+        var token = _linkCheck.Token;
+        ViewModel.ShowStatus("Checking the link…", InfoBarSeverity.Informational);
+        try
+        {
+            var result = await StreamLink.CheckAsync(url, token);
+            if (generation != _linkGeneration || token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (result.Status != StreamCheckStatus.Media)
+            {
+                ViewModel.ShowStatus(result.Message, InfoBarSeverity.Error);
+                return;
+            }
+
+            Frame.Navigate(typeof(VideoPlayerPage), new StreamOpenRequest(result.Url, StreamLink.DisplayName(result.Url)));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            if (generation == _linkGeneration)
+            {
+                ViewModel.ShowStatus(StreamLink.OpenFailedMessage, InfoBarSeverity.Error);
+            }
         }
     }
 
@@ -908,6 +978,84 @@ public sealed partial class LibraryPage : Page
         {
             ViewModel.ShowStatus(ex.Message, InfoBarSeverity.Error);
         }
+    }
+
+    private void ShowContinue()
+    {
+        ContinueList.Children.Clear();
+        var points = PlaybackProgress.Unfinished().Take(16).ToArray();
+        ContinueSection.Visibility = points.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (points.Length == 0)
+        {
+            return;
+        }
+
+        var library = App.MediaLibrary.GetItems(null);
+        foreach (var point in points)
+        {
+            var file = library.FirstOrDefault(item => item.IsVideo && string.Equals(item.FilePath, point.Key, StringComparison.OrdinalIgnoreCase));
+            var title = file?.DisplayName ?? point.Title ?? ContinueName(point.Key);
+            var card = new ContinueWatchCard();
+            card.Show(title, ContinuePlace(point.TimeMs, point.DurationMs), ContinueFraction(point.TimeMs, point.DurationMs), file?.FilePath);
+            card.Chosen += (_, _) => OpenContinue(point.Key, file);
+            ContinueList.Children.Add(card);
+        }
+    }
+
+    private void OpenContinue(string key, MediaItem? file)
+    {
+        if (file is not null && File.Exists(file.FilePath))
+        {
+            Frame.Navigate(typeof(VideoPlayerPage), file);
+            return;
+        }
+
+        if (StreamLink.TryNormalize(key, out var page) && App.MainAppWindow is MainWindow window)
+        {
+            window.OpenResolvedPage(page, PlaybackProgress.Load(key));
+            return;
+        }
+
+        ViewModel.ShowStatus("That video is no longer on this PC.", InfoBarSeverity.Warning);
+        ShowContinue();
+    }
+
+    private static string ContinueName(string key)
+    {
+        if (Uri.TryCreate(key, UriKind.Absolute, out var page) && page.Host.Length > 0)
+        {
+            return page.Host;
+        }
+
+        return Path.GetFileName(key);
+    }
+
+    private static string ContinuePlace(long timeMs, long durationMs)
+    {
+        var at = ContinueClock(timeMs);
+        if (durationMs <= timeMs + 1_000)
+        {
+            return $"At {at}";
+        }
+
+        return $"At {at} · {ContinueClock(durationMs - timeMs)} left";
+    }
+
+    private static double ContinueFraction(long timeMs, long durationMs)
+        => durationMs > timeMs ? timeMs / (double)durationMs : 0;
+
+    private static string ContinueClock(long durationMs)
+    {
+        if (durationMs < 0)
+        {
+            return "0:00";
+        }
+
+        var totalSeconds = durationMs / 1000;
+        var hours = totalSeconds / 3600;
+        var minutes = totalSeconds % 3600 / 60;
+        var seconds = totalSeconds % 60;
+        return hours > 0 ? $"{hours}:{minutes:00}:{seconds:00}" : $"{minutes}:{seconds:00}";
     }
 
     private void OpenSelected()

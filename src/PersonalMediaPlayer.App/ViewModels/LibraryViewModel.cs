@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Library;
 using PersonalMediaPlayer.Core.Models;
 using Windows.Storage;
@@ -503,6 +504,9 @@ public sealed partial class LibraryViewModel : ObservableObject
         {
             var renamed = _library.RenameItem(filePath, newName);
             PlaybackBookmarks.Move(filePath, renamed.FilePath);
+            PlaybackProgress.Move(filePath, renamed.FilePath);
+            SavedWords.Move(filePath, renamed.FilePath);
+            Playlists.MoveFile(filePath, renamed.FilePath);
             MediaFavorites.Move(filePath, renamed.FilePath);
             ScreenshotTextIndex.Move(filePath, renamed.FilePath);
             await LoadAsync();

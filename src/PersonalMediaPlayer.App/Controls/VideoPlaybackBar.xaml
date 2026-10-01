@@ -44,6 +44,36 @@
                             Maximum="1000"
                             Minimum="0"
                             StepFrequency="1" />
+                        <Canvas x:Name="RepeatCanvas" Height="28" IsHitTestVisible="False" Visibility="Collapsed">
+                            <Border
+                                x:Name="RepeatSpan"
+                                Height="4"
+                                VerticalAlignment="Center"
+                                Background="#CC7DD3FC"
+                                CornerRadius="2"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed" />
+                            <Grid x:Name="RepeatMarkA" Width="18" Height="22" Visibility="Collapsed">
+                                <Border Background="#FF1B6CA8" CornerRadius="4" />
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Foreground="White"
+                                    Text="A" />
+                            </Grid>
+                            <Grid x:Name="RepeatMarkB" Width="18" Height="22" Visibility="Collapsed">
+                                <Border Background="#FF0E7C66" CornerRadius="4" />
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Foreground="White"
+                                    Text="B" />
+                            </Grid>
+                        </Canvas>
                         <Canvas
                             x:Name="TrimCanvas"
                             Height="28"
@@ -198,33 +228,6 @@
                     Spacing="8"
                     VerticalAlignment="Center">
                     <Button
-                        x:Name="SubtitleButton"
-                        Height="40"
-                        Padding="12,0"
-                        Click="Subtitle_Click"
-                        ToolTipService.ToolTip="Show subtitles"
-                        Visibility="Collapsed">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="SubtitleIcon" FontSize="14" Glyph="&#xE7F0;" />
-                            <TextBlock x:Name="SubtitleText" VerticalAlignment="Center" Text="CC" />
-                        </StackPanel>
-                    </Button>
-                    <ComboBox
-                        x:Name="SpeedCombo"
-                        x:FieldModifier="public"
-                        MinWidth="88"
-                        SelectedIndex="3"
-                        ToolTipService.ToolTip="Playback speed">
-                        <ComboBoxItem Content="0.25×" Tag="0.25" />
-                        <ComboBoxItem Content="0.5×" Tag="0.5" />
-                        <ComboBoxItem Content="0.75×" Tag="0.75" />
-                        <ComboBoxItem Content="1×" Tag="1" />
-                        <ComboBoxItem Content="1.25×" Tag="1.25" />
-                        <ComboBoxItem Content="1.5×" Tag="1.5" />
-                        <ComboBoxItem Content="1.75×" Tag="1.75" />
-                        <ComboBoxItem Content="2×" Tag="2" />
-                    </ComboBox>
-                    <Button
                         x:Name="BookmarkButton"
                         x:FieldModifier="public"
                         Height="40"
@@ -245,6 +248,15 @@
                         ToolTipService.ToolTip="Save this frame"
                         Visibility="Collapsed">
                         <FontIcon FontSize="16" Glyph="&#xE722;" />
+                    </Button>
+                    <Button
+                        x:Name="SettingsButton"
+                        Width="44"
+                        Height="40"
+                        Padding="0"
+                        Click="Settings_Click"
+                        ToolTipService.ToolTip="Playback settings">
+                        <FontIcon FontSize="16" Glyph="&#xE713;" />
                     </Button>
                     <Button
                         x:Name="FullScreenButton"
@@ -288,5 +300,135 @@
                     Text="0:00" />
             </StackPanel>
         </Border>
+        <Popup
+            x:Name="SettingsPopup"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            IsLightDismissEnabled="True"
+            ShouldConstrainToRootBounds="True">
+            <Border
+                x:Name="SettingsCard"
+                Width="360"
+                Padding="16"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="12">
+                <StackPanel Spacing="14">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Playback" />
+                    <StackPanel x:Name="QualityRow" Spacing="8" Visibility="Collapsed">
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Quality" />
+                        <ComboBox
+                            x:Name="QualityCombo"
+                            HorizontalAlignment="Stretch"
+                            PlaceholderText="Quality"
+                            SelectionChanged="QualityCombo_Changed"
+                            ToolTipService.ToolTip="Video quality" />
+                    </StackPanel>
+                    <StackPanel x:Name="AudioRow" Spacing="8" Visibility="Collapsed">
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Audio" />
+                        <ComboBox
+                            x:Name="AudioCombo"
+                            HorizontalAlignment="Stretch"
+                            PlaceholderText="Audio"
+                            SelectionChanged="AudioCombo_Changed"
+                            ToolTipService.ToolTip="Audio language" />
+                    </StackPanel>
+                    <StackPanel x:Name="CaptionRow" Spacing="8" Visibility="Collapsed">
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Captions" />
+                        <ComboBox
+                            x:Name="CaptionCombo"
+                            HorizontalAlignment="Stretch"
+                            MaxDropDownHeight="320"
+                            PlaceholderText="Captions"
+                            SelectionChanged="CaptionCombo_Changed"
+                            ToolTipService.ToolTip="Captions"
+                            Visibility="Collapsed" />
+                        <Button
+                            x:Name="SubtitleButton"
+                            Height="36"
+                            Padding="12,0"
+                            HorizontalAlignment="Left"
+                            Click="Subtitle_Click"
+                            ToolTipService.ToolTip="Show subtitles"
+                            Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon x:Name="SubtitleIcon" FontSize="14" Glyph="&#xE7F0;" />
+                                <TextBlock x:Name="SubtitleText" VerticalAlignment="Center" Text="CC" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel x:Name="SpeedRow" Spacing="8">
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Speed" />
+                        <ComboBox
+                            x:Name="SpeedCombo"
+                            x:FieldModifier="public"
+                            HorizontalAlignment="Stretch"
+                            SelectedIndex="3"
+                            ToolTipService.ToolTip="Playback speed">
+                            <ComboBoxItem Content="0.25×" Tag="0.25" />
+                            <ComboBoxItem Content="0.5×" Tag="0.5" />
+                            <ComboBoxItem Content="0.75×" Tag="0.75" />
+                            <ComboBoxItem Content="1×" Tag="1" />
+                            <ComboBoxItem Content="1.25×" Tag="1.25" />
+                            <ComboBoxItem Content="1.5×" Tag="1.5" />
+                            <ComboBoxItem Content="1.75×" Tag="1.75" />
+                            <ComboBoxItem Content="2×" Tag="2" />
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel x:Name="RepeatButtons" Spacing="8" Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="RepeatHint"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Repeat a section"
+                            TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button
+                                x:Name="RepeatAButton"
+                                Height="36"
+                                Padding="12,0"
+                                Click="RepeatA_Click"
+                                ToolTipService.ToolTip="Mark where the repeat starts">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Text="A" />
+                                    <TextBlock VerticalAlignment="Center" Text="Start" />
+                                </StackPanel>
+                            </Button>
+                            <Button
+                                x:Name="RepeatBButton"
+                                Height="36"
+                                Padding="12,0"
+                                Click="RepeatB_Click"
+                                ToolTipService.ToolTip="Mark where the repeat ends">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{ThemeResource SystemFillColorSuccessBrush}" Text="B" />
+                                    <TextBlock VerticalAlignment="Center" Text="End" />
+                                </StackPanel>
+                            </Button>
+                            <Button
+                                x:Name="RepeatClearButton"
+                                Height="36"
+                                Padding="12,0"
+                                Click="RepeatClear_Click"
+                                Content="Clear"
+                                ToolTipService.ToolTip="Clear the repeat points"
+                                Visibility="Collapsed" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </UserControl>

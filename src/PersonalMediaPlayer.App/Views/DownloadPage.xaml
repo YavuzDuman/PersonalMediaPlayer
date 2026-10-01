@@ -22,7 +22,7 @@
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 TextWrapping="Wrap"
-                Text="Add YouTube, Shorts, or music links. Choose a quality for each one. They download in order, then you preview and save each file." />
+                Text="Add a YouTube video or a playlist. A playlist lets you choose the episodes. They download in order, then you preview and save each file." />
         </StackPanel>
 
         <InfoBar

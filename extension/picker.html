@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Choose a video</title>
+  <style>
+    html, body {
+      margin: 0;
+      color-scheme: light dark;
+    }
+
+    body {
+      font: 13px "Segoe UI", sans-serif;
+      min-width: 280px;
+      max-width: 420px;
+      color: CanvasText;
+      background: Canvas;
+    }
+
+    #list {
+      max-height: 360px;
+      overflow: auto;
+    }
+
+    button {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+      background: transparent;
+      color: inherit;
+      padding: 10px 14px;
+      cursor: pointer;
+    }
+
+    button:hover, button:focus-visible {
+      background: color-mix(in srgb, CanvasText 10%, Canvas);
+    }
+
+    #empty {
+      margin: 0;
+      padding: 12px 14px;
+      max-width: 280px;
+    }
+  </style>
+</head>
+<body>
+  <div id="list"><p id="empty">Looking for videos…</p></div>
+  <script src="picker.js"></script>
+</body>
+</html>

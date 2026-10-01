@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Download;
 using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Models;
 using PersonalMediaPlayer.App.Helpers;
 using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
@@ -33,6 +34,7 @@ public sealed partial class DownloadPage : Page
     private bool _audioOnly;
     private bool _downloading;
     private bool _allowLeave;
+    private bool _detached;
     private bool _closeWindow;
     private bool _updatingSlider;
     private bool _dragging;
@@ -84,6 +86,29 @@ public sealed partial class DownloadPage : Page
         Playback.VolumeSlider.ValueChanged += Volume_Changed;
         Playback.SpeedCombo.SelectionChanged += (_, _) => _player?.SetRate(SelectedRate());
         Playback.FullScreenButton.Click += (_, _) => _ = ToggleFullScreenAsync();
+        DownloadQueueHub.Enqueued += OnCopyEnqueued;
+        if (_queue.Any(item => item.Status == "Queued"))
+        {
+            _ = PumpAsync();
+        }
+    }
+
+    private void OnCopyEnqueued(object? sender, DownloadQueueItem item)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_detached || _queue.Any(existing => string.Equals(existing.Url, item.Url, StringComparison.OrdinalIgnoreCase)
+                && existing.Quality.Format == item.Quality.Format
+                && existing.Status is "Queued" or "Downloading" or "Paused" or "Ready"))
+            {
+                return;
+            }
+
+            Remember(item);
+            _queue.Add(item);
+            EmptyQueue.Visibility = Visibility.Collapsed;
+            _ = PumpAsync();
+        });
     }
 
     private bool HasUnsaved => _queue.Any(item => item.Status is "Queued" or "Downloading" or "Paused" or "Ready");
@@ -140,6 +165,9 @@ public sealed partial class DownloadPage : Page
         {
             PersistForExit();
         }
+
+        _detached = true;
+        DownloadQueueHub.Enqueued -= OnCopyEnqueued;
         if (App.MainAppWindow is MainWindow window && window.IsFullScreen)
         {
             window.SetFullScreen(false);
@@ -189,6 +217,28 @@ public sealed partial class DownloadPage : Page
         StatusBar.IsOpen = false;
         try
         {
+            if (YoutubeDownloader.IsPlaylist(uri.AbsoluteUri))
+            {
+                StatusBar.Severity = InfoBarSeverity.Informational;
+                StatusBar.Message = "Reading the playlist…";
+                StatusBar.IsOpen = true;
+                var playlist = await YoutubeDownloader.ListPlaylistAsync(uri.AbsoluteUri, new Progress<string>(text => DownloadStatus.Text = text), token);
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                StatusBar.IsOpen = false;
+                var choice = await AskPlaylistAsync(playlist);
+                if (choice is null)
+                {
+                    return;
+                }
+
+                QueuePlaylist(choice.Value.Quality, choice.Value.Videos);
+                return;
+            }
+
             var listing = await YoutubeDownloader.ListAsync(uri.AbsoluteUri, new Progress<string>(text => DownloadStatus.Text = text), token);
             if (token.IsCancellationRequested)
             {
@@ -271,7 +321,7 @@ public sealed partial class DownloadPage : Page
                     var path = await YoutubeDownloader.DownloadAsync(
                         item.Url,
                         item.Quality,
-                        item.SubtitleLanguage is null ? null : new DownloadSubtitle(item.SubtitleLanguage, item.SubtitleLabel ?? item.SubtitleLanguage, item.SubtitleAutomatic),
+                        item.SubtitleLanguage is null ? null : new DownloadSubtitle(item.SubtitleLanguage, item.SubtitleLabel ?? item.SubtitleLanguage, item.SubtitleAutomatic, item.SubtitleTranslated),
                         item.Title,
                         item.OutputPath,
                         new Progress<double>(value => DispatcherQueue.TryEnqueue(() => item.Report(value))),
@@ -351,6 +401,153 @@ public sealed partial class DownloadPage : Page
         _ = PumpAsync();
     }
 
+    private void QueuePlaylist(DownloadQuality quality, IReadOnlyList<PlaylistVideo> videos)
+    {
+        var added = 0;
+        var skipped = 0;
+        foreach (var video in videos)
+        {
+            if (_queue.Any(item => string.Equals(item.Url, video.Url, StringComparison.OrdinalIgnoreCase)
+                && item.Status is "Queued" or "Downloading" or "Paused" or "Ready"))
+            {
+                skipped++;
+                continue;
+            }
+
+            var item = new DownloadQueueItem(video.Title, video.Url, quality);
+            Remember(item);
+            _queue.Add(item);
+            added++;
+        }
+
+        if (added > 0)
+        {
+            DownloadQueueStore.Save(_queue);
+            EmptyQueue.Visibility = Visibility.Collapsed;
+            _ = PumpAsync();
+        }
+
+        LinkBox.Text = string.Empty;
+        StatusBar.Severity = added > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Informational;
+        StatusBar.Message = added == 0
+            ? "Those videos are already in the queue."
+            : skipped == 0
+                ? (added == 1 ? "Added 1 video." : $"Added {added} videos.")
+                : $"Added {added} videos. {skipped} {(skipped == 1 ? "was" : "were")} already in the queue.";
+        StatusBar.IsOpen = true;
+    }
+
+    private async Task<(DownloadQuality Quality, IReadOnlyList<PlaylistVideo> Videos)?> AskPlaylistAsync(PlaylistListing playlist)
+    {
+        var qualities = YoutubeDownloader.PlaylistQualities();
+        var quality = new ComboBox
+        {
+            Header = "Quality",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ItemsSource = qualities,
+            DisplayMemberPath = nameof(DownloadQuality.Label),
+            SelectedIndex = 0
+        };
+        var boxes = new List<(CheckBox Box, PlaylistVideo Video)>();
+        var list = new StackPanel { Spacing = 4 };
+        foreach (var video in playlist.Videos)
+        {
+            var label = string.IsNullOrWhiteSpace(video.Length) ? video.Title : video.Title + " · " + video.Length;
+            var box = new CheckBox
+            {
+                IsChecked = true,
+                Content = new TextBlock
+                {
+                    Text = label,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxWidth = 360
+                }
+            };
+            boxes.Add((box, video));
+            list.Children.Add(box);
+        }
+
+        var updating = false;
+        var all = new CheckBox { Content = "All videos", IsChecked = true, IsThreeState = true };
+        all.Checked += (_, _) => SetAll(true);
+        all.Unchecked += (_, _) => SetAll(false);
+        foreach (var (box, _) in boxes)
+        {
+            box.Checked += (_, _) => RefreshAll();
+            box.Unchecked += (_, _) => RefreshAll();
+        }
+
+        var note = playlist.TotalCount > playlist.Videos.Count
+            ? $"Showing the first {playlist.Videos.Count} of {playlist.TotalCount}. Each selected video is added on its own. Look up one video when you want captions."
+            : "Each selected video is added on its own. Look up one video when you want captions.";
+        var dialog = new ContentDialog
+        {
+            Title = playlist.Title,
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Width = 420,
+                Children =
+                {
+                    new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap },
+                    quality,
+                    all,
+                    new ScrollViewer
+                    {
+                        MaxHeight = 320,
+                        Content = list
+                    }
+                }
+            },
+            PrimaryButtonText = "Add to queue",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || quality.SelectedItem is not DownloadQuality selected)
+        {
+            return null;
+        }
+
+        var chosen = boxes.Where(item => item.Box.IsChecked == true).Select(item => item.Video).ToArray();
+        if (chosen.Length == 0)
+        {
+            ShowError("Select at least one video.");
+            return null;
+        }
+
+        return (selected, chosen);
+
+        void SetAll(bool check)
+        {
+            if (updating)
+            {
+                return;
+            }
+
+            updating = true;
+            foreach (var (box, _) in boxes)
+            {
+                box.IsChecked = check;
+            }
+
+            updating = false;
+        }
+
+        void RefreshAll()
+        {
+            if (updating)
+            {
+                return;
+            }
+
+            updating = true;
+            var count = boxes.Count(item => item.Box.IsChecked == true);
+            all.IsChecked = count == boxes.Count ? true : count == 0 ? false : null;
+            updating = false;
+        }
+    }
+
     private async Task<DownloadSubtitle?> AskSubtitleAsync(IReadOnlyList<DownloadSubtitle> tracks)
     {
         if (tracks.Count == 0)
@@ -364,6 +561,7 @@ public sealed partial class DownloadPage : Page
         {
             Header = "Language",
             HorizontalAlignment = HorizontalAlignment.Stretch,
+            MaxDropDownHeight = 320,
             ItemsSource = choices,
             DisplayMemberPath = nameof(DownloadSubtitle.Label),
             SelectedIndex = 0
@@ -379,7 +577,7 @@ public sealed partial class DownloadPage : Page
                 {
                     new TextBlock
                     {
-                        Text = "Choose an uploaded subtitle, or the video’s original automatic caption. Translated languages are not listed. Audio-only downloads stay without subtitles.",
+                        Text = "Choose a subtitle. Uploaded captions come first, then YouTube’s automatic captions, including translations. A translation can take about a minute. Audio-only downloads stay without subtitles.",
                         TextWrapping = TextWrapping.Wrap
                     },
                     languages
@@ -745,6 +943,7 @@ public sealed partial class DownloadPage : Page
         }
 
         _transitioning = true;
+        Playback.CloseSettings();
         var enter = !window.IsFullScreen;
         if (enter)
         {
@@ -771,6 +970,7 @@ public sealed partial class DownloadPage : Page
 
     private void RestoreWindowedLayout()
     {
+        Playback.CloseSettings();
         PageGrid.Padding = new Thickness(24, 8, 24, 24);
         PageGrid.RowSpacing = 12;
         HeaderPanel.Visibility = Visibility.Visible;
@@ -915,6 +1115,8 @@ public sealed partial class DownloadPage : Page
         try
         {
             var saved = await write(source);
+            SavedWords.Move(source, saved.Path);
+            Playlists.MoveFile(source, saved.Path);
             try
             {
                 File.Delete(source);
@@ -1131,11 +1333,25 @@ public sealed partial class DownloadPage : Page
             _activeDownload?.Cancel();
         }
 
+        foreach (var item in _queue)
+        {
+            if (item.Status == "Queued")
+            {
+                item.MarkPaused();
+            }
+        }
+
         DownloadQueueStore.Save(_queue);
     }
 
     private void Remember(DownloadQueueItem item)
-        => item.PropertyChanged += (_, _) => DownloadQueueStore.Save(_queue);
+        => item.PropertyChanged += (_, _) =>
+        {
+            if (!_detached)
+            {
+                DownloadQueueStore.Save(_queue);
+            }
+        };
 
     private static void DeletePartial(DownloadQueueItem item)
     {
