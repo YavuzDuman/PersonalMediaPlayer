@@ -37,6 +37,7 @@ public sealed partial class VideoPlayerPage : Page
     private Media? _streamMedia;
     private string? _pendingPath;
     private Uri? _pendingStream;
+    private bool _pendingPageResolve;
     private string? _filePath;
     private Uri? _streamUrl;
     private Uri? _streamReferrer;
@@ -46,6 +47,7 @@ public sealed partial class VideoPlayerPage : Page
     private IReadOnlyList<DownloadSubtitle>? _streamSubtitles;
     private DownloadSubtitle? _streamSubtitle;
     private DownloadQuality? _streamQuality;
+    private string? _streamThumbnail;
     private string? _hlsBody;
     private Uri? _hlsSource;
     private HlsMaster? _hlsMaster;
@@ -129,6 +131,7 @@ public sealed partial class VideoPlayerPage : Page
         Playback.UseSectionRepeat(true);
         WordsPanel.WordChosen += WordsPanel_WordChosen;
         PlaylistPanel.VideoChosen += (_, index) => OpenPlaylistVideo(index);
+        PlaylistPanel.OrderChanged += (_, index) => ApplyPlaylistOrder(index);
         Captions.WordSaved += (_, _) => WordsPanel.Refresh();
         Playback.CaptionChosen += (_, index) => ChoosePageSubtitle(index);
         Playback.QualityChosen += (_, index) => ChooseStreamQuality(index);
@@ -168,7 +171,14 @@ public sealed partial class VideoPlayerPage : Page
 
             _playlistId = list.Id;
             _playlistIndex = playlistRequest.Index;
-            var path = list.Videos[playlistRequest.Index];
+            var entry = list.Videos[playlistRequest.Index];
+            if (entry.Resolve)
+            {
+                OpenSavedPage(entry, keepPlaylist: true);
+                return;
+            }
+
+            var path = entry.Location;
             if (!File.Exists(path))
             {
                 TitleText.Text = Path.GetFileName(path);
@@ -404,7 +414,12 @@ public sealed partial class VideoPlayerPage : Page
         VideoView.MediaPlayer = _player;
         ApplyVolumeToPlayer();
         ApplyRateToPlayer();
-        if (_pendingStream is Uri pendingStream)
+        if (_pendingPageResolve)
+        {
+            _pendingPageResolve = false;
+            _ = ResolvePageAsync(_streamStartMs);
+        }
+        else if (_pendingStream is Uri pendingStream)
         {
             _ = OpenStreamAsync(pendingStream);
         }
@@ -940,7 +955,7 @@ public sealed partial class VideoPlayerPage : Page
             return;
         }
 
-        PlaybackProgress.Save(key, time, _durationMs, TitleText.Text);
+        PlaybackProgress.Save(key, time, _durationMs, TitleText.Text, _streamPage is null ? null : _streamThumbnail);
         _lastRememberedMs = time;
     }
 
@@ -1291,7 +1306,7 @@ public sealed partial class VideoPlayerPage : Page
             return;
         }
 
-        var item = App.MediaLibrary.GetById(Path.GetRelativePath(App.MediaLibrary.LibraryRoot, _filePath).Replace('\\', '/'));
+        var item = App.MediaLibrary.GetById(_filePath);
         if (item is null)
         {
             return;
@@ -1578,14 +1593,16 @@ public sealed partial class VideoPlayerPage : Page
         ApplyRateToPlayer();
     }
 
-    private void ShowStream(StreamOpenRequest stream)
+    private void ShowStream(StreamOpenRequest stream, bool keepPlaylist = false)
     {
+        var playlistId = keepPlaylist ? _playlistId : null;
+        var playlistIndex = keepPlaylist ? _playlistIndex : -1;
         _subtitleWork?.Cancel();
         ClearStreamChoices();
         _openAtMs = null;
         _savedFocus = stream.Focus;
-        _playlistId = null;
-        _playlistIndex = -1;
+        _playlistId = playlistId;
+        _playlistIndex = playlistIndex;
         _filePath = null;
         _streamUrl = stream.Url;
         _streamPage = stream.Page;
@@ -1593,6 +1610,7 @@ public sealed partial class VideoPlayerPage : Page
         _streamSubtitles = stream.Subtitles;
         _streamSubtitle = null;
         _streamQuality = stream.Quality;
+        _streamThumbnail = StreamThumbnail.Choose(stream.Page?.AbsoluteUri, stream.Thumbnail);
         _streamReferrer = stream.Referrer;
         _streamLastMs = 0;
         _streamEndedCleanly = false;
@@ -1622,8 +1640,8 @@ public sealed partial class VideoPlayerPage : Page
         WordsButton.Visibility = Visibility.Visible;
         RestoreButton.Visibility = Visibility.Collapsed;
         EditTrimButton.Visibility = Visibility.Collapsed;
-        PlaylistButton.Visibility = Visibility.Collapsed;
-        WordsPanel.Visibility = Visibility.Visible;
+        PlaylistButton.Visibility = _playlistId is null ? Visibility.Collapsed : Visibility.Visible;
+        AddPlaylistButton.Visibility = stream.Page is null ? Visibility.Collapsed : Visibility.Visible;
         SaveCopyButton.Visibility = _streamPage is null ? Visibility.Collapsed : Visibility.Visible;
         SaveCopyButton.IsEnabled = _streamPage is not null && _streamQuality is not null;
         SaveCopyLabel.Text = "Save a copy";
@@ -1652,10 +1670,7 @@ public sealed partial class VideoPlayerPage : Page
             _hlsAudioKey = _restoreAudioLanguage;
         }
 
-        if (_streamPage is not null && _streamSubtitles is { Count: > 0 })
-        {
-            Playback.OfferCaptionChoices(_streamSubtitles.Select(item => item.Label).ToList(), CaptionIndex(_savedFocus?.CaptionLanguage));
-        }
+        ShowResolvedCaptions();
         if (VideoHost.Child is null)
         {
             VideoHost.Child = VideoView;
@@ -1663,10 +1678,19 @@ public sealed partial class VideoPlayerPage : Page
 
         ResetDuration();
         _pendingPath = null;
-        _pendingStream = stream.Url;
+        var unresolvedPage = stream.Page is Uri savedPage && SameAddress(stream.Url, savedPage);
+        _pendingPageResolve = unresolvedPage && _player is null;
+        _pendingStream = unresolvedPage ? null : stream.Url;
         if (_player is not null)
         {
-            _ = OpenStreamAsync(stream.Url);
+            if (unresolvedPage)
+            {
+                _ = ResolvePageAsync(_streamStartMs);
+            }
+            else
+            {
+                _ = OpenStreamAsync(stream.Url);
+            }
         }
 
         if (_streamPage is not null)
@@ -1674,7 +1698,29 @@ public sealed partial class VideoPlayerPage : Page
             ShowBookmarks();
         }
 
+        if (_playlistId is not null)
+        {
+            ShowPlaylist();
+        }
+
         StartWatching();
+    }
+
+    private static bool SameAddress(Uri left, Uri right)
+        => string.Equals(left.AbsoluteUri, right.AbsoluteUri, StringComparison.OrdinalIgnoreCase);
+
+    private void OpenSavedPage(PlaylistEntry entry, bool keepPlaylist)
+    {
+        if (!StreamLink.TryNormalize(entry.Location, out var page))
+        {
+            TitleText.Text = string.IsNullOrWhiteSpace(entry.Title) ? "Playlist" : entry.Title;
+            AddedText.Text = "That link cannot be opened.";
+            ShowPlaylist();
+            return;
+        }
+
+        var title = string.IsNullOrWhiteSpace(entry.Title) ? StreamLink.DisplayName(page) : entry.Title;
+        ShowStream(new StreamOpenRequest(page, title, Page: page), keepPlaylist);
     }
 
     private async Task ReplayStreamAsync()
@@ -1929,7 +1975,11 @@ public sealed partial class VideoPlayerPage : Page
                 _hlsHeight,
                 referrer,
                 _streamPage is not null ? BrowserUserAgent : null,
-                cancellationToken);
+                cancellationToken,
+                _streamPage is not null,
+                _streamPage is not null && string.IsNullOrWhiteSpace(_hlsAudioKey)
+                    ? StreamLanguageSettings.Load().AudioLanguage
+                    : null);
             if (generation != _streamGeneration || cancellationToken.IsCancellationRequested)
             {
                 DeletePlaylistFile(prepared?.PlaylistPath);
@@ -2277,13 +2327,28 @@ public sealed partial class VideoPlayerPage : Page
                 return;
             }
 
+            var captionsWereOffered = _streamSubtitles is { Count: > 0 };
             _streamUrl = choice.Media;
             _streamAudio = choice.Audio;
             _streamReferrer = page;
+            _streamThumbnail = StreamThumbnail.Choose(page.AbsoluteUri, choice.Thumbnail);
+            RememberPlaylistThumbnail();
             _streamSubtitles = choice.Subtitles;
             if (choice.Quality is not null)
             {
+                var qualityWasMissing = _streamQuality is null;
                 _streamQuality = choice.Quality;
+                if (qualityWasMissing)
+                {
+                    SaveCopyButton.IsEnabled = true;
+                }
+            }
+
+            // ShowStream offers captions only when the request already has them.
+            // A playlist open learns the list from this lookup.
+            if (!captionsWereOffered)
+            {
+                ShowResolvedCaptions();
             }
 
             _streamStartMs = startMs is > 0 ? startMs : null;
@@ -2462,6 +2527,129 @@ public sealed partial class VideoPlayerPage : Page
         UpdatePlayIcon();
     }
 
+    private async void AddPlaylist_Click(object sender, RoutedEventArgs e)
+    {
+        if (_streamPage is not Uri page)
+        {
+            return;
+        }
+
+        var lists = Playlists.All();
+        var picker = new ListView
+        {
+            SelectionMode = ListViewSelectionMode.Single,
+            DisplayMemberPath = nameof(Playlist.Name),
+            MaxHeight = 220,
+            Visibility = lists.Count == 0 ? Visibility.Collapsed : Visibility.Visible
+        };
+        foreach (var list in lists)
+        {
+            picker.Items.Add(list);
+        }
+
+        var name = new TextBox
+        {
+            Header = lists.Count == 0 ? "Playlist name" : "New playlist",
+            PlaceholderText = lists.Count == 0 ? "Name" : "Leave this blank to use the playlist you select"
+        };
+        var hint = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var dialog = new ContentDialog
+        {
+            Title = "Add to playlist",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Width = 420,
+                Children = { picker, name, hint }
+            },
+            PrimaryButtonText = "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            var message = TryAddCurrentPage(page, TitleForPlaylist(), name.Text, picker.SelectedItem as Playlist, lists);
+            if (message is null)
+            {
+                return;
+            }
+
+            args.Cancel = true;
+            hint.Text = message;
+            hint.Visibility = Visibility.Visible;
+        };
+        await dialog.ShowAsync();
+    }
+
+    private static string? TryAddCurrentPage(Uri page, string title, string typedName, Playlist? selected, IReadOnlyList<Playlist> lists)
+    {
+        var typed = typedName.Trim();
+        Playlist? target = null;
+        if (typed.Length > 0)
+        {
+            if (typed.Length > 80)
+            {
+                return "Use a name of 80 characters or fewer.";
+            }
+
+            target = lists.FirstOrDefault(item => string.Equals(item.Name, typed, StringComparison.OrdinalIgnoreCase));
+            if (target is null)
+            {
+                try
+                {
+                    target = Playlists.Create(typed);
+                }
+                catch (IOException)
+                {
+                    return "Could not save the playlist.";
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return "Could not save the playlist.";
+                }
+
+                if (target is null)
+                {
+                    return "You already have a playlist with that name.";
+                }
+            }
+        }
+        else if (selected is not null)
+        {
+            target = selected;
+        }
+        else
+        {
+            return lists.Count == 0 ? "Enter a name for the playlist." : "Choose a playlist, or enter a new name.";
+        }
+
+        try
+        {
+            var added = Playlists.AddPage(target.Id, page.AbsoluteUri, title);
+            return added switch
+            {
+                1 => null,
+                0 => "This page is already in that playlist.",
+                _ => "That link cannot be saved."
+            };
+        }
+        catch (IOException)
+        {
+            return "Could not save the playlist.";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return "Could not save the playlist.";
+        }
+    }
+
+    private string TitleForPlaylist()
+    {
+        var title = TitleText.Text.Trim();
+        return title.Length == 0 ? _streamPage?.AbsoluteUri ?? string.Empty : title;
+    }
+
     private void WordsButton_Click(object sender, RoutedEventArgs e) => WordsPanel.Toggle();
 
     private void WordsPanel_WordChosen(object? sender, SavedWord word) => OpenSavedWord(word);
@@ -2576,6 +2764,23 @@ public sealed partial class VideoPlayerPage : Page
 
     private string? StreamWordKey()
         => _streamPage?.AbsoluteUri ?? _streamUrl?.AbsoluteUri;
+
+    private void ShowResolvedCaptions()
+    {
+        if (_streamPage is null || _streamSubtitles is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var requested = string.IsNullOrWhiteSpace(_streamSubtitle?.Language)
+            ? _savedFocus?.CaptionLanguage
+            : _streamSubtitle.Language;
+        var preferred = string.IsNullOrWhiteSpace(requested)
+            ? StreamLanguageSettings.Load().CaptionLanguage
+            : null;
+        var index = StreamLanguageSettings.ChooseCaption(_streamSubtitles, requested, preferred);
+        Playback.OfferCaptionChoices(_streamSubtitles.Select(item => item.Label).ToList(), index);
+    }
 
     private int CaptionIndex(string? language)
     {
@@ -2700,17 +2905,19 @@ public sealed partial class VideoPlayerPage : Page
         _streamSubtitles = null;
         _streamSubtitle = null;
         _streamQuality = null;
+        _streamThumbnail = null;
         _streamReferrer = null;
         _streamStartMs = null;
         _streamFailed = false;
         _streamResolving = false;
         _streamOpening = false;
         _pendingStream = null;
+        _pendingPageResolve = false;
         _restoreAudioLanguage = null;
         ClearStreamChoices();
+        AddPlaylistButton.Visibility = Visibility.Collapsed;
         EditButton.Visibility = Visibility.Visible;
         WordsButton.Visibility = Visibility.Visible;
-        WordsPanel.Visibility = Visibility.Visible;
         EditTrimButton.Visibility = Visibility.Visible;
         SaveCopyButton.Visibility = Visibility.Collapsed;
         PlaylistButton.Visibility = _playlistId is null ? Visibility.Collapsed : Visibility.Visible;
@@ -2741,7 +2948,14 @@ public sealed partial class VideoPlayerPage : Page
             return;
         }
 
-        var path = list.Videos[index];
+        var entry = list.Videos[index];
+        if (entry.Resolve)
+        {
+            OpenPlaylistPage(entry, index);
+            return;
+        }
+
+        var path = entry.Location;
         if (!File.Exists(path))
         {
             PlaylistPanel.SetStatus("That video is no longer on this PC.");
@@ -2792,6 +3006,37 @@ public sealed partial class VideoPlayerPage : Page
         _timer.Start();
     }
 
+    private void OpenPlaylistPage(PlaylistEntry entry, int index)
+    {
+        if (!StreamLink.TryNormalize(entry.Location, out var page))
+        {
+            PlaylistPanel.SetStatus("That link cannot be opened.");
+            return;
+        }
+
+        var samePage = index == _playlistIndex
+            && _streamPage is not null
+            && SameAddress(_streamPage, page);
+        if (samePage && _player is not null && !_ended && !_streamFailed)
+        {
+            PlaylistPanel.SetStatus(null);
+            return;
+        }
+
+        if (!samePage)
+        {
+            RememberPosition(force: true);
+        }
+
+        ClearSectionRepeat();
+        _savedFocus = null;
+        Captions.ClearSavedWord();
+        _playlistIndex = index;
+        var title = string.IsNullOrWhiteSpace(entry.Title) ? StreamLink.DisplayName(page) : entry.Title;
+        ShowStream(new StreamOpenRequest(page, title, Page: page), keepPlaylist: true);
+        PlaylistPanel.SetStatus(null);
+    }
+
     private bool PlayFollowingVideo()
     {
         if (_editing || _savingTrim || _playlistId is null)
@@ -2807,7 +3052,7 @@ public sealed partial class VideoPlayerPage : Page
 
         for (var i = _playlistIndex + 1; i < list.Videos.Count; i++)
         {
-            if (!File.Exists(list.Videos[i]))
+            if (!list.Videos[i].IsPlayable)
             {
                 continue;
             }
@@ -2817,6 +3062,48 @@ public sealed partial class VideoPlayerPage : Page
         }
 
         return false;
+    }
+
+    private void ApplyPlaylistOrder(int index)
+    {
+        if (_playlistId is null || index < 0)
+        {
+            return;
+        }
+
+        _playlistIndex = index;
+        if (_streamPage is null && !string.IsNullOrWhiteSpace(_filePath))
+        {
+            AddedText.Text = PlaylistLabel();
+        }
+    }
+
+    private void RememberPlaylistThumbnail()
+    {
+        if (_playlistId is null || _streamPage is null || _streamThumbnail is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Playlists.RememberThumbnail(_playlistId, _streamPage.AbsoluteUri, _streamThumbnail))
+            {
+                return;
+            }
+
+            var known = StreamThumbnail.ForPage(_streamPage.AbsoluteUri);
+            if (!string.Equals(_streamThumbnail, known, StringComparison.Ordinal))
+            {
+                PlaylistPanel.Show(_playlistId, _playlistIndex);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     private void ShowPlaylist()
@@ -2846,7 +3133,7 @@ public sealed partial class VideoPlayerPage : Page
         }
 
         var list = Playlists.Find(_playlistId);
-        var index = list?.Videos.FindIndex(item => string.Equals(item, path, StringComparison.OrdinalIgnoreCase)) ?? -1;
+        var index = list?.Videos.FindIndex(item => !item.Resolve && string.Equals(item.Location, path, StringComparison.OrdinalIgnoreCase)) ?? -1;
         if (list is null || index < 0)
         {
             LeavePlaylist();

@@ -208,7 +208,8 @@ public sealed partial class MainWindow : Window
             choice.Audio,
             choice.Subtitles,
             choice.Quality,
-            focus));
+            focus,
+            choice.Thumbnail));
     }
 
     private void ShowHandoff(string message, InfoBarSeverity severity)
@@ -294,12 +295,6 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (Shell.ContentFrame.Content is DownloadPage download && download.TryHandleHostClose())
-        {
-            args.Cancel = true;
-            return;
-        }
-
         if (Shell.ContentFrame.Content is CapturePage capture && capture.TryHandleHostClose())
         {
             args.Cancel = true;
@@ -312,10 +307,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (Shell.ContentFrame.Content is DownloadPage finishedDownload)
-        {
-            finishedDownload.PersistForExit();
-        }
+        DownloadQueueHub.PauseForExit();
     }
 
     internal void SyncNavigationSelection() => Shell.SyncNavSelection();

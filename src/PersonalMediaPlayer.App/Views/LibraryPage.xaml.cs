@@ -1,3 +1,4 @@
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -15,6 +16,8 @@ using PersonalMediaPlayer.Core.Models;
 using MediaCard = PersonalMediaPlayer.App.Controls.MediaCard;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
+using Windows.System;
+using Windows.UI.Core;
 
 namespace PersonalMediaPlayer.App.Views;
 
@@ -26,11 +29,15 @@ public sealed partial class LibraryPage : Page
     private int _slideIndex;
     private int _linkGeneration;
     private CancellationTokenSource? _linkCheck;
+    private MediaItem? _selectionAnchor;
+    private List<MediaItem>? _pendingSelection;
+    private bool _applyingSelection;
 
     public LibraryPage()
     {
         ViewModel = new LibraryViewModel(App.MediaLibrary);
         InitializeComponent();
+        MediaGrid.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(MediaGrid_PointerReleased), true);
         ViewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(LibraryViewModel.ShowingDuplicates))
@@ -47,7 +54,6 @@ public sealed partial class LibraryPage : Page
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         await ViewModel.LoadAsync();
-        ShowContinue();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
@@ -154,10 +160,44 @@ public sealed partial class LibraryPage : Page
     private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
         => ViewModel.SearchText = args.QueryText;
 
+    private void Page_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.A || !IsKeyDown(VirtualKey.Control) || IsKeyDown(VirtualKey.Menu))
+        {
+            return;
+        }
+
+        if (Slideshow.Visibility == Visibility.Visible || IsTextInput(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        if (XamlRoot is not null
+            && FocusManager.GetFocusedElement(XamlRoot) is DependencyObject focused
+            && IsTextInput(focused))
+        {
+            return;
+        }
+
+        var visible = ViewModel.Items.ToList();
+        _pendingSelection = null;
+        ApplySelection(visible);
+        if (visible.Count > 0)
+        {
+            _selectionAnchor = visible[0];
+        }
+
+        e.Handled = true;
+    }
+
     private void MediaGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        ViewModel.SetSelection(SelectedItems());
-        UpdateSelectionMarks();
+        if (_applyingSelection)
+        {
+            return;
+        }
+
+        SyncSelectionChrome();
     }
 
     private void MediaGrid_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
@@ -167,14 +207,171 @@ public sealed partial class LibraryPage : Page
             return;
         }
 
+        card.ItemPressed -= Card_ItemPressed;
         if (args.InRecycleQueue)
         {
             card.SetSelectionMark(false);
             return;
         }
 
+        card.ItemPressed += Card_ItemPressed;
         var multiple = sender.SelectedItems.Count > 1;
         card.SetSelectionMark(multiple && args.Item is MediaItem item && sender.SelectedItems.Contains(item));
+    }
+
+    private void Card_ItemPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not MediaCard card || card.Item is not MediaItem item)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(card).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        if (!IsKeyDown(VirtualKey.Shift))
+        {
+            _selectionAnchor = item;
+            _pendingSelection = null;
+            return;
+        }
+
+        var selection = SelectionFromAnchor(item, IsKeyDown(VirtualKey.Control));
+        if (selection.Count == 0)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _pendingSelection = selection;
+        ApplySelection(selection);
+    }
+
+    private void MediaGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_pendingSelection is null)
+        {
+            return;
+        }
+
+        var pending = _pendingSelection;
+        _pendingSelection = null;
+        e.Handled = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (IsLoaded)
+            {
+                ApplySelection(pending);
+            }
+        });
+    }
+
+    private void ApplySelection(IReadOnlyList<MediaItem> items)
+    {
+        _applyingSelection = true;
+        try
+        {
+            MediaGrid.SelectedItems.Clear();
+            foreach (var item in items)
+            {
+                MediaGrid.SelectedItems.Add(item);
+            }
+        }
+        finally
+        {
+            _applyingSelection = false;
+        }
+
+        SyncSelectionChrome();
+    }
+
+    private void SyncSelectionChrome()
+    {
+        ViewModel.SetSelection(SelectedItems());
+        UpdateSelectionMarks();
+        MediaGrid.Padding = new Thickness(0, 0, 0, ViewModel.HasSelection ? 72 : 0);
+    }
+
+    private List<MediaItem> SelectionFromAnchor(MediaItem item, bool extend)
+    {
+        var visible = ViewModel.Items.ToList();
+        var end = IndexOfItem(visible, item);
+        if (end < 0)
+        {
+            return extend ? SelectedItems().ToList() : [];
+        }
+
+        var start = IndexOfItem(visible, _selectionAnchor);
+        if (start < 0)
+        {
+            start = 0;
+        }
+
+        if (start > end)
+        {
+            (start, end) = (end, start);
+        }
+
+        var range = visible.GetRange(start, end - start + 1);
+        if (!extend)
+        {
+            return range;
+        }
+
+        var combined = SelectedItems().ToList();
+        foreach (var entry in range)
+        {
+            if (!combined.Contains(entry))
+            {
+                combined.Add(entry);
+            }
+        }
+
+        return combined;
+    }
+
+    private static int IndexOfItem(IReadOnlyList<MediaItem> items, MediaItem? target)
+    {
+        if (target is null)
+        {
+            return -1;
+        }
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            if (ReferenceEquals(items[index], target))
+            {
+                return index;
+            }
+        }
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            if (string.Equals(items[index].FilePath, target.FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsKeyDown(VirtualKey key)
+        => InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(CoreVirtualKeyStates.Down);
+
+    private static bool IsTextInput(DependencyObject? source)
+    {
+        for (var node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is TextBox or AutoSuggestBox or RichEditBox or PasswordBox or NumberBox or ComboBox)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void UpdateSelectionMarks()
@@ -232,7 +429,14 @@ public sealed partial class LibraryPage : Page
     }
 
     private void MediaGrid_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-        => OpenSelected();
+    {
+        if (IsKeyDown(VirtualKey.Shift) || IsKeyDown(VirtualKey.Control))
+        {
+            return;
+        }
+
+        OpenSelected();
+    }
 
     private void MediaGrid_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
@@ -242,6 +446,7 @@ public sealed partial class LibraryPage : Page
             return;
         }
 
+        _selectionAnchor = item;
         if (!MediaGrid.SelectedItems.Contains(item))
         {
             MediaGrid.SelectedItems.Clear();
@@ -287,16 +492,25 @@ public sealed partial class LibraryPage : Page
             open.Click += (_, _) => OpenSelected();
             flyout.Items.Add(open);
 
-            if (!one.IsVideo)
+            if (one.IsMissing)
             {
-                var copy = new MenuFlyoutItem { Text = "Copy" };
-                copy.Click += async (_, _) => await CopySelectionAsync();
-                flyout.Items.Add(copy);
+                var locate = new MenuFlyoutItem { Text = "Locate" };
+                locate.Click += async (_, _) => await LocateSelectionAsync(one);
+                flyout.Items.Add(locate);
             }
+            else
+            {
+                if (!one.IsVideo)
+                {
+                    var copy = new MenuFlyoutItem { Text = "Copy" };
+                    copy.Click += async (_, _) => await CopySelectionAsync();
+                    flyout.Items.Add(copy);
+                }
 
-            var rename = new MenuFlyoutItem { Text = "Rename" };
-            rename.Click += async (_, _) => await RenameItemAsync(one);
-            flyout.Items.Add(rename);
+                var rename = new MenuFlyoutItem { Text = "Rename" };
+                rename.Click += async (_, _) => await RenameItemAsync(one);
+                flyout.Items.Add(rename);
+            }
         }
 
         var add = new MenuFlyoutSubItem { Text = selected.Count == 1 ? "Add to" : $"Add {selected.Count} to" };
@@ -336,17 +550,21 @@ public sealed partial class LibraryPage : Page
         }
 
         flyout.Items.Add(relocate);
+        AddOrganizeFlyout(flyout, selected);
         flyout.Items.Add(new MenuFlyoutSeparator());
 
         var inAllMedia = IsPermanentDeleteView();
         var favorites = ViewModel.SelectedFolder?.IsFavorites == true;
+        var linkedOnly = inAllMedia && selected.All(item => item.IsLinked);
         var delete = new MenuFlyoutItem
         {
             Text = favorites
                 ? (selected.Count == 1 ? "Remove from Favorites" : $"Remove {selected.Count} from Favorites")
-                : selected.Count == 1
-                    ? (inAllMedia ? "Delete" : "Remove from folder")
-                    : (inAllMedia ? $"Delete {selected.Count} items" : $"Remove {selected.Count} items")
+                : linkedOnly
+                    ? (selected.Count == 1 ? "Remove from library" : $"Remove {selected.Count} from library")
+                    : selected.Count == 1
+                        ? (inAllMedia ? "Delete" : "Remove from folder")
+                        : (inAllMedia ? $"Delete {selected.Count} items" : $"Remove {selected.Count} items")
         };
         delete.Click += Delete_Click;
         flyout.Items.Add(delete);
@@ -568,25 +786,62 @@ public sealed partial class LibraryPage : Page
         var inAllMedia = IsPermanentDeleteView();
         var recentlyDeleted = ViewModel.SelectedFolder?.IsRecentlyDeleted == true;
         var favorites = ViewModel.SelectedFolder?.IsFavorites == true;
+        var linked = selected.Count(item => item.IsLinked);
+        string title;
+        string content;
+        string confirm;
+        if (recentlyDeleted)
+        {
+            title = "Delete forever?";
+            content = selected.Count == 1
+                ? $"Delete {selected[0].DisplayName} forever? This cannot be undone."
+                : $"Delete {selected.Count} items forever? This cannot be undone.";
+            confirm = "Delete forever";
+        }
+        else if (favorites)
+        {
+            title = "Remove from Favorites?";
+            content = selected.Count == 1
+                ? $"Remove {selected[0].DisplayName} from Favorites? The file stays in the library."
+                : $"Remove {selected.Count} items from Favorites? The files stay in the library.";
+            confirm = "Remove";
+        }
+        else if (!inAllMedia)
+        {
+            title = "Remove from folder?";
+            content = selected.Count == 1
+                ? $"Remove {selected[0].DisplayName} from this folder? It stays in All media."
+                : $"Remove {selected.Count} items from this folder? They stay in All media.";
+            confirm = "Remove";
+        }
+        else if (linked == selected.Count)
+        {
+            title = "Remove from library?";
+            content = selected.Count == 1
+                ? $"Remove {selected[0].DisplayName} from the library? The original file stays where it is."
+                : $"Remove {selected.Count} items from the library? The original files stay where they are.";
+            confirm = "Remove";
+        }
+        else if (linked > 0)
+        {
+            title = "Delete from library?";
+            content = "Copies go to Recently deleted for 7 days. Linked files stay on disk and are only removed from the library.";
+            confirm = "Delete";
+        }
+        else
+        {
+            title = "Delete from library?";
+            content = selected.Count == 1
+                ? $"Delete {selected[0].DisplayName}? You can restore it from Recently deleted for 7 days."
+                : $"Delete {selected.Count} items? You can restore them from Recently deleted for 7 days.";
+            confirm = "Delete";
+        }
+
         var dialog = new ContentDialog
         {
-            Title = recentlyDeleted ? "Delete forever?" : favorites ? "Remove from Favorites?" : inAllMedia ? "Delete from library?" : "Remove from folder?",
-            Content = recentlyDeleted
-                ? (selected.Count == 1
-                    ? $"Delete {selected[0].DisplayName} forever? This cannot be undone."
-                    : $"Delete {selected.Count} items forever? This cannot be undone.")
-                : favorites
-                ? (selected.Count == 1
-                    ? $"Remove {selected[0].DisplayName} from Favorites? The file stays in the library."
-                    : $"Remove {selected.Count} items from Favorites? The files stay in the library.")
-                : inAllMedia
-                ? (selected.Count == 1
-                    ? $"Delete {selected[0].DisplayName}? You can restore it from Recently deleted for 7 days."
-                    : $"Delete {selected.Count} items? You can restore them from Recently deleted for 7 days.")
-                : (selected.Count == 1
-                    ? $"Remove {selected[0].DisplayName} from this folder? It stays in All media."
-                    : $"Remove {selected.Count} items from this folder? They stay in All media."),
-            PrimaryButtonText = recentlyDeleted ? "Delete forever" : favorites ? "Remove" : inAllMedia ? "Delete" : "Remove",
+            Title = title,
+            Content = content,
+            PrimaryButtonText = confirm,
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot
@@ -980,82 +1235,20 @@ public sealed partial class LibraryPage : Page
         }
     }
 
-    private void ShowContinue()
+    private async Task LocateSelectionAsync(MediaItem item)
     {
-        ContinueList.Children.Clear();
-        var points = PlaybackProgress.Unfinished().Take(16).ToArray();
-        ContinueSection.Visibility = points.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (points.Length == 0)
+        await ViewModel.LocateAsync(item);
+        MediaGrid.SelectedItems.Clear();
+    }
+
+    private async void Locate_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.DetailsItem is not { IsMissing: true } item)
         {
             return;
         }
 
-        var library = App.MediaLibrary.GetItems(null);
-        foreach (var point in points)
-        {
-            var file = library.FirstOrDefault(item => item.IsVideo && string.Equals(item.FilePath, point.Key, StringComparison.OrdinalIgnoreCase));
-            var title = file?.DisplayName ?? point.Title ?? ContinueName(point.Key);
-            var card = new ContinueWatchCard();
-            card.Show(title, ContinuePlace(point.TimeMs, point.DurationMs), ContinueFraction(point.TimeMs, point.DurationMs), file?.FilePath);
-            card.Chosen += (_, _) => OpenContinue(point.Key, file);
-            ContinueList.Children.Add(card);
-        }
-    }
-
-    private void OpenContinue(string key, MediaItem? file)
-    {
-        if (file is not null && File.Exists(file.FilePath))
-        {
-            Frame.Navigate(typeof(VideoPlayerPage), file);
-            return;
-        }
-
-        if (StreamLink.TryNormalize(key, out var page) && App.MainAppWindow is MainWindow window)
-        {
-            window.OpenResolvedPage(page, PlaybackProgress.Load(key));
-            return;
-        }
-
-        ViewModel.ShowStatus("That video is no longer on this PC.", InfoBarSeverity.Warning);
-        ShowContinue();
-    }
-
-    private static string ContinueName(string key)
-    {
-        if (Uri.TryCreate(key, UriKind.Absolute, out var page) && page.Host.Length > 0)
-        {
-            return page.Host;
-        }
-
-        return Path.GetFileName(key);
-    }
-
-    private static string ContinuePlace(long timeMs, long durationMs)
-    {
-        var at = ContinueClock(timeMs);
-        if (durationMs <= timeMs + 1_000)
-        {
-            return $"At {at}";
-        }
-
-        return $"At {at} · {ContinueClock(durationMs - timeMs)} left";
-    }
-
-    private static double ContinueFraction(long timeMs, long durationMs)
-        => durationMs > timeMs ? timeMs / (double)durationMs : 0;
-
-    private static string ContinueClock(long durationMs)
-    {
-        if (durationMs < 0)
-        {
-            return "0:00";
-        }
-
-        var totalSeconds = durationMs / 1000;
-        var hours = totalSeconds / 3600;
-        var minutes = totalSeconds % 3600 / 60;
-        var seconds = totalSeconds % 60;
-        return hours > 0 ? $"{hours}:{minutes:00}:{seconds:00}" : $"{minutes}:{seconds:00}";
+        await LocateSelectionAsync(item);
     }
 
     private void OpenSelected()
@@ -1063,6 +1256,12 @@ public sealed partial class LibraryPage : Page
         var item = SelectedItems().LastOrDefault() ?? ViewModel.DetailsItem;
         if (item is null)
         {
+            return;
+        }
+
+        if (item.IsMissing)
+        {
+            ViewModel.ShowStatus("This file is missing. Locate it to keep saved words, bookmarks, and the playback position.", InfoBarSeverity.Warning);
             return;
         }
 
@@ -1081,4 +1280,213 @@ public sealed partial class LibraryPage : Page
 
     private IReadOnlyList<MediaItem> SelectedItems()
         => MediaGrid.SelectedItems.OfType<MediaItem>().ToArray();
+
+    private void AddOrganizeFlyout(MenuFlyout flyout, IReadOnlyList<MediaItem> selected)
+    {
+        if (ViewModel.SelectedFolder?.IsRecentlyDeleted == true)
+        {
+            return;
+        }
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        var playlist = new MenuFlyoutItem { Text = "Add to playlist" };
+        playlist.Click += async (_, _) => await AddSelectionToPlaylistAsync();
+        flyout.Items.Add(playlist);
+
+        var addFavorites = new MenuFlyoutItem
+        {
+            Text = selected.Count == 1 ? "Add to favorites" : $"Add {selected.Count} to favorites"
+        };
+        addFavorites.Click += (_, _) => AddSelectionToFavorites();
+        flyout.Items.Add(addFavorites);
+
+        var removeFavorites = new MenuFlyoutItem
+        {
+            Text = selected.Count == 1 ? "Remove from favorites" : $"Remove {selected.Count} from favorites"
+        };
+        removeFavorites.Click += (_, _) => RemoveSelectionFromFavorites();
+        flyout.Items.Add(removeFavorites);
+    }
+
+    private void ClearSelection_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingSelection = null;
+        _selectionAnchor = null;
+        MediaGrid.SelectedItems.Clear();
+    }
+
+    private async void AddToPlaylist_Click(object sender, RoutedEventArgs e)
+        => await AddSelectionToPlaylistAsync();
+
+    private void AddFavorites_Click(object sender, RoutedEventArgs e)
+        => AddSelectionToFavorites();
+
+    private void RemoveFavorites_Click(object sender, RoutedEventArgs e)
+        => RemoveSelectionFromFavorites();
+
+    private void AddSelectionToFavorites()
+    {
+        if (ViewModel.SelectedFolder?.IsRecentlyDeleted == true)
+        {
+            return;
+        }
+
+        var paths = SelectedItems().Select(item => item.FilePath).Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
+        var added = MediaFavorites.AddMany(paths);
+        RefreshFavoriteIcons();
+        ViewModel.ShowStatus(
+            added == 0
+                ? "Those files are already favorites."
+                : added == 1 ? "Added 1 file to favorites." : $"Added {added} files to favorites.",
+            added == 0 ? InfoBarSeverity.Informational : InfoBarSeverity.Success);
+    }
+
+    private void RemoveSelectionFromFavorites()
+    {
+        if (ViewModel.SelectedFolder?.IsRecentlyDeleted == true)
+        {
+            return;
+        }
+
+        var paths = SelectedItems().Select(item => item.FilePath).Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
+        var removed = MediaFavorites.RemoveMany(paths);
+        RefreshFavoriteIcons();
+        ViewModel.ShowStatus(
+            removed == 0
+                ? "Those files are not favorites."
+                : removed == 1 ? "Removed 1 file from favorites." : $"Removed {removed} files from favorites.",
+            removed == 0 ? InfoBarSeverity.Informational : InfoBarSeverity.Success);
+    }
+
+    private void RefreshFavoriteIcons()
+    {
+        foreach (var entry in ViewModel.Items)
+        {
+            if (MediaGrid.ContainerFromItem(entry) is GridViewItem container && CardIn(container) is MediaCard card)
+            {
+                card.RefreshFavorite();
+            }
+        }
+    }
+
+    private async Task AddSelectionToPlaylistAsync()
+    {
+        if (ViewModel.SelectedFolder?.IsRecentlyDeleted == true)
+        {
+            return;
+        }
+
+        var selected = SelectedItems();
+        if (selected.Count == 0)
+        {
+            return;
+        }
+
+        var candidates = selected
+            .Where(item => item.IsVideo && !item.IsMissing && !string.IsNullOrWhiteSpace(item.FilePath))
+            .Select(item => item.FilePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var videos = candidates.Length == 0
+            ? []
+            : await Task.Run(() => candidates.Where(File.Exists).ToArray());
+        if (videos.Length == 0)
+        {
+            ViewModel.ShowStatus("Choose a video that is on this PC. Photos are not added to a playlist.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var choices = Playlists.All().Select(list => new PlaylistPick(list.Name, list.Id, false)).ToList();
+        choices.Add(new PlaylistPick("New playlist…", null, true));
+        var combo = new ComboBox
+        {
+            DisplayMemberPath = nameof(PlaylistPick.Name),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ItemsSource = choices,
+            MinWidth = 320
+        };
+        var nameBox = new TextBox { PlaceholderText = "Playlist name" };
+        void UpdateNameBox()
+        {
+            var create = combo.SelectedItem is PlaylistPick { CreateNew: true };
+            nameBox.Visibility = create ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        combo.SelectionChanged += (_, _) => UpdateNameBox();
+        combo.SelectedIndex = 0;
+        UpdateNameBox();
+
+        var leftOut = selected.Any(item => !videos.Contains(item.FilePath, StringComparer.OrdinalIgnoreCase));
+        var note = videos.Length == 1 ? "1 video selected." : $"{videos.Length} videos selected.";
+        if (leftOut)
+        {
+            note += " Photos and missing files stay out.";
+        }
+
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "Playlist" });
+        panel.Children.Add(combo);
+        panel.Children.Add(nameBox);
+        var dialog = new ContentDialog
+        {
+            Title = "Add to playlist",
+            Content = panel,
+            PrimaryButtonText = "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        try
+        {
+            if (combo.SelectedItem is not PlaylistPick choice)
+            {
+                return;
+            }
+
+            var id = choice.Id;
+            if (choice.CreateNew)
+            {
+                var created = Playlists.Create(nameBox.Text);
+                if (created is null)
+                {
+                    ViewModel.ShowStatus("Type a playlist name that is not already used.", InfoBarSeverity.Warning);
+                    return;
+                }
+
+                id = created.Id;
+            }
+
+            if (string.IsNullOrEmpty(id))
+            {
+                return;
+            }
+
+            var added = Playlists.Add(id, videos);
+            var message = added == 0
+                ? "Those videos are already in this playlist."
+                : added == 1 ? "Added 1 video." : $"Added {added} videos.";
+            if (leftOut)
+            {
+                message += " Photos and missing files were left out.";
+            }
+
+            ViewModel.ShowStatus(message, added == 0 ? InfoBarSeverity.Informational : InfoBarSeverity.Success);
+        }
+        catch (IOException)
+        {
+            ViewModel.ShowStatus("Could not add those videos.", InfoBarSeverity.Error);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ViewModel.ShowStatus("Could not add those videos.", InfoBarSeverity.Error);
+        }
+    }
+
+    private sealed record PlaylistPick(string Name, string? Id, bool CreateNew);
 }

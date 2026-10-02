@@ -4,10 +4,14 @@ namespace PersonalMediaPlayer.App.Playback;
 
 internal static class MediaFavorites
 {
-    private static readonly string FilePath = Path.Combine(
+    private static readonly string DefaultFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PersonalMediaPlayer",
         "favorites.json");
+
+    internal static string? StoreOverride { get; set; }
+
+    private static string FilePath => StoreOverride ?? DefaultFilePath;
 
     public static event EventHandler? Changed;
 
@@ -26,6 +30,50 @@ internal static class MediaFavorites
         Write(items);
         Changed?.Invoke(null, EventArgs.Empty);
         return added;
+    }
+
+    public static int AddMany(IEnumerable<string> paths)
+    {
+        var items = Read();
+        var added = 0;
+        foreach (var path in paths)
+        {
+            if (!string.IsNullOrWhiteSpace(path) && items.Add(path))
+            {
+                added++;
+            }
+        }
+
+        if (added == 0)
+        {
+            return 0;
+        }
+
+        Write(items);
+        Changed?.Invoke(null, EventArgs.Empty);
+        return added;
+    }
+
+    public static int RemoveMany(IEnumerable<string> paths)
+    {
+        var items = Read();
+        var removed = 0;
+        foreach (var path in paths)
+        {
+            if (!string.IsNullOrWhiteSpace(path) && items.Remove(path))
+            {
+                removed++;
+            }
+        }
+
+        if (removed == 0)
+        {
+            return 0;
+        }
+
+        Write(items);
+        Changed?.Invoke(null, EventArgs.Empty);
+        return removed;
     }
 
     public static void Move(string oldPath, string newPath)
@@ -68,8 +116,10 @@ internal static class MediaFavorites
                 return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
 
-            return JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText(FilePath))
-                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var parsed = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(FilePath)) ?? [];
+            return new HashSet<string>(
+                parsed.Where(path => !string.IsNullOrWhiteSpace(path)),
+                StringComparer.OrdinalIgnoreCase);
         }
         catch
         {

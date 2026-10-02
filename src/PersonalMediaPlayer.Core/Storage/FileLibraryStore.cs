@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Models;
@@ -109,6 +110,103 @@ public sealed class FileLibraryStore : ILibraryStore
         return destination;
     }
 
+    public string LinkMedia(string sourcePath, string? folderName = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        var full = Path.GetFullPath(sourcePath);
+        if (!File.Exists(full))
+        {
+            throw new FileNotFoundException("The selected file no longer exists.", sourcePath);
+        }
+
+        if (!IsSupportedMedia(full))
+        {
+            throw new NotSupportedException($"'{Path.GetExtension(full)}' is not a supported media type.");
+        }
+
+        if (!IsManagedCopy(full) && !IsLinked(full))
+        {
+            Links.Add(new LinkRecord { Path = full, AddedUtc = DateTimeOffset.UtcNow });
+            SaveLinks();
+        }
+
+        if (CanAddImportedFileTo(folderName))
+        {
+            AddToFolder(full, folderName!);
+        }
+
+        return full;
+    }
+
+    public string RelocateLink(string currentPath, string newPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(currentPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newPath);
+        var current = Path.GetFullPath(currentPath);
+        if (!IsLinked(current))
+        {
+            throw new InvalidOperationException("This file is not a linked library item.");
+        }
+
+        var next = Path.GetFullPath(newPath);
+        if (!File.Exists(next))
+        {
+            throw new FileNotFoundException("The selected file no longer exists.", newPath);
+        }
+
+        if (!IsSupportedMedia(next))
+        {
+            throw new NotSupportedException($"'{Path.GetExtension(next)}' is not a supported media type.");
+        }
+
+        if (string.Equals(current, next, StringComparison.OrdinalIgnoreCase))
+        {
+            return next;
+        }
+
+        if (!MediaFileTypes.SameKind(current, next))
+        {
+            throw new InvalidOperationException(MediaFileTypes.LocateMismatchWarning(current));
+        }
+
+        if (IsManagedCopy(next) || IsLinked(next))
+        {
+            throw new InvalidOperationException("That file is already in the library.");
+        }
+
+        var backup = LinkBackupPath(current);
+        RetargetLink(current, next, backup);
+        ReplaceMemberId(current, next);
+        return next;
+    }
+
+    public bool IsLinked(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return false;
+        }
+
+        var full = Path.GetFullPath(filePath);
+        return !IsManagedCopy(full) && FindLink(full) is not null;
+    }
+
+    public DateTimeOffset? LinkAddedAt(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return null;
+        }
+
+        var full = Path.GetFullPath(filePath);
+        if (IsManagedCopy(full))
+        {
+            return null;
+        }
+
+        return FindLink(full)?.AddedUtc;
+    }
+
     public IReadOnlyList<string> EnumerateImageFiles()
         => EnumerateFiles(ImagesDirectory, MediaFileTypes.ImageExtensions)
             .OrderByDescending(File.GetCreationTimeUtc)
@@ -116,12 +214,32 @@ public sealed class FileLibraryStore : ILibraryStore
 
     public IReadOnlyList<string> EnumerateMediaFiles(string? folderName = null)
     {
+        var links = LinkMap();
         IEnumerable<string> files;
         if (string.IsNullOrWhiteSpace(folderName))
         {
-            files = EnumerateFiles(ImagesDirectory, AllMediaExtensions)
-                .Concat(EnumerateFiles(VideosDirectory, AllMediaExtensions))
-                .Concat(EnumerateFiles(ScreenshotsDirectory, MediaFileTypes.ImageExtensions));
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var combined = new List<string>();
+            foreach (var path in EnumerateFiles(ImagesDirectory, AllMediaExtensions)
+                         .Concat(EnumerateFiles(VideosDirectory, AllMediaExtensions))
+                         .Concat(EnumerateFiles(ScreenshotsDirectory, MediaFileTypes.ImageExtensions)))
+            {
+                var full = Path.GetFullPath(path);
+                if (seen.Add(full))
+                {
+                    combined.Add(full);
+                }
+            }
+
+            foreach (var path in links.Keys)
+            {
+                if (seen.Add(path))
+                {
+                    combined.Add(path);
+                }
+            }
+
+            files = combined;
         }
         else if (IsScreenshotsFolder(folderName))
         {
@@ -130,11 +248,12 @@ public sealed class FileLibraryStore : ILibraryStore
         else
         {
             files = ReadMembers(folderName)
-                .Select(ResolveLibraryPath)
-                .Where(File.Exists);
+                .Select(id => ResolveMemberPath(id, links))
+                .OfType<string>()
+                .Where(path => File.Exists(path) || links.ContainsKey(path));
         }
 
-        return files.OrderByDescending(File.GetCreationTimeUtc).ToArray();
+        return files.OrderByDescending(path => Stamp(path, links)).ToArray();
     }
 
     public IReadOnlyList<string> EnumerateFolderNames()
@@ -212,6 +331,22 @@ public sealed class FileLibraryStore : ILibraryStore
 
     public void DeleteMedia(string filePath)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        var requested = Path.GetFullPath(filePath);
+        if (IsLinked(requested))
+        {
+            RemoveFromAllFolders(requested);
+            RemoveRecordingMembership(requested);
+            var backup = LinkBackupPath(requested);
+            RemoveLink(requested);
+            if (File.Exists(backup))
+            {
+                File.Delete(backup);
+            }
+
+            return;
+        }
+
         var full = EnsureLibraryFile(filePath);
         if (IsInRecentlyDeleted(full))
         {
@@ -323,8 +458,8 @@ public sealed class FileLibraryStore : ILibraryStore
             throw new InvalidOperationException("Photos, Videos, and This month fill themselves. Add the item to one of your folders instead.");
         }
 
-        var full = EnsureLibraryFile(filePath);
-        var id = RelativeId(full);
+        var full = EnsureCatalogFile(filePath);
+        var id = MemberId(full);
         var members = ReadMembers(folderName);
         if (members.Contains(id, StringComparer.OrdinalIgnoreCase))
         {
@@ -337,7 +472,7 @@ public sealed class FileLibraryStore : ILibraryStore
 
     public void RemoveFromFolder(string filePath, string folderName)
     {
-        var full = EnsureLibraryFile(filePath);
+        var full = EnsureCatalogFile(filePath);
         if (IsScreenshotsFolder(folderName) || IsRecordingsFolder(folderName))
         {
             throw new InvalidOperationException("Items stay in that folder. Delete the file to remove it.");
@@ -353,7 +488,7 @@ public sealed class FileLibraryStore : ILibraryStore
             throw new InvalidOperationException("Photos, Videos, and This month fill themselves. Delete the file to remove it from the library.");
         }
 
-        var id = RelativeId(full);
+        var id = MemberId(full);
         var members = ReadMembers(folderName);
         var next = members.Where(member => !member.Equals(id, StringComparison.OrdinalIgnoreCase)).ToArray();
         WriteMembers(folderName, next);
@@ -361,7 +496,7 @@ public sealed class FileLibraryStore : ILibraryStore
 
     public string MoveMedia(string filePath, string? folderName)
     {
-        var full = EnsureLibraryFile(filePath);
+        var full = EnsureCatalogFile(filePath);
         if (string.IsNullOrWhiteSpace(folderName))
         {
             RemoveFromAllFolders(full);
@@ -404,7 +539,7 @@ public sealed class FileLibraryStore : ILibraryStore
             throw new InvalidOperationException("Photos, Videos, and This month fill themselves. Add the item to one of your folders instead.");
         }
 
-        var full = EnsureLibraryFile(filePath);
+        var full = EnsureCatalogFile(filePath);
         var source = string.IsNullOrWhiteSpace(sourceFolder) ? null : sourceFolder.Trim();
         var leavingOne = source is not null && !IsReservedFolder(source);
         if (leavingOne && source!.Equals(destinationFolder, StringComparison.OrdinalIgnoreCase))
@@ -426,7 +561,12 @@ public sealed class FileLibraryStore : ILibraryStore
 
     public string RenameMedia(string filePath, string newName)
     {
-        var full = EnsureLibraryFile(filePath);
+        var full = EnsureCatalogFile(filePath);
+        if (IsLinked(full) && !File.Exists(full))
+        {
+            throw new InvalidOperationException("This file is missing. Locate it before renaming.");
+        }
+
         var directory = Path.GetDirectoryName(full) ?? ImagesDirectory;
         var extension = Path.GetExtension(full);
         var stem = Path.GetFileNameWithoutExtension(newName.Trim());
@@ -437,13 +577,14 @@ public sealed class FileLibraryStore : ILibraryStore
 
         var requested = NormalizeFileName(stem + extension);
         var destination = Path.Combine(directory, requested);
-        var oldId = RelativeId(full);
+        var oldId = MemberId(full);
         if (string.Equals(destination, full, StringComparison.Ordinal))
         {
             return full;
         }
 
-        var originalSource = OriginalBackupPath(full);
+        var linked = IsLinked(full);
+        var backup = linked ? LinkBackupPath(full) : OriginalBackupPath(full);
         if (string.Equals(destination, full, StringComparison.OrdinalIgnoreCase))
         {
             var temp = Path.Combine(directory, $".{Guid.NewGuid():N}{extension}");
@@ -456,18 +597,22 @@ public sealed class FileLibraryStore : ILibraryStore
             File.Move(full, destination);
         }
 
-        if (File.Exists(originalSource))
+        if (linked)
+        {
+            RetargetLink(full, destination, backup);
+        }
+        else if (File.Exists(backup))
         {
             var originalDestination = NestedOriginalPath(destination);
-            if (!string.Equals(originalSource, originalDestination, StringComparison.OrdinalIgnoreCase)
+            if (!string.Equals(backup, originalDestination, StringComparison.OrdinalIgnoreCase)
                 && !File.Exists(originalDestination))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(originalDestination)!);
-                File.Move(originalSource, originalDestination);
+                File.Move(backup, originalDestination);
             }
         }
 
-        ReplaceMemberId(oldId, RelativeId(destination));
+        ReplaceMemberId(oldId, MemberId(destination));
         return destination;
     }
 
@@ -503,7 +648,7 @@ public sealed class FileLibraryStore : ILibraryStore
     {
         try
         {
-            var full = EnsureLibraryFile(filePath);
+            var full = EnsureCatalogFile(filePath);
             var backup = OriginalBackupPath(full);
             return File.Exists(backup) ? backup : null;
         }
@@ -523,7 +668,7 @@ public sealed class FileLibraryStore : ILibraryStore
 
     public void RestoreOriginal(string filePath)
     {
-        var full = EnsureLibraryFile(filePath);
+        var full = EnsureCatalogFile(filePath);
         var backup = OriginalBackupPath(full);
         if (!File.Exists(backup))
         {
@@ -551,14 +696,24 @@ public sealed class FileLibraryStore : ILibraryStore
             throw new FileNotFoundException("The image to replace no longer exists.", existingPath);
         }
 
-        PreserveOriginal(existingPath);
+        var existingFull = EnsureCatalogFile(existingPath);
+        if (!File.Exists(existingFull))
+        {
+            throw new FileNotFoundException("The image to replace no longer exists.", existingPath);
+        }
+
+        PreserveOriginal(existingFull);
 
         var requestedName = NormalizeFileName(fileName);
-        var existingFull = Path.GetFullPath(existingPath);
+        var linked = IsLinked(existingFull);
         string destination;
         if (string.Equals(requestedName, Path.GetFileName(existingFull), StringComparison.OrdinalIgnoreCase))
         {
             destination = existingFull;
+        }
+        else if (linked)
+        {
+            destination = GetAvailablePath(requestedName, Path.GetDirectoryName(existingFull) ?? ImagesDirectory);
         }
         else
         {
@@ -583,10 +738,17 @@ public sealed class FileLibraryStore : ILibraryStore
             }
         }
 
-        if (!string.Equals(destination, existingFull, StringComparison.OrdinalIgnoreCase)
-            && File.Exists(existingFull))
+        if (!string.Equals(destination, existingFull, StringComparison.OrdinalIgnoreCase))
         {
-            File.Delete(existingFull);
+            if (linked)
+            {
+                RetargetLink(existingFull, destination, LinkBackupPath(existingFull));
+                ReplaceMemberId(existingFull, destination);
+            }
+            else if (File.Exists(existingFull))
+            {
+                File.Delete(existingFull);
+            }
         }
 
         return destination;
@@ -661,7 +823,7 @@ public sealed class FileLibraryStore : ILibraryStore
 
     private List<string> FoldersContaining(string fullPath)
     {
-        var id = RelativeId(fullPath);
+        var id = MemberId(fullPath);
         var names = new List<string>();
         foreach (var name in EnumerateFolderNames().Append(LibraryFolder.Recordings))
         {
@@ -780,7 +942,13 @@ public sealed class FileLibraryStore : ILibraryStore
 
     private string OriginalBackupPath(string fullPath)
     {
-        var nested = NestedOriginalPath(fullPath);
+        var full = Path.GetFullPath(fullPath);
+        if (IsLinked(full))
+        {
+            return LinkBackupPath(full);
+        }
+
+        var nested = NestedOriginalPath(full);
         if (File.Exists(nested))
         {
             if (ConflictsWithAnotherFile(fullPath, nested))
@@ -924,7 +1092,7 @@ public sealed class FileLibraryStore : ILibraryStore
 
     private void RemoveRecordingMembership(string fullPath)
     {
-        var id = RelativeId(fullPath);
+        var id = MemberId(fullPath);
         var members = ReadMembers(LibraryFolder.Recordings);
         var next = members.Where(member => !member.Equals(id, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (next.Length != members.Count)
@@ -935,7 +1103,7 @@ public sealed class FileLibraryStore : ILibraryStore
 
     private void RemoveFromAllFolders(string filePath)
     {
-        var id = RelativeId(filePath);
+        var id = MemberId(filePath);
         foreach (var name in EnumerateFolderNames().Append(LibraryFolder.Recordings))
         {
             if (IsRecordingsFolder(name))
@@ -993,6 +1161,203 @@ public sealed class FileLibraryStore : ILibraryStore
         }
 
         return full;
+    }
+
+    private string EnsureCatalogFile(string filePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        var full = Path.GetFullPath(filePath);
+        if (IsLinked(full))
+        {
+            return full;
+        }
+
+        return EnsureLibraryFile(full);
+    }
+
+    private string MemberId(string fullPath)
+    {
+        var full = Path.GetFullPath(fullPath);
+        return IsLinked(full) ? full : RelativeId(full);
+    }
+
+    private bool IsManagedCopy(string fullPath)
+    {
+        var full = Path.GetFullPath(fullPath);
+        return IsInsideDirectory(full, ImagesDirectory)
+            || IsInsideDirectory(full, VideosDirectory)
+            || IsInsideDirectory(full, ScreenshotsDirectory);
+    }
+
+    private static bool IsInsideDirectory(string fullPath, string directory)
+    {
+        var root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSupportedMedia(string fullPath)
+        => MediaFileTypes.IsImage(fullPath) || MediaFileTypes.IsVideo(fullPath);
+
+    private string LinksFile => Path.Combine(LibraryRoot, "links.json");
+
+    private List<LinkRecord>? _links;
+
+    private List<LinkRecord> Links => _links ??= ReadLinks();
+
+    private LinkRecord? FindLink(string fullPath)
+        => Links.FirstOrDefault(link => string.Equals(Path.GetFullPath(link.Path), fullPath, StringComparison.OrdinalIgnoreCase));
+
+    private Dictionary<string, DateTimeOffset> LinkMap()
+    {
+        var map = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in Links)
+        {
+            if (string.IsNullOrWhiteSpace(link.Path) || IsManagedCopy(link.Path))
+            {
+                continue;
+            }
+
+            map.TryAdd(Path.GetFullPath(link.Path), link.AddedUtc);
+        }
+
+        return map;
+    }
+
+    private List<LinkRecord> ReadLinks()
+    {
+        if (!File.Exists(LinksFile))
+        {
+            return [];
+        }
+
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<List<LinkRecord>>(File.ReadAllText(LinksFile)) ?? [];
+            var unique = new List<LinkRecord>();
+            foreach (var entry in loaded)
+            {
+                if (string.IsNullOrWhiteSpace(entry.Path))
+                {
+                    continue;
+                }
+
+                var full = Path.GetFullPath(entry.Path);
+                if (unique.Any(item => string.Equals(item.Path, full, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                entry.Path = full;
+                unique.Add(entry);
+            }
+
+            return unique;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+    }
+
+    private void SaveLinks()
+    {
+        var list = Links;
+        if (list.Count == 0)
+        {
+            if (File.Exists(LinksFile))
+            {
+                File.Delete(LinksFile);
+            }
+
+            return;
+        }
+
+        File.WriteAllText(LinksFile, JsonSerializer.Serialize(list));
+    }
+
+    private void RemoveLink(string fullPath)
+    {
+        var full = Path.GetFullPath(fullPath);
+        Links.RemoveAll(link => string.Equals(Path.GetFullPath(link.Path), full, StringComparison.OrdinalIgnoreCase));
+        SaveLinks();
+    }
+
+    private void RetargetLink(string oldPath, string newPath, string? backupToMove)
+    {
+        var oldFull = Path.GetFullPath(oldPath);
+        var entry = FindLink(oldFull) ?? throw new InvalidOperationException("This file is not a linked library item.");
+        entry.Path = Path.GetFullPath(newPath);
+        SaveLinks();
+        if (string.IsNullOrWhiteSpace(backupToMove) || !File.Exists(backupToMove))
+        {
+            return;
+        }
+
+        var target = LinkBackupPath(entry.Path);
+        if (string.Equals(backupToMove, target, StringComparison.OrdinalIgnoreCase) || File.Exists(target))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.Move(backupToMove, target);
+    }
+
+    private string LinkBackupPath(string fullPath)
+    {
+        var full = Path.GetFullPath(fullPath);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(full)));
+        var extension = Path.GetExtension(full);
+        if (string.IsNullOrEmpty(extension))
+        {
+            extension = ".bin";
+        }
+
+        return Path.Combine(OriginalsDirectory, "links", hash + extension);
+    }
+
+    private string? ResolveMemberPath(string id, IReadOnlyDictionary<string, DateTimeOffset> links)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        if (Path.IsPathRooted(id))
+        {
+            var full = Path.GetFullPath(id);
+            return links.ContainsKey(full) ? full : null;
+        }
+
+        var combined = Path.GetFullPath(Path.Combine(LibraryRoot, id.Replace('/', Path.DirectorySeparatorChar)));
+        var root = Path.GetFullPath(LibraryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!combined.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return combined;
+    }
+
+    private static DateTime Stamp(string path, IReadOnlyDictionary<string, DateTimeOffset> links)
+    {
+        if (links.TryGetValue(Path.GetFullPath(path), out var added))
+        {
+            return added.UtcDateTime;
+        }
+
+        return File.Exists(path) ? File.GetCreationTimeUtc(path) : DateTime.MinValue;
+    }
+
+    private sealed class LinkRecord
+    {
+        public string Path { get; set; } = string.Empty;
+
+        public DateTimeOffset AddedUtc { get; set; }
     }
 
     private static string NormalizeFolderName(string name)

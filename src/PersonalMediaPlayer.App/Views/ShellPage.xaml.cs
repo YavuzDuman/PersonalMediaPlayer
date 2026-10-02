@@ -56,6 +56,7 @@ public sealed partial class ShellPage : UserControl
     {
         NavView.IsPaneVisible = true;
         NavView.IsSettingsVisible = true;
+        NameSettingsInEnglish();
         NavView.OpenPaneLength = 240;
         NavView.CompactPaneLength = 48;
         if (NavView.PaneDisplayMode == NavigationViewPaneDisplayMode.LeftMinimal)
@@ -68,16 +69,26 @@ public sealed partial class ShellPage : UserControl
     {
         foreach (var item in NavView.MenuItems.OfType<NavigationViewItem>())
         {
-            if (item.Tag as string == "library")
+            if (item.Tag as string == "home")
             {
                 NavView.SelectedItem = item;
                 if (NavFrame.Content is null)
                 {
-                    NavigateToSection(typeof(LibraryPage));
+                    NavigateToSection(typeof(HomePage));
                 }
 
                 break;
             }
+        }
+
+        NameSettingsInEnglish();
+    }
+
+    private void NameSettingsInEnglish()
+    {
+        if (NavView.SettingsItem is NavigationViewItem settings)
+        {
+            settings.Content = "Settings";
         }
     }
 
@@ -96,6 +107,9 @@ public sealed partial class ShellPage : UserControl
 
         switch (item.Tag as string)
         {
+            case "home":
+                NavigateToSection(typeof(HomePage));
+                break;
             case "library":
                 NavigateToSection(typeof(LibraryPage));
                 break;
@@ -186,11 +200,6 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
-        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(null, null, back: true))
-        {
-            return;
-        }
-
         if (NavFrame.Content is MergePage merge && !merge.PrepareToLeave(null, null, back: true))
         {
             return;
@@ -244,11 +253,6 @@ public sealed partial class ShellPage : UserControl
         }
 
         if (NavFrame.Content is MediaPreviewPage preview && !preview.PrepareToLeave(pageType, parameter, back: false))
-        {
-            return false;
-        }
-
-        if (NavFrame.Content is DownloadPage download && !download.PrepareToLeave(pageType, parameter, back: false))
         {
             return false;
         }
@@ -312,7 +316,9 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
-        var tag = type == typeof(PlaylistsPage)
+        var tag = type == typeof(HomePage)
+            ? "home"
+            : type == typeof(PlaylistsPage)
             ? "playlists"
             : type == typeof(SavedWordsPage)
             ? "words"

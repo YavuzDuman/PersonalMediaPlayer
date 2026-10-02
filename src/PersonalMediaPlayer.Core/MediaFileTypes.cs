@@ -22,4 +22,12 @@ public static class MediaFileTypes
 
     public static MediaKind GetKind(string path)
         => IsVideo(path) ? MediaKind.Video : MediaKind.Image;
+
+    public static bool SameKind(string left, string right)
+        => IsVideo(left) == IsVideo(right);
+
+    public static string LocateMismatchWarning(string currentPath)
+        => IsVideo(currentPath)
+            ? "Choose a video. A photo cannot replace this video."
+            : "Choose a photo. A video cannot replace this photo.";
 }

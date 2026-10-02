@@ -173,6 +173,27 @@ public class HlsMasterTests
     }
 
     [Fact]
+    public void APreferredLanguageUsesTheOriginalTrackWhenItIsMissing()
+    {
+        var text = """
+            #EXTM3U
+            #EXT-X-MEDIA:URI="https://cdn.example/a/en.m3u8",TYPE=AUDIO,GROUP-ID="233",LANGUAGE="en",NAME="English - dubbed",DEFAULT=YES,AUTOSELECT=YES
+            #EXT-X-MEDIA:URI="https://cdn.example/a/ja.m3u8",TYPE=AUDIO,GROUP-ID="233",LANGUAGE="ja",NAME="Japanese - original",DEFAULT=NO,AUTOSELECT=YES
+            #EXT-X-MEDIA:URI="https://cdn.example/a/es.m3u8",TYPE=AUDIO,GROUP-ID="233",LANGUAGE="es-US",NAME="Spanish",DEFAULT=NO,AUTOSELECT=YES
+            #EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=640x360,AUDIO="233"
+            https://cdn.example/v/360.m3u8
+            """;
+        var master = Parse(text);
+        Assert.Equal("en", master.SelectAudio(null));
+        Assert.Equal("ja", master.ChooseAudio(null, null));
+        Assert.Equal("en", master.ChooseAudio(null, "en"));
+        Assert.Equal("es-US", master.ChooseAudio(null, "es"));
+        Assert.Equal("ja", master.ChooseAudio(null, "fr"));
+        Assert.Equal("en", master.ChooseAudio("en", "ja"));
+        Assert.Equal("ja", master.ChooseAudio("tr", "es"));
+    }
+
+    [Fact]
     public void AnUnknownHeightUsesTheClosestOne()
     {
         var master = Parse(Master(new[] { "en" }, "en"));

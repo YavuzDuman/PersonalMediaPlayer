@@ -23,7 +23,8 @@ internal sealed record StreamOpenRequest(
     Uri? Audio = null,
     IReadOnlyList<DownloadSubtitle>? Subtitles = null,
     DownloadQuality? Quality = null,
-    SavedWord? Focus = null);
+    SavedWord? Focus = null,
+    Uri? Thumbnail = null);
 
 internal static class StreamLink
 {

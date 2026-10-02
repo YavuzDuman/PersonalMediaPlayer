@@ -25,7 +25,7 @@
             <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Playlists" />
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="Collect library videos and play them in order." />
+                Text="Search by name, drag to rearrange, or sort. The order is saved." />
         </StackPanel>
         <InfoBar
             x:Name="StatusBar"
@@ -122,20 +122,42 @@
                                 <Button Click="Rename_Click" Content="Rename" />
                                 <Button Click="Delete_Click" Content="Delete" />
                             </StackPanel>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    x:Name="VideoSearch"
+                                    PlaceholderText="Search by name"
+                                    TextChanged="VideoSearch_TextChanged" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="Sort" />
+                                    <Button Click="SortByName_Click" Content="Name" ToolTipService.ToolTip="Sort A to Z" />
+                                    <Button Click="SortByDate_Click" Content="Date added" ToolTipService.ToolTip="Newest first" />
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
                         <Grid Grid.Row="1">
                             <TextBlock
                                 x:Name="EmptyVideos"
                                 Margin="16,0,16,16"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="Add videos from your library. You can select one or several."
+                                Text="Add videos from your library, or add a stream from the player."
                                 TextWrapping="Wrap"
                                 Visibility="Collapsed" />
                             <Border
                                 x:Name="VideoHost"
                                 BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                 BorderThickness="0,1,0,0">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ScrollViewer
+                                    x:Name="VideoScroller"
+                                    AllowDrop="True"
+                                    DragOver="VideoScroller_DragOver"
+                                    VerticalScrollBarVisibility="Auto">
                                     <StackPanel x:Name="VideoRows" />
                                 </ScrollViewer>
                             </Border>

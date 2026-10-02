@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using PersonalMediaPlayer.App.Subtitles;
 
@@ -21,7 +20,7 @@ public sealed partial class SavedWordsPanel : UserControl
 
     internal event EventHandler<SavedWord>? WordChosen;
 
-    public bool IsOpen => Panel.Visibility == Visibility.Visible;
+    public bool IsOpen => Visibility == Visibility.Visible;
 
     public string? CurrentVideoPath { get; set; }
 
@@ -39,8 +38,7 @@ public sealed partial class SavedWordsPanel : UserControl
 
     public void Open()
     {
-        Rail.Visibility = Visibility.Collapsed;
-        Panel.Visibility = Visibility.Visible;
+        Visibility = Visibility.Visible;
         Refresh();
     }
 
@@ -53,8 +51,7 @@ public sealed partial class SavedWordsPanel : UserControl
 
     public void Collapse()
     {
-        Panel.Visibility = Visibility.Collapsed;
-        Rail.Visibility = Visibility.Visible;
+        Visibility = Visibility.Collapsed;
     }
 
     public void SetStatus(string? message, InfoBarSeverity severity = InfoBarSeverity.Warning)
@@ -122,12 +119,6 @@ public sealed partial class SavedWordsPanel : UserControl
         {
             Scroller.ChangeView(null, offset, null, true);
         }
-    }
-
-    private void Rail_Tapped(object sender, TappedRoutedEventArgs e)
-    {
-        e.Handled = true;
-        Open();
     }
 
     private void Collapse_Click(object sender, RoutedEventArgs e) => Collapse();

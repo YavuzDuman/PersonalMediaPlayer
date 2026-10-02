@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace PersonalMediaPlayer.App.Playback;
 
-internal readonly record struct ResumePoint(string Key, long TimeMs, long DurationMs, string? Title, DateTimeOffset Seen);
+internal readonly record struct ResumePoint(string Key, long TimeMs, long DurationMs, string? Title, DateTimeOffset Seen, string? Thumbnail);
 
 internal static class PlaybackProgress
 {
@@ -33,13 +33,13 @@ internal static class PlaybackProgress
     {
         return Read()
             .Where(pair => pair.Value.TimeMs >= ResumeAfterMs && IsAvailable(pair.Key))
-            .Select(pair => new ResumePoint(pair.Key, pair.Value.TimeMs, pair.Value.DurationMs, pair.Value.Title, pair.Value.Seen))
+            .Select(pair => new ResumePoint(pair.Key, pair.Value.TimeMs, pair.Value.DurationMs, pair.Value.Title, pair.Value.Seen, pair.Value.Thumbnail))
             .OrderByDescending(point => point.Seen)
             .ThenBy(point => point.Key, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
-    public static void Save(string filePath, long timeMs, long durationMs, string? title = null)
+    public static void Save(string filePath, long timeMs, long durationMs, string? title = null, string? thumbnail = null)
     {
         var positions = Read();
         if (timeMs < ResumeAfterMs || durationMs <= 0 || timeMs >= durationMs - FinishedTailMs)
@@ -54,7 +54,8 @@ internal static class PlaybackProgress
 
         positions.TryGetValue(filePath, out var previous);
         var name = Clean(title) ?? previous.Title;
-        positions[filePath] = new StoredPoint(timeMs, durationMs, name, DateTimeOffset.Now);
+        var image = CleanUrl(thumbnail) ?? previous.Thumbnail;
+        positions[filePath] = new StoredPoint(timeMs, durationMs, name, DateTimeOffset.Now, image);
         Write(positions);
     }
 
@@ -126,7 +127,7 @@ internal static class PlaybackProgress
         point = default;
         if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var time) && time > 0)
         {
-            point = new StoredPoint(time, 0, null, DateTimeOffset.MinValue);
+            point = new StoredPoint(time, 0, null, DateTimeOffset.MinValue, null);
             return true;
         }
 
@@ -150,7 +151,10 @@ internal static class PlaybackProgress
             seen = parsed;
         }
 
-        point = new StoredPoint(stored, duration, title, seen);
+        var thumbnail = value.TryGetProperty("thumbnail", out var thumbnailElement) && thumbnailElement.ValueKind == JsonValueKind.String
+            ? CleanUrl(thumbnailElement.GetString())
+            : null;
+        point = new StoredPoint(stored, duration, title, seen, thumbnail);
         return true;
     }
 
@@ -166,6 +170,7 @@ internal static class PlaybackProgress
                     Time = pair.Value.TimeMs,
                     Duration = pair.Value.DurationMs > 0 ? pair.Value.DurationMs : null,
                     Title = pair.Value.Title,
+                    Thumbnail = pair.Value.Thumbnail,
                     Seen = pair.Value.Seen == DateTimeOffset.MinValue ? null : pair.Value.Seen.ToString("O")
                 },
                 StringComparer.Ordinal);
@@ -187,7 +192,22 @@ internal static class PlaybackProgress
         return trimmed.Length <= 120 ? trimmed : trimmed[..120].Trim();
     }
 
-    private readonly record struct StoredPoint(long TimeMs, long DurationMs, string? Title, DateTimeOffset Seen);
+    private static string? CleanUrl(string? thumbnail)
+    {
+        var trimmed = thumbnail?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed)
+            || trimmed.Length > 2_000
+            || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https")
+            || string.IsNullOrEmpty(uri.Host))
+        {
+            return null;
+        }
+
+        return uri.AbsoluteUri;
+    }
+
+    private readonly record struct StoredPoint(long TimeMs, long DurationMs, string? Title, DateTimeOffset Seen, string? Thumbnail);
 
     private sealed class StoredPosition
     {
@@ -199,6 +219,9 @@ internal static class PlaybackProgress
 
         [JsonPropertyName("title")]
         public string? Title { get; set; }
+
+        [JsonPropertyName("thumbnail")]
+        public string? Thumbnail { get; set; }
 
         [JsonPropertyName("seen")]
         public string? Seen { get; set; }

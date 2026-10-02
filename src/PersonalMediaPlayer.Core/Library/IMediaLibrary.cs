@@ -24,6 +24,10 @@ public interface IMediaLibrary
 
     MediaItem ImportMedia(Stream content, string originalFileName, string? folderName = null);
 
+    MediaItem LinkMedia(string sourcePath, string? folderName = null);
+
+    MediaItem RelocateLink(string currentPath, string newPath);
+
     IReadOnlyList<MediaItem> GetItems(string? folderName);
 
     Task<IReadOnlyList<MediaItem>> GetItemsAsync(string? folderName, CancellationToken cancellationToken = default);

@@ -98,6 +98,12 @@ public sealed class MediaLibrary : IMediaLibrary
     public MediaItem ImportMedia(Stream content, string originalFileName, string? folderName = null)
         => ToItem(_store.ImportMedia(content, originalFileName, folderName));
 
+    public MediaItem LinkMedia(string sourcePath, string? folderName = null)
+        => ToItem(_store.LinkMedia(sourcePath, folderName));
+
+    public MediaItem RelocateLink(string currentPath, string newPath)
+        => ToItem(_store.RelocateLink(currentPath, newPath));
+
     public IReadOnlyList<LibraryFolder> GetFolders()
     {
         var screenshots = Describe(LibraryFolder.Screenshots, _store.EnumerateMediaFiles(LibraryFolder.Screenshots));
@@ -188,6 +194,23 @@ public sealed class MediaLibrary : IMediaLibrary
             return null;
         }
 
+        if (Path.IsPathRooted(id))
+        {
+            var rooted = Path.GetFullPath(id);
+            if (_store.IsLinked(rooted))
+            {
+                return ToItem(rooted);
+            }
+
+            var libraryRoot = Path.GetFullPath(_store.LibraryRoot);
+            if (rooted.StartsWith(libraryRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(rooted))
+            {
+                return ToItem(rooted);
+            }
+
+            return null;
+        }
+
         var root = Path.GetFullPath(_store.LibraryRoot);
         var fullPath = Path.GetFullPath(Path.Combine(root, id.Replace('/', Path.DirectorySeparatorChar)));
         if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(fullPath))
@@ -214,16 +237,39 @@ public sealed class MediaLibrary : IMediaLibrary
 
     private MediaItem ToItem(string filePath)
     {
-        var info = new FileInfo(filePath);
+        var full = Path.GetFullPath(filePath);
+        var linked = _store.IsLinked(full);
+        var exists = File.Exists(full);
+        if (!exists && !linked)
+        {
+            throw new FileNotFoundException("The media file is not in the library.", filePath);
+        }
+
+        long size = 0;
+        DateTimeOffset imported;
+        if (exists)
+        {
+            var info = new FileInfo(full);
+            full = info.FullName;
+            size = info.Exists ? info.Length : 0;
+            var created = new DateTimeOffset(DateTime.SpecifyKind(info.CreationTimeUtc, DateTimeKind.Utc));
+            imported = linked ? _store.LinkAddedAt(full) ?? created : created;
+        }
+        else
+        {
+            imported = _store.LinkAddedAt(full) ?? DateTimeOffset.UtcNow;
+        }
+
         return new MediaItem
         {
-            Id = Path.GetRelativePath(_store.LibraryRoot, info.FullName).Replace('\\', '/'),
-            Kind = MediaFileTypes.GetKind(info.FullName),
-            DisplayName = info.Name,
-            FilePath = info.FullName,
-            ImportedAt = new DateTimeOffset(DateTime.SpecifyKind(info.CreationTimeUtc, DateTimeKind.Utc)),
-            FileSizeBytes = info.Length,
-            FolderName = FolderNameOf(info.FullName)
+            Id = linked ? full : Path.GetRelativePath(_store.LibraryRoot, full).Replace('\\', '/'),
+            Kind = MediaFileTypes.GetKind(full),
+            DisplayName = Path.GetFileName(full),
+            FilePath = full,
+            ImportedAt = imported,
+            FileSizeBytes = size,
+            FolderName = FolderNameOf(full),
+            IsLinked = linked
         };
     }
 

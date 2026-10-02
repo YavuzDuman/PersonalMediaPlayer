@@ -24,7 +24,7 @@ public sealed record PlaylistVideo(string Title, string Url, string? Length);
 
 public sealed record PlaylistListing(string Title, IReadOnlyList<PlaylistVideo> Videos, int TotalCount);
 
-internal sealed record PlaybackSource(string Title, Uri Media, Uri? Audio, DownloadQuality Quality, IReadOnlyList<DownloadSubtitle> Subtitles);
+internal sealed record PlaybackSource(string Title, Uri Media, Uri? Audio, DownloadQuality Quality, IReadOnlyList<DownloadSubtitle> Subtitles, Uri? Thumbnail = null);
 
 internal static class YoutubeDownloader
 {
@@ -370,7 +370,7 @@ internal static class YoutubeDownloader
         var qualities = ReadQualities(root);
         var quality = qualities.FirstOrDefault(item => !item.AudioOnly)
             ?? new DownloadQuality("Best available", "bestvideo+bestaudio/best", false);
-        return new PlaybackSource(title, chosen.Address, audio, quality, ReadSubtitles(root));
+        return new PlaybackSource(title, chosen.Address, audio, quality, ReadSubtitles(root), ReadThumbnail(root));
     }
 
     internal static async Task<string?> FetchSubtitleAsync(string pageUrl, DownloadSubtitle subtitle, CancellationToken cancellationToken)
@@ -1007,6 +1007,60 @@ internal static class YoutubeDownloader
 
         var number = value >= 10 ? value.ToString("0", CultureInfo.CurrentCulture) : value.ToString("0.0", CultureInfo.CurrentCulture);
         return " · " + (approximate ? "about " : string.Empty) + number + " " + unit;
+    }
+
+    private static Uri? ReadThumbnail(JsonElement root)
+    {
+        if (ImageAddress(Text(root, "thumbnail")) is Uri direct)
+        {
+            return direct;
+        }
+
+        if (!root.TryGetProperty("thumbnails", out var list) || list.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        Uri? best = null;
+        var bestWidth = -1;
+        foreach (var item in list.EnumerateArray())
+        {
+            var address = ImageAddress(Text(item, "url"));
+            if (address is null)
+            {
+                continue;
+            }
+
+            var width = item.TryGetProperty("width", out var widthElement) && widthElement.TryGetInt32(out var pixels) ? pixels : 0;
+            if (best is null || width > bestWidth)
+            {
+                best = address;
+                bestWidth = width;
+            }
+        }
+
+        return best;
+    }
+
+    private static Uri? ImageAddress(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !Uri.TryCreate(text.Trim(), UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        if (uri.Scheme is not ("http" or "https") || string.IsNullOrEmpty(uri.Host))
+        {
+            return null;
+        }
+
+        if (uri.AbsolutePath.EndsWith(".mhtml", StringComparison.OrdinalIgnoreCase)
+            || uri.AbsolutePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return uri;
     }
 
     private static string? Text(JsonElement element, string name)

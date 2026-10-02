@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using PersonalMediaPlayer.App.Download;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core.Library;
@@ -62,6 +63,7 @@ public partial class App : Application
         var window = new MainWindow();
         _window = window;
         ThemeSettings.Apply(window, ThemeSettings.Load());
+        DownloadQueueHub.Start(window.DispatcherQueue);
         _handoffListen = new CancellationTokenSource();
         var token = _handoffListen.Token;
         _ = ListenForHandoffAsync(window, token);

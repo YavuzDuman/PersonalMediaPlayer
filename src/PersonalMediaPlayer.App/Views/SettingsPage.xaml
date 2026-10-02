@@ -7,12 +7,13 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
     <StackPanel Padding="24,8,24,24" Spacing="20">
         <StackPanel Spacing="4">
             <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Settings" />
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="Appearance, library, screenshot shortcuts, and app info" />
+                Text="Appearance, online playback, library, screenshot shortcuts, and app info" />
         </StackPanel>
 
         <Border
@@ -30,6 +31,33 @@
                     MinWidth="220"
                     ItemsSource="{x:Bind ViewModel.ThemeOptions}"
                     SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Online videos" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Text="Used when a page opens from the extension or a playlist. A saved word still uses the languages stored with it. A missing audio language plays the original track. A missing subtitle language leaves subtitles off." />
+                <ComboBox
+                    MinWidth="280"
+                    MaxDropDownHeight="320"
+                    Header="Audio"
+                    ItemsSource="{x:Bind ViewModel.AudioOptions}"
+                    SelectedIndex="{x:Bind ViewModel.AudioIndex, Mode=TwoWay}" />
+                <ComboBox
+                    MinWidth="280"
+                    MaxDropDownHeight="320"
+                    Header="Subtitles"
+                    ItemsSource="{x:Bind ViewModel.CaptionOptions}"
+                    SelectedIndex="{x:Bind ViewModel.CaptionIndex, Mode=TwoWay}" />
             </StackPanel>
         </Border>
 
@@ -121,4 +149,5 @@
             </StackPanel>
         </Border>
     </StackPanel>
+    </ScrollViewer>
 </Page>

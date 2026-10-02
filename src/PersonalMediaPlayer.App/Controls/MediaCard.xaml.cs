@@ -30,13 +30,25 @@ public sealed partial class MediaCard : UserControl
 
     public string ImportedOn => Item is null
         ? string.Empty
-        : Item.ImportedAt.ToLocalTime().ToString("g");
+        : Item.IsMissing
+            ? "Missing"
+            : Item.ImportedAt.ToLocalTime().ToString("g");
+
+    public event PointerEventHandler? ItemPressed;
 
     public void SetSelectionMark(bool visible) =>
         SelectionMark.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
+    public void RefreshFavorite() => UpdateFavoriteIcon();
+
     private void Card_PointerEntered(object sender, PointerRoutedEventArgs e)
-        => FavoriteButton.Visibility = Item is null ? Visibility.Collapsed : Visibility.Visible;
+    {
+        UpdateFavoriteIcon();
+        FavoriteButton.Visibility = Item is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void Card_PointerPressed(object sender, PointerRoutedEventArgs e)
+        => ItemPressed?.Invoke(this, e);
 
     private void Card_PointerExited(object sender, PointerRoutedEventArgs e)
         => FavoriteButton.Visibility = Visibility.Collapsed;
@@ -81,6 +93,12 @@ public sealed partial class MediaCard : UserControl
         SelectionMark.Visibility = Visibility.Collapsed;
         FavoriteButton.Visibility = Visibility.Collapsed;
         UpdateFavoriteIcon();
+        if (Item.IsMissing || !File.Exists(Item.FilePath))
+        {
+            ThumbImage.Source = null;
+            return;
+        }
+
         if (!Item.IsVideo)
         {
             var image = new BitmapImage

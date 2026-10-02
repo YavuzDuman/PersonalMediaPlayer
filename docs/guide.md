@@ -1,12 +1,28 @@
 # Using Personal Media Player
 
-The window has eight places: **Library**, **Playlists**, **Saved words**, **Recordings**, **Download**, **Merge**, **Capture**, and **Settings**.
+The window opens on **Home**. The other places are **Library**, **Playlists**, **Saved words**, **Recordings**, **Download**, **Merge**, **Capture**, and **Settings**.
 
-Your files live under `%LocalAppData%\PersonalMediaPlayer\Library`. Settings can open that folder. Import copies a file into the library, so later changes to the original on disk do not change the copy.
+## Home
+
+Home is the start page. A row is hidden when it has nothing to show.
+
+**Continue watching** is the row of videos left in the middle. A place is kept after 5 seconds, and it is dropped in the last 10 seconds or when the video ends. Up to 16 items are shown, newest first. **All** opens every one of them, and Back returns to Home. A library file shows its picture from the file and opens at the saved time. An online video shows that video’s thumbnail. A YouTube page uses its YouTube picture. Another page uses the picture found when it was opened. Opening it looks the page up again and continues when that stream can seek.
+
+**Playlists** shows each list as a card. The cover uses up to four videos. One picture fills it. Two sit side by side. Three put the first picture on the left and the other two on the right. Four form a grid. A library file uses its own picture. A YouTube page uses its normal picture. Another site uses the picture saved after that page has been opened. A list with no picture shows the playlist mark. The name and the video count sit under the cover. **Play** on the cover starts the first video that can be opened. It stays hidden when nothing in the list can be opened. Clicking the rest of the card opens that playlist. Hovering a list slides in cards for its videos. The cards stay while the pointer is over that list or the cards, and they leave when the pointer does. Choosing a preview card opens that video. **More** opens that same playlist. **All** opens Playlists.
+
+**Recent** shows the latest files added to the library, including screenshots and recordings. Clicking one opens it. A video shows a play mark. A photo does not. **All** opens Library.
+
+**Saved words** shows the latest words that can still be opened, one line each. Clicking a word opens that video at that moment. **All** opens Saved words.
+
+**Downloads** appears while something is queued, downloading, paused, ready to save, or failed. Clicking it, or **All**, opens Download.
+
+When none of those rows have anything, Home says so and offers **Import** and **Open link**.
+
+Your files live under `%LocalAppData%\PersonalMediaPlayer\Library`. Settings can open that folder. Import and drop ask whether to copy a file into the library or use it where it is. A copy is unchanged by later edits to the original. A linked file is listed with the other files and is not copied. Removing a linked file from the library leaves the original in place. If that file moves, **Locate** points the same library item at the new place and keeps its saved words, bookmarks, and playback position.
 
 ## Library
 
-Import photos (`png`, `jpg`, `jpeg`, `webp`, `bmp`, `gif`) and videos (`mp4`, `mkv`, `mov`, `avi`, `wmv`, `webm`, `m4v`, `m4a`). Drop files on the page, or use **Import**. A music file saved from Download uses `m4a` and is listed with the videos.
+Import photos (`png`, `jpg`, `jpeg`, `webp`, `bmp`, `gif`) and videos (`mp4`, `mkv`, `mov`, `avi`, `wmv`, `webm`, `m4v`, `m4a`). Drop files on the page, or use **Import**. Choose **Copy** or **Use where it is**. **Copy** puts a new file in the library. **Use where it is** lists the file from its current folder. A music file saved from Download uses `m4a` and is listed with the videos. Download, Merge, the editor, and Recordings still save a copy.
 
 The left column is a mix of real albums and views:
 
@@ -28,23 +44,25 @@ The left column is a mix of real albums and views:
 
 A heart appears at the top-right of a thumbnail while the pointer is over it. In Favorites, remove only clears the heart. The file stays in the library.
 
+Ctrl+click, Shift+click, and Ctrl+A select the files in the current view. A bar shows how many are selected. **Add to playlist** adds the videos that are on this PC. Photos and missing files stay out. **Add to favorites** and **Remove from favorites** change the heart for every selected file. Recently deleted does not offer those actions. Ctrl+A in the search box still selects the search text.
+
 Search matches the name, the type, the album, and text previously read from a screenshot. Opening a screenshot from a text search draws boxes around the matching words. Those boxes are only on the preview.
 
 **Slideshow** plays the photos in the current view, starting from the selected photo. Left and Right change the photo. Esc leaves the slideshow.
 
-**Continue watching** appears above the folders when a video was left in the middle. A place is kept after 5 seconds, and it is dropped in the last 10 seconds or when the video ends. Up to 16 items are shown, newest first. A library file opens at that time. A stream that came from a page is looked up again and continues when that stream can seek. Renaming a library video or a recording keeps its place.
+Renaming a library video or a recording keeps its place in Continue watching on Home. Locating a linked file that moved does the same for saved words, bookmarks, and the playback position. Locate accepts another video for a video, or another photo for a photo. Choosing the other type shows a warning and leaves the library entry and its saved data unchanged. A missing linked file stays in the library so it can be located. Its card says **Missing**.
 
 **Open link** asks for an `http` or `https` address that is already the video. The app checks the response, then plays it. The address can leave off a file ending. A web page shows an error and Library stays open. The video is played here and is kept out of the library. While the check runs, the page says **Checking the link…**, and the rest of the window still accepts input.
 
-Deleting from All media, Photos, Videos, This month, Screenshots, Recordings, or Duplicates moves the file to Recently deleted. Deleting from an album you created only removes it from that album. Restore and permanent delete are on the Recently deleted page. Items older than 7 days are removed on the next launch.
+Deleting a copied file from All media, Photos, Videos, This month, Screenshots, Recordings, or Duplicates moves that copy to Recently deleted. Deleting a linked file only removes it from the library. The original stays where it is. Deleting from an album you created only removes it from that album. Restore and permanent delete are on the Recently deleted page. Items older than 7 days are removed on the next launch. Overwriting a linked photo or video changes that file. The previous bytes are kept as a backup. Saving a linked photo under a new name writes the new file beside it and leaves the old file on disk.
 
 ## Playlists
 
-Playlists collect library videos and play them in order. Type a name and press **Create**, then **Add videos**. The picker hides videos already in that list, and you can select several. **Play** starts the first one. **Rename** and **Delete** apply to the list. Removing a video takes it out of the list and leaves the file in the library.
+Playlists collect library videos and online videos, and play them in order. Type a name and press **Create**, then **Add videos**. The picker hides videos already in that list, and you can select several. While a page is streaming, **Add to playlist** saves that page link. The saved link is the page address, not the temporary stream address. Opening it later looks the page up again and shows that page’s captions. Audio and quality appear when the stream opens. **Play** starts the first visible video that can be opened. **Rename** and **Delete** apply to the list. Removing a video takes it out of the list and leaves a library file where it is.
 
-Each row can move up, move down, or leave the list. A file that is gone says **Not on this PC**.
+Search by name filters the rows. The videos stay in the playlist, and clearing the search shows them again. Drag the grip to rearrange a row. **Name** sorts A to Z. **Date added** puts the newest first. The new order is saved and is the same after a restart. Each row can still move up, move down, or leave the list. Up and down move among the rows the search is showing. A file that is gone says **Not on this PC**. An online video says **Online**.
 
-Opening a playlist video shows the rest beside the player: **Previous**, **Next**, and **Play the next video when this one ends**. That switch stays off until you turn it on. Clicking a row switches video without leaving the player. Renaming a library video, a recording, or a saved download keeps it in the playlist.
+Opening a playlist video shows the rest beside the player: **Previous**, **Next**, and **Play the next video when this one ends**. That switch stays off until you turn it on. Each row shows a picture when one is available. A file uses its own picture, a YouTube page uses its normal picture, and another site shows a picture after that page has been opened. Drag the grip, or use the arrows, to change the order while a video plays. The video that is playing stays on screen, and the new order is saved. Clicking a row switches video without leaving the player. Renaming a library video, a recording, or a saved download keeps it in the playlist. Locating a moved linked file does too. An online link is left as it is.
 
 ## Saved words
 
@@ -52,7 +70,7 @@ Click a caption word. A card shows the English word or phrase, the Turkish meani
 
 **Save** stores the word on this PC, with the video, the cue time, and the audio and caption languages selected at that moment. Opening the word later goes to the same moment and restores those languages. A word saved on a stream stores the page, or the direct video address, and opens that address again. On the same page, choosing the word seeks there. A stream that cannot seek shows **This stream cannot seek.**
 
-The **Saved words** page lists one word per line, grouped by video. The columns are the word, the Turkish meaning, the sentence, and the time. Search matches the English word and the Turkish meaning. Click a word to open its video. The list stays open beside the player, and the matching word is highlighted. Remove asks first. A word saved before it had a place stays in the list. Saving it again while that video is open fills in the place and time. A missing file stays listed. **Words** on the player opens the same list beside the video.
+The **Saved words** page lists one word per line, grouped by video. The columns are the word, the Turkish meaning, the sentence, and the time. Search matches the English word and the Turkish meaning. Click a word to open its video and show the list beside the player, with the matching word highlighted. **Words** opens that list. Clicking **Words** again, or the hide button on the list, closes it. While it is hidden, the video uses the full width. Opening another video does not bring the list back. Remove asks first. A word saved before it had a place stays in the list. Saving it again while that video is open fills in the place and time. A missing file stays listed.
 
 ## Photos
 
@@ -122,9 +140,9 @@ Save keeps the first caption track. Trim, cut, and speed move the cue times with
 
 The app keeps one window. A second open uses that window. A page that needs a license shows **This video is protected by a license and stays in the browser.** The extension asks only for the tab address.
 
-On a stream, **Edit**, **Trim**, **Restore original**, the still-frame button, and **Playlist** are hidden. **Words** stays. Bookmarks and **Save a copy** appear when the stream was opened from a page. **Save a copy** adds that page to the Download queue and leaves the stream playing. The download starts when Download is opened. A stream that cannot seek keeps play, pause, volume, speed, and full screen, and leaves the timeline and section repeat off. The line under the title says **Streaming**, or **Streaming. This video cannot seek.** Reaching the end and pressing play looks a page up again. A direct file is checked again and starts from the beginning.
+On a stream, **Edit**, **Trim**, **Restore original**, and the still-frame button are hidden. **Playlist** appears when that stream was opened from a playlist, and that list stays beside the player. **Words** stays. The saved-words list stays closed until you open it. Bookmarks and **Save a copy** appear when the stream was opened from a page. **Save a copy** adds that page to the Download queue, starts the download, and leaves the stream playing. **Add to playlist** saves that same page address in a playlist. A stream that cannot seek keeps play, pause, volume, speed, and full screen, and leaves the timeline and section repeat off. The line under the title says **Streaming**, or **Streaming. This video cannot seek.** Reaching the end and pressing play looks a page up again. A direct file is checked again and starts from the beginning.
 
-Playback settings on a resolved stream can change quality and audio language. Captions for that page use the same list as Download.
+Playback settings on a resolved stream can change quality and audio language. Captions for that page use the same list as Download. **Settings** can prefer the original audio or one language, and a subtitle language or no subtitles. The extension and a playlist use those choices when the page opens. A missing audio language plays the original track. A missing subtitle language leaves subtitles off. A saved word still opens with the languages stored on that word.
 
 ## Download
 
@@ -134,7 +152,7 @@ A playlist address, or a link that has `list=` and no video id, lists up to 200 
 
 When a single video has subtitles, Look up asks whether to include one. Uploaded captions come first, then YouTube’s automatic captions, including translations, with one English name per language. A translation can take about a minute. **No subtitles** leaves them out. An audio-only download stays without subtitles. The preview and the saved video use the same **CC** control and the same hover meanings as the player.
 
-The queue downloads one item at a time. Each row shows waiting, a download percentage, paused, ready, failed, or cancelled.
+The queue downloads one item at a time and keeps going after you leave this page. Each row shows waiting, a download percentage, paused, ready, failed, or cancelled.
 
 | Button | What it does |
 | --- | --- |
@@ -148,7 +166,7 @@ The queue downloads one item at a time. Each row shows waiting, a download perce
 
 **History** is the card row under the queue. Each card shows the picture, the file name, the link, the quality, the date, and the folder. **Open** plays it in the app. **Folder** selects it in File Explorer. **Remove** drops the card only. The saved file stays where it is.
 
-Leaving Download while something is queued, downloading, paused, or not yet saved asks you to stay or leave. Leaving cancels the rest and deletes unsaved files. Closing the window asks the same question. If nothing is waiting, closing pauses the active download and keeps the partial file for **Resume**.
+Leaving Download does not stop the queue. Pause, resume, cancel, and save stay on this page. A finished file stays ready until you save or discard it. Closing the app pauses the active download and any that are still waiting, and keeps the partial file for **Resume**.
 
 ## Merge
 
@@ -201,4 +219,4 @@ Stop opens a preview on the same video bar. You can trim the ends before saving.
 
 ## Settings
 
-Settings chooses light, dark, or the Windows theme, shows the library folder, and stores the screenshot cursor and delay. The shortcut list is shown there as a reminder.
+Settings chooses light, dark, or the Windows theme, shows the library folder, and stores the screenshot cursor and delay. **Online videos** stores the default audio and subtitles for the extension and for playlists. The shortcut list is shown there as a reminder.

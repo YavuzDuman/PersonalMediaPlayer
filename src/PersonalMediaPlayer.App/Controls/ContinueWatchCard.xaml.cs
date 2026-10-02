@@ -15,10 +15,13 @@ public sealed partial class ContinueWatchCard : UserControl
 
     public event EventHandler? Chosen;
 
-    public void Show(string title, string place, double fraction, string? filePath)
+    public void Show(string title, string place, double fraction, string? filePath, string? imageUrl = null, bool showPlay = true)
     {
         Title.Text = title;
         Place.Text = place;
+        var play = showPlay ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+        PlayMark.Visibility = play;
+        PlayShade.Visibility = play;
         ToolTipService.SetToolTip(this, title + Environment.NewLine + place);
         if (fraction > 0 && fraction < 1)
         {
@@ -34,6 +37,36 @@ public sealed partial class ContinueWatchCard : UserControl
         {
             _ = LoadThumbAsync(filePath);
         }
+        else if (!string.IsNullOrWhiteSpace(imageUrl))
+        {
+            LoadRemoteThumb(imageUrl);
+        }
+    }
+
+    private void LoadRemoteThumb(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var imageUri))
+        {
+            return;
+        }
+
+        try
+        {
+            Thumb.Source = new BitmapImage
+            {
+                DecodePixelWidth = 440,
+                UriSource = imageUri
+            };
+        }
+        catch (Exception)
+        {
+            Thumb.Source = null;
+        }
+    }
+
+    private void Thumb_Failed(object sender, Microsoft.UI.Xaml.ExceptionRoutedEventArgs e)
+    {
+        Thumb.Source = null;
     }
 
     private async Task LoadThumbAsync(string path)

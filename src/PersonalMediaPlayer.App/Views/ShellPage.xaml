@@ -18,6 +18,11 @@
         OpenPaneLength="240"
         ItemInvoked="NavView_ItemInvoked">
         <NavigationView.MenuItems>
+            <NavigationViewItem Content="Home" Tag="home">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE80F;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem Content="Library" Tag="library">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xEB9F;" />

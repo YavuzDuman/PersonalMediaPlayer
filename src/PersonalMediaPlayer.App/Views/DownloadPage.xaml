@@ -22,7 +22,7 @@
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 TextWrapping="Wrap"
-                Text="Add a YouTube video or a playlist. A playlist lets you choose the episodes. They download in order, then you preview and save each file." />
+                Text="Add a YouTube video or a playlist. A playlist lets you choose the episodes. Downloads keep going when you leave this page. Preview and save each file when it is ready." />
         </StackPanel>
 
         <InfoBar
@@ -281,32 +281,5 @@
                 </ListView>
             </StackPanel>
         </Border>
-
-        <Grid
-            x:Name="LeavePrompt"
-            Grid.RowSpan="4"
-            Padding="24"
-            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-            Visibility="Collapsed">
-            <StackPanel
-                MaxWidth="420"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Spacing="12">
-                <TextBlock
-                    x:Name="LeavePromptText"
-                    TextAlignment="Center"
-                    TextWrapping="Wrap" />
-                <Button
-                    HorizontalAlignment="Stretch"
-                    Click="LeavePromptConfirm_Click"
-                    Content="Leave"
-                    Style="{StaticResource AccentButtonStyle}" />
-                <Button
-                    HorizontalAlignment="Stretch"
-                    Click="LeavePromptStay_Click"
-                    Content="Stay" />
-            </StackPanel>
-        </Grid>
     </Grid>
 </Page>

@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Helpers;
+using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core.Library;
 using Windows.System;
 
@@ -15,6 +16,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         ThemeIndex = (int)ThemeSettings.Load();
         includeCursor = CaptureSettings.LoadIncludeCursor();
         delayIndex = CaptureSettings.IndexFromSeconds(CaptureSettings.LoadDelaySeconds());
+        var languages = StreamLanguageSettings.Load();
+        audioIndex = StreamLanguageSettings.AudioIndex(languages.AudioLanguage);
+        captionIndex = StreamLanguageSettings.CaptionIndex(languages.CaptionLanguage);
+        AudioOptions = new[] { "Original" }.Concat(StreamLanguageSettings.Languages.Select(item => item.Name)).ToArray();
+        CaptionOptions = new[] { "Off" }.Concat(StreamLanguageSettings.Languages.Select(item => item.Name)).ToArray();
     }
 
     public string LibraryPath { get; }
@@ -34,6 +40,16 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private int delayIndex;
+
+    [ObservableProperty]
+    private int audioIndex;
+
+    [ObservableProperty]
+    private int captionIndex;
+
+    public IReadOnlyList<string> AudioOptions { get; }
+
+    public IReadOnlyList<string> CaptionOptions { get; }
 
     public IReadOnlyList<string> DelayOptions { get; } =
     [
@@ -62,6 +78,17 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         var index = Math.Clamp(value, 0, CaptureSettings.DelayChoices.Length - 1);
         CaptureSettings.SaveDelaySeconds(CaptureSettings.DelayChoices[index]);
+    }
+
+    partial void OnAudioIndexChanged(int value) => SaveStreamLanguages();
+
+    partial void OnCaptionIndexChanged(int value) => SaveStreamLanguages();
+
+    private void SaveStreamLanguages()
+    {
+        StreamLanguageSettings.Save(new StreamLanguagePreference(
+            StreamLanguageSettings.LanguageFromIndex(AudioIndex),
+            StreamLanguageSettings.LanguageFromIndex(CaptionIndex)));
     }
 
     [RelayCommand]

@@ -163,7 +163,15 @@ public sealed partial class PhotoEditorViewModel : ObservableObject
             var fileName = BuildFileName(rendered.Extension);
             if (overwrite)
             {
-                return await Task.Run(() => _library.OverwriteEdited(SourceItem.FilePath, rendered.Stream, fileName));
+                var previous = SourceItem.FilePath;
+                var linked = SourceItem.IsLinked;
+                var saved = await Task.Run(() => _library.OverwriteEdited(previous, rendered.Stream, fileName));
+                if (linked && !string.Equals(previous, saved.FilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    LibraryPaths.Move(previous, saved.FilePath);
+                }
+
+                return saved;
             }
 
             return await Task.Run(() => _library.SaveEditedAsNew(rendered.Stream, fileName));

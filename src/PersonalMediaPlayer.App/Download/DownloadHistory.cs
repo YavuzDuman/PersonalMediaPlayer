@@ -50,10 +50,14 @@ public sealed class DownloadHistoryEntry
 
 internal static class DownloadHistory
 {
-    private static readonly string FilePath = Path.Combine(
+    private static readonly string DefaultFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PersonalMediaPlayer",
         "download-history.json");
+
+    internal static string? StoreOverride { get; set; }
+
+    private static string FilePath => StoreOverride ?? DefaultFilePath;
 
     public static IReadOnlyList<DownloadHistoryEntry> Load()
     {

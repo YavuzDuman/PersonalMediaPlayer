@@ -17,8 +17,8 @@
             </Grid.RowDefinitions>
             <Grid>
                 <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12,12,0,0" />
-                <Image x:Name="Thumb" Stretch="UniformToFill" />
-                <Border Background="#66000000" CornerRadius="12,12,0,0" IsHitTestVisible="False" />
+                <Image x:Name="Thumb" Stretch="UniformToFill" ImageFailed="Thumb_Failed" />
+                <Border x:Name="PlayShade" Background="#66000000" CornerRadius="12,12,0,0" IsHitTestVisible="False" />
                 <FontIcon
                     x:Name="PlayMark"
                     HorizontalAlignment="Center"

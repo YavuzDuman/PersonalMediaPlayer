@@ -12,6 +12,7 @@
     AllowDrop="True"
     DragOver="Page_DragOver"
     Drop="Page_Drop"
+    PreviewKeyDown="Page_PreviewKeyDown"
     mc:Ignorable="d">
     <Page.Resources>
         <converters:BoolToVisibilityConverter x:Key="VisibleWhenTrue" />
@@ -20,7 +21,6 @@
 
     <Grid x:Name="PageRoot" Padding="24,8,24,24" RowSpacing="12">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -90,18 +90,7 @@
             Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
             Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
 
-        <StackPanel x:Name="ContinueSection" Grid.Row="2" Spacing="8" Visibility="Collapsed">
-            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Continue watching" />
-            <ScrollViewer
-                HorizontalScrollBarVisibility="Auto"
-                HorizontalScrollMode="Enabled"
-                VerticalScrollBarVisibility="Disabled"
-                VerticalScrollMode="Disabled">
-                <StackPanel x:Name="ContinueList" Orientation="Horizontal" Spacing="12" />
-            </ScrollViewer>
-        </StackPanel>
-
-        <Grid Grid.Row="3" ColumnSpacing="16">
+        <Grid Grid.Row="2" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="260" />
                 <ColumnDefinition Width="*" />
@@ -193,6 +182,34 @@
                         </Style>
                     </GridView.ItemContainerStyle>
                 </GridView>
+
+                <Border
+                    Padding="12,8"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16"
+                    Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock
+                            Margin="4,0,4,0"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="{x:Bind ViewModel.SelectionCountLabel, Mode=OneWay}" />
+                        <StackPanel
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
+                            <Button Padding="10,4" Click="AddToPlaylist_Click" Content="Add to playlist" />
+                            <Button Padding="10,4" Click="AddFavorites_Click" Content="Add to favorites" />
+                            <Button Padding="10,4" Click="RemoveFavorites_Click" Content="Remove from favorites" />
+                        </StackPanel>
+                        <Button Padding="10,4" Click="ClearSelection_Click" Content="Clear" />
+                    </StackPanel>
+                </Border>
             </Grid>
 
             <Border
@@ -207,7 +224,7 @@
                         <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Details" />
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Select an item to see its details. Ctrl or Shift to select several. Drop files to import. Drag onto a folder to add an item. Move to takes it out of the folder you are viewing. Photos, Videos, and This month fill themselves."
+                            Text="Select an item to see its details. Ctrl+click, Shift+click, or Ctrl+A selects the files in this view. Drop files to add them. Drag onto a folder to add an item. Move to takes it out of the folder you are viewing. Photos, Videos, and This month fill themselves."
                             TextWrapping="Wrap"
                             Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource VisibleWhenFalse}}" />
                         <StackPanel Spacing="8" Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
@@ -216,12 +233,18 @@
                             <TextBlock Text="{x:Bind ViewModel.DetailsItem.SizeLabel, Mode=OneWay}" />
                             <TextBlock Text="{x:Bind ViewModel.DetailsFolder, Mode=OneWay}" TextWrapping="Wrap" />
                             <TextBlock Text="{x:Bind ViewModel.DetailsImported, Mode=OneWay}" />
+                            <TextBlock Text="{x:Bind ViewModel.DetailsPlace, Mode=OneWay}" TextWrapping="Wrap" />
                             <TextBlock Text="{x:Bind ViewModel.DetailsExtra, Mode=OneWay}" TextWrapping="Wrap" />
                             <TextBlock
                                 IsTextSelectionEnabled="True"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Text="{x:Bind ViewModel.DetailsItem.FilePath, Mode=OneWay}"
                                 TextWrapping="Wrap" />
+                            <Button
+                                HorizontalAlignment="Left"
+                                Click="Locate_Click"
+                                Content="Locate"
+                                Visibility="{x:Bind ViewModel.CanLocate, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
                             <TextBlock
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Text="{x:Bind ViewModel.SelectionLabel, Mode=OneWay}" />

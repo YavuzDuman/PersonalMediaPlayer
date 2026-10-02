@@ -14,29 +14,12 @@
         </StackPanel>
 
         <Border
-            x:Name="Rail"
-            Width="44"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="12"
-            Tapped="Rail_Tapped"
-            ToolTipService.ToolTip="Show saved words">
-            <FontIcon
-                Margin="0,14,0,0"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Top"
-                Glyph="&#xE82D;" />
-        </Border>
-
-        <Border
             x:Name="Panel"
             Width="320"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
-            CornerRadius="12"
-            Visibility="Collapsed">
+            CornerRadius="12">
             <Grid Padding="12" RowSpacing="8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />

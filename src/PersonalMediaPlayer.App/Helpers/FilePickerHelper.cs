@@ -27,6 +27,24 @@ internal static class FilePickerHelper
         return files is { Count: > 0 } ? files.ToArray() : [];
     }
 
+    public static async Task<StorageFile?> PickSingleMediaAsync(Window window)
+    {
+        var picker = new FileOpenPicker
+        {
+            ViewMode = PickerViewMode.Thumbnail,
+            SuggestedStartLocation = PickerLocationId.VideosLibrary
+        };
+
+        foreach (var extension in MediaFileTypes.ImageExtensions.Concat(MediaFileTypes.VideoExtensions))
+        {
+            picker.FileTypeFilter.Add(extension);
+        }
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        return await picker.PickSingleFileAsync();
+    }
+
     public static async Task<StorageFile?> PickTextFileAsync(Window window)
     {
         var picker = new FileOpenPicker

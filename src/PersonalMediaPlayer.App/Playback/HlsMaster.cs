@@ -170,7 +170,9 @@ internal sealed class HlsMaster
         int height,
         Uri? referrer,
         string? userAgent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool matchLanguagePreference = false,
+        string? preferredLanguage = null)
     {
         if (string.IsNullOrEmpty(body))
         {
@@ -182,7 +184,9 @@ internal sealed class HlsMaster
             return null;
         }
 
-        var selectedAudio = master.SelectAudio(audioKey);
+        var selectedAudio = matchLanguagePreference
+            ? master.ChooseAudio(audioKey, preferredLanguage)
+            : master.SelectAudio(audioKey);
         var selectedHeight = master.ResolveHeight(height);
         var rewrite = master.ExceedsAudioLimit || master.Audios.Count > 1 || master.Qualities.Count > 1 || selectedHeight > 0;
         string? path = null;
@@ -196,14 +200,79 @@ internal sealed class HlsMaster
 
     internal string SelectAudio(string? requested)
     {
-        if (!string.IsNullOrEmpty(requested))
+        if (FindKey(requested) is string key)
         {
-            foreach (var option in Audios)
+            return key;
+        }
+
+        return Audios.Count == 0 ? string.Empty : Audios[0].Key;
+    }
+
+    internal string ChooseAudio(string? requestedKey, string? preferredLanguage)
+    {
+        if (FindKey(requestedKey) is string requested)
+        {
+            return requested;
+        }
+
+        if (string.IsNullOrWhiteSpace(requestedKey) && FindLanguage(preferredLanguage) is string preferred)
+        {
+            return preferred;
+        }
+
+        return OriginalKey();
+    }
+
+    private string? FindKey(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        foreach (var option in Audios)
+        {
+            if (option.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
             {
-                if (option.Key.Equals(requested, StringComparison.OrdinalIgnoreCase))
-                {
-                    return option.Key;
-                }
+                return option.Key;
+            }
+        }
+
+        return null;
+    }
+
+    private string? FindLanguage(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return null;
+        }
+
+        string? prefix = null;
+        foreach (var option in Audios)
+        {
+            if (option.Key.Equals(language, StringComparison.OrdinalIgnoreCase))
+            {
+                return option.Key;
+            }
+
+            if (prefix is null && StreamLanguageSettings.SameLanguage(option.Key, language))
+            {
+                prefix = option.Key;
+            }
+        }
+
+        return prefix;
+    }
+
+    // A track named original wins over the rendition marked DEFAULT.
+    private string OriginalKey()
+    {
+        foreach (var rendition in _audios)
+        {
+            if (rendition.IsOriginal && FindKey(rendition.Key) is string key)
+            {
+                return key;
             }
         }
 

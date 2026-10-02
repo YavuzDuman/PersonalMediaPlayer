@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -10,10 +11,14 @@ internal static class Playlists
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private static readonly string FilePath = Path.Combine(
+    private static readonly string DefaultFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PersonalMediaPlayer",
         "playlists.json");
+
+    internal static string? StoreOverride { get; set; }
+
+    private static string FilePath => StoreOverride ?? DefaultFilePath;
 
     public static IReadOnlyList<Playlist> All() => Read();
 
@@ -101,15 +106,19 @@ internal static class Playlists
         }
 
         var added = 0;
+        var stamp = DateTimeOffset.UtcNow;
         foreach (var path in paths)
         {
             var clean = CleanPath(path);
-            if (clean is null || list.Videos.Any(existing => SamePath(existing, clean)))
+            if (clean is null || list.Videos.Any(existing => !existing.Resolve && SamePath(existing.Location, clean)))
             {
                 continue;
             }
 
-            list.Videos.Add(clean);
+            var entry = PlaylistEntry.ForFile(clean);
+            entry.AddedUtc = stamp;
+            stamp = stamp.AddTicks(1);
+            list.Videos.Add(entry);
             added++;
         }
 
@@ -119,6 +128,35 @@ internal static class Playlists
         }
 
         return added;
+    }
+
+    public static int AddPage(string id, string pageUrl, string? title)
+    {
+        if (!Uri.TryCreate(pageUrl.Trim(), UriKind.Absolute, out var page)
+            || (page.Scheme != Uri.UriSchemeHttp && page.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrEmpty(page.Host))
+        {
+            return -1;
+        }
+
+        var lists = Read();
+        var list = lists.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        if (list is null)
+        {
+            return -1;
+        }
+
+        var location = page.AbsoluteUri;
+        if (list.Videos.Any(existing => existing.Resolve && SamePath(existing.Location, location)))
+        {
+            return 0;
+        }
+
+        var entry = PlaylistEntry.Page(location, title);
+        entry.AddedUtc = DateTimeOffset.UtcNow;
+        list.Videos.Add(entry);
+        Write(lists);
+        return 1;
     }
 
     public static void RemoveAt(string id, int index)
@@ -153,6 +191,120 @@ internal static class Playlists
         Write(lists);
     }
 
+    public static bool MoveTo(string id, int from, int to)
+    {
+        var lists = Read();
+        var list = lists.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        if (list is null)
+        {
+            return false;
+        }
+
+        var count = list.Videos.Count;
+        if (from < 0 || from >= count)
+        {
+            return false;
+        }
+
+        if (to < 0)
+        {
+            to = 0;
+        }
+
+        if (to > count)
+        {
+            to = count;
+        }
+
+        if (to == from || to == from + 1)
+        {
+            return false;
+        }
+
+        var item = list.Videos[from];
+        list.Videos.RemoveAt(from);
+        if (to > from)
+        {
+            to--;
+        }
+
+        list.Videos.Insert(to, item);
+        Write(lists);
+        return true;
+    }
+
+    public static void SortByName(string id, Func<string, string?>? libraryName)
+    {
+        var lists = Read();
+        var list = lists.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        if (list is null || list.Videos.Count < 2)
+        {
+            return;
+        }
+
+        list.Videos = list.Videos
+            .Select((video, index) => (video, index))
+            .OrderBy(item => item.video.DisplayTitle(libraryName), StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(item => item.index)
+            .Select(item => item.video)
+            .ToList();
+        Write(lists);
+    }
+
+    public static void SortByAdded(string id)
+    {
+        var lists = Read();
+        var list = lists.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        if (list is null || list.Videos.Count == 0)
+        {
+            return;
+        }
+
+        StampMissingAdded(list);
+        if (list.Videos.Count > 1)
+        {
+            list.Videos = list.Videos
+                .Select((video, index) => (video, index))
+                .OrderByDescending(item => item.video.AddedUtc ?? DateTimeOffset.MinValue)
+                .ThenByDescending(item => item.index)
+                .Select(item => item.video)
+                .ToList();
+        }
+
+        Write(lists);
+    }
+
+    private static void StampMissingAdded(Playlist list)
+    {
+        var missing = list.Videos.Count(video => video.AddedUtc is null);
+        if (missing == 0)
+        {
+            return;
+        }
+
+        DateTimeOffset? earliest = null;
+        foreach (var video in list.Videos)
+        {
+            if (video.AddedUtc is DateTimeOffset stamp && (earliest is null || stamp < earliest))
+            {
+                earliest = stamp;
+            }
+        }
+
+        var start = (earliest ?? DateTimeOffset.UtcNow).AddSeconds(-missing);
+        var placed = 0;
+        foreach (var video in list.Videos)
+        {
+            if (video.AddedUtc is not null)
+            {
+                continue;
+            }
+
+            video.AddedUtc = start.AddSeconds(placed);
+            placed++;
+        }
+    }
+
     public static void SetPlayNext(string id, bool playNext)
     {
         var lists = Read();
@@ -181,12 +333,15 @@ internal static class Playlists
         {
             for (var i = 0; i < list.Videos.Count; i++)
             {
-                if (!SamePath(list.Videos[i], from))
+                var entry = list.Videos[i];
+                if (entry.Resolve || !SamePath(entry.Location, from))
                 {
                     continue;
                 }
 
-                list.Videos[i] = to;
+                var replacement = PlaylistEntry.ForFile(to);
+                replacement.AddedUtc = entry.AddedUtc;
+                list.Videos[i] = replacement;
                 changed = true;
             }
         }
@@ -195,6 +350,28 @@ internal static class Playlists
         {
             Write(lists);
         }
+    }
+
+    public static bool RememberThumbnail(string id, string pageUrl, string? thumbnail)
+    {
+        var picture = PlaylistEntry.CleanThumbnail(thumbnail);
+        var page = CleanPath(pageUrl);
+        if (picture is null || page is null)
+        {
+            return false;
+        }
+
+        var lists = Read();
+        var list = lists.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        var entry = list?.Videos.FirstOrDefault(item => item.Resolve && SamePath(item.Location, page));
+        if (entry is null || string.Equals(entry.Thumbnail, picture, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        entry.Thumbnail = picture;
+        Write(lists);
+        return true;
     }
 
     private static string? CleanName(string? name)
@@ -231,7 +408,7 @@ internal static class Playlists
             {
                 list.Id ??= string.Empty;
                 list.Name ??= string.Empty;
-                list.Videos = (list.Videos ?? []).Where(path => !string.IsNullOrWhiteSpace(path)).ToList();
+                list.Videos = (list.Videos ?? []).Where(item => !string.IsNullOrWhiteSpace(item.Location)).ToList();
             }
 
             return lists;
@@ -263,5 +440,220 @@ internal sealed class Playlist
 
     public bool PlayNext { get; set; }
 
-    public List<string> Videos { get; set; } = [];
+    public List<PlaylistEntry> Videos { get; set; } = [];
+}
+
+[JsonConverter(typeof(PlaylistEntryConverter))]
+internal sealed class PlaylistEntry
+{
+    public string Location { get; set; } = string.Empty;
+
+    public string? Title { get; set; }
+
+    public bool Resolve { get; set; }
+
+    public DateTimeOffset? AddedUtc { get; set; }
+
+    public string? Thumbnail { get; set; }
+
+    public bool IsPlayable => Resolve || System.IO.File.Exists(Location);
+
+    public static string? CleanThumbnail(string? value)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed) || trimmed.Length > 2048)
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrEmpty(uri.Host))
+        {
+            return null;
+        }
+
+        return uri.AbsoluteUri;
+    }
+
+    public bool Matches(string? query, Func<string, string?>? libraryName = null)
+    {
+        var term = query?.Trim();
+        if (string.IsNullOrEmpty(term))
+        {
+            return true;
+        }
+
+        if (DisplayTitle(libraryName).Contains(term, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return !Resolve && Path.GetFileName(Location).Contains(term, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static PlaylistEntry ForFile(string path) => new() { Location = path };
+
+    public static PlaylistEntry Page(string url, string? title)
+    {
+        var clean = title?.Trim();
+        if (string.IsNullOrEmpty(clean) || clean.Equals("Opening…", StringComparison.OrdinalIgnoreCase) || clean.Equals("Video", StringComparison.OrdinalIgnoreCase))
+        {
+            clean = null;
+        }
+        else if (clean.Length > 120)
+        {
+            clean = clean[..120].Trim();
+        }
+
+        return new PlaylistEntry { Location = url, Title = clean, Resolve = true };
+    }
+
+    public string DisplayTitle(Func<string, string?>? libraryName = null)
+    {
+        if (Resolve)
+        {
+            return string.IsNullOrWhiteSpace(Title) ? Location : Title!;
+        }
+
+        var known = libraryName?.Invoke(Location);
+        return string.IsNullOrWhiteSpace(known) ? Path.GetFileName(Location) : known!;
+    }
+}
+
+internal sealed class PlaylistEntryConverter : JsonConverter<PlaylistEntry>
+{
+    public override PlaylistEntry Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            return PlaylistEntry.ForFile(reader.GetString() ?? string.Empty);
+        }
+
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return PlaylistEntry.ForFile(string.Empty);
+        }
+
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException();
+        }
+
+        string? path = null;
+        string? url = null;
+        string? title = null;
+        bool? resolve = null;
+        DateTimeOffset? added = null;
+        string? thumbnail = null;
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject)
+            {
+                break;
+            }
+
+            if (reader.TokenType != JsonTokenType.PropertyName)
+            {
+                continue;
+            }
+
+            var name = reader.GetString();
+            if (!reader.Read())
+            {
+                break;
+            }
+
+            switch (name?.ToLowerInvariant())
+            {
+                case "path":
+                    path = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
+                    break;
+                case "url":
+                    url = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
+                    break;
+                case "title":
+                    title = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
+                    break;
+                case "resolve":
+                    resolve = reader.TokenType != JsonTokenType.False && reader.TokenType != JsonTokenType.Null;
+                    break;
+                case "added":
+                    added = ReadAdded(ref reader);
+                    break;
+                case "thumb":
+                case "thumbnail":
+                    thumbnail = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
+                    break;
+                default:
+                    reader.Skip();
+                    break;
+            }
+        }
+
+        var page = resolve == true
+            || (resolve is null && !string.IsNullOrWhiteSpace(url) && string.IsNullOrWhiteSpace(path));
+        if (page && !string.IsNullOrWhiteSpace(url))
+        {
+            var entry = PlaylistEntry.Page(url, title);
+            entry.AddedUtc = added;
+            entry.Thumbnail = PlaylistEntry.CleanThumbnail(thumbnail);
+            return entry;
+        }
+
+        var file = PlaylistEntry.ForFile(path ?? url ?? string.Empty);
+        file.AddedUtc = added;
+        return file;
+    }
+
+    private static DateTimeOffset? ReadAdded(ref Utf8JsonReader reader)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            reader.Skip();
+            return null;
+        }
+
+        var text = reader.GetString();
+        return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var stamp)
+            ? stamp
+            : null;
+    }
+
+    public override void Write(Utf8JsonWriter writer, PlaylistEntry value, JsonSerializerOptions options)
+    {
+        if (!value.Resolve && value.AddedUtc is null)
+        {
+            writer.WriteStringValue(value.Location);
+            return;
+        }
+
+        writer.WriteStartObject();
+        if (value.Resolve)
+        {
+            writer.WriteString("Url", value.Location);
+            if (!string.IsNullOrWhiteSpace(value.Title))
+            {
+                writer.WriteString("Title", value.Title);
+            }
+
+            writer.WriteBoolean("Resolve", true);
+            var thumbnail = PlaylistEntry.CleanThumbnail(value.Thumbnail);
+            if (thumbnail is not null)
+            {
+                writer.WriteString("Thumb", thumbnail);
+            }
+        }
+        else
+        {
+            writer.WriteString("Path", value.Location);
+        }
+
+        if (value.AddedUtc is DateTimeOffset added)
+        {
+            writer.WriteString("Added", added.ToString("O", CultureInfo.InvariantCulture));
+        }
+
+        writer.WriteEndObject();
+    }
 }

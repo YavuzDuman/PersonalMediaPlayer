@@ -355,10 +355,22 @@ public sealed partial class VideoPlaybackBar : UserControl
             choices.Add((index, name));
         }
 
-        _captionChoices = choices.Count == 0 ? null : choices;
         _announcedCaption = int.MinValue;
-        _subtitleTrack = choices.Count == 0 ? -1 : Math.Clamp(selectedIndex, 0, choices.Count - 1);
-        _subtitlesOn = choices.Count > 0;
+        if (choices.Count == 0)
+        {
+            _captionChoices = null;
+            _subtitleTrack = -1;
+            _subtitlesOn = false;
+        }
+        else
+        {
+            _captionChoices = choices;
+            _subtitlesOn = selectedIndex >= 0;
+            _subtitleTrack = _subtitlesOn
+                ? choices[Math.Clamp(selectedIndex, 0, choices.Count - 1)].Id
+                : -1;
+        }
+
         ApplySubtitles();
     }
 

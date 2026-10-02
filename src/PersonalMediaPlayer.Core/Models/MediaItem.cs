@@ -16,6 +16,10 @@ public sealed class MediaItem
 
     public string FolderName { get; init; } = string.Empty;
 
+    public bool IsLinked { get; init; }
+
+    public bool IsMissing => IsLinked && !File.Exists(FilePath);
+
     public bool IsVideo => Kind is MediaKind.Video or MediaKind.Recording;
 
     public string TypeLabel => IsVideo ? "Video" : "Image";
@@ -24,6 +28,11 @@ public sealed class MediaItem
     {
         get
         {
+            if (IsMissing)
+            {
+                return "Missing";
+            }
+
             const double kb = 1024;
             const double mb = kb * 1024;
             if (FileSizeBytes >= mb)

@@ -2,11 +2,12 @@ using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
-using PersonalMediaPlayer.App.Subtitles;
+using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Library;
 using PersonalMediaPlayer.Core.Models;
 using Windows.Storage;
@@ -56,6 +57,16 @@ public sealed partial class LibraryViewModel : ObservableObject
         ? string.Empty
         : $"Added {DetailsItem.ImportedAt.ToLocalTime():g}";
 
+    public string DetailsPlace => DetailsItem is null
+        ? string.Empty
+        : DetailsItem.IsMissing
+            ? "This file is missing. Locate it to keep saved words, bookmarks, and the playback position."
+            : DetailsItem.IsLinked
+                ? "Linked. The library uses this file where it is."
+                : "Library copy.";
+
+    public bool CanLocate => DetailsItem?.IsMissing == true;
+
     public string DetailsFolder
     {
         get
@@ -75,6 +86,15 @@ public sealed partial class LibraryViewModel : ObservableObject
     }
 
     public string SelectionLabel => SelectionCount <= 1 ? string.Empty : $"{SelectionCount} selected";
+
+    public string SelectionCountLabel => SelectionCount switch
+    {
+        <= 0 => string.Empty,
+        1 => "1 file selected",
+        _ => $"{SelectionCount} files selected"
+    };
+
+    public bool CanOrganizeSelection => HasSelection && SelectedFolder?.IsRecentlyDeleted != true;
 
     [ObservableProperty]
     private bool isEmpty = true;
@@ -360,7 +380,11 @@ public sealed partial class LibraryViewModel : ObservableObject
         DetailsExtra = string.Empty;
         OnPropertyChanged(nameof(DetailsImported));
         OnPropertyChanged(nameof(DetailsFolder));
+        OnPropertyChanged(nameof(DetailsPlace));
+        OnPropertyChanged(nameof(CanLocate));
         OnPropertyChanged(nameof(SelectionLabel));
+        OnPropertyChanged(nameof(SelectionCountLabel));
+        OnPropertyChanged(nameof(CanOrganizeSelection));
         _ = LoadDetailsExtraAsync(DetailsItem);
     }
 
@@ -378,6 +402,18 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     public async Task ImportStorageFilesAsync(IEnumerable<StorageFile> files)
     {
+        var list = files as IReadOnlyList<StorageFile> ?? files.ToArray();
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        var link = await ChooseLinkAsync(list.Count);
+        if (link is null)
+        {
+            return;
+        }
+
         IsBusy = true;
         var imported = 0;
         var failed = 0;
@@ -385,11 +421,11 @@ public sealed partial class LibraryViewModel : ObservableObject
 
         try
         {
-            foreach (var file in files)
+            foreach (var file in list)
             {
                 try
                 {
-                    await ImportFileAsync(file, folder);
+                    await ImportFileAsync(file, folder, link.Value);
                     imported++;
                 }
                 catch
@@ -399,7 +435,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             }
 
             await LoadAsync();
-            ShowImportStatus(imported, failed);
+            ShowImportStatus(imported, failed, link.Value);
         }
         finally
         {
@@ -409,6 +445,18 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     public async Task ImportPathsAsync(IEnumerable<string> paths)
     {
+        var list = paths as IReadOnlyList<string> ?? paths.ToArray();
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        var link = await ChooseLinkAsync(list.Count);
+        if (link is null)
+        {
+            return;
+        }
+
         IsBusy = true;
         var imported = 0;
         var failed = 0;
@@ -416,11 +464,11 @@ public sealed partial class LibraryViewModel : ObservableObject
 
         try
         {
-            foreach (var path in paths)
+            foreach (var path in list)
             {
                 try
                 {
-                    await Task.Run(() => _library.ImportMedia(path, folder));
+                    await Task.Run(() => link.Value ? _library.LinkMedia(path, folder) : _library.ImportMedia(path, folder));
                     imported++;
                 }
                 catch
@@ -430,7 +478,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             }
 
             await LoadAsync();
-            ShowImportStatus(imported, failed);
+            ShowImportStatus(imported, failed, link.Value);
         }
         finally
         {
@@ -503,12 +551,7 @@ public sealed partial class LibraryViewModel : ObservableObject
         try
         {
             var renamed = _library.RenameItem(filePath, newName);
-            PlaybackBookmarks.Move(filePath, renamed.FilePath);
-            PlaybackProgress.Move(filePath, renamed.FilePath);
-            SavedWords.Move(filePath, renamed.FilePath);
-            Playlists.MoveFile(filePath, renamed.FilePath);
-            MediaFavorites.Move(filePath, renamed.FilePath);
-            ScreenshotTextIndex.Move(filePath, renamed.FilePath);
+            LibraryPaths.Move(filePath, renamed.FilePath);
             await LoadAsync();
             ShowStatus($"Renamed to '{renamed.DisplayName}'.", InfoBarSeverity.Success);
         }
@@ -566,11 +609,7 @@ public sealed partial class LibraryViewModel : ObservableObject
         {
             if (SelectedFolder?.IsFavorites == true)
             {
-                foreach (var item in selected)
-                {
-                    MediaFavorites.Remove(item.FilePath);
-                }
-
+                MediaFavorites.RemoveMany(selected.Select(item => item.FilePath));
                 await LoadAsync();
                 ShowStatus($"Removed {selected.Count} item{(selected.Count == 1 ? "" : "s")} from Favorites.", InfoBarSeverity.Success);
                 return;
@@ -596,7 +635,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             {
                 _library.DeleteItems(selected.Select(item => item.FilePath));
                 await LoadAsync();
-                ShowStatus($"Deleted {selected.Count} item{(selected.Count == 1 ? "" : "s")}. You can restore them from Recently deleted for 7 days.", InfoBarSeverity.Success);
+                ShowDeleteStatus(selected);
                 return;
             }
 
@@ -637,6 +676,50 @@ public sealed partial class LibraryViewModel : ObservableObject
             {
                 ShowStatus($"Added {selected.Count} item{(selected.Count == 1 ? "" : "s")} to '{folderName}'. Files stay in All media.", InfoBarSeverity.Success);
             }
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
+    public async Task LocateAsync(MediaItem item)
+    {
+        if (!item.IsLinked)
+        {
+            ShowStatus("Only a linked file can be located.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        StorageFile? file;
+        try
+        {
+            file = await FilePickerHelper.PickSingleMediaAsync(App.MainAppWindow);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(ex.Message, InfoBarSeverity.Error);
+            return;
+        }
+
+        if (file is null || string.IsNullOrWhiteSpace(file.Path))
+        {
+            return;
+        }
+
+        var chosen = file.Path;
+        if (!MediaFileTypes.SameKind(item.FilePath, chosen))
+        {
+            ShowStatus(MediaFileTypes.LocateMismatchWarning(item.FilePath), InfoBarSeverity.Warning);
+            return;
+        }
+
+        try
+        {
+            var relocated = await Task.Run(() => _library.RelocateLink(item.FilePath, chosen));
+            LibraryPaths.Move(item.FilePath, relocated.FilePath);
+            await LoadAsync();
+            ShowStatus($"Located '{relocated.DisplayName}'. Saved words, bookmarks, and the playback position stay with it.", InfoBarSeverity.Success);
         }
         catch (Exception ex)
         {
@@ -803,6 +886,7 @@ public sealed partial class LibraryViewModel : ObservableObject
     partial void OnSelectedFolderChanged(LibraryFolder? value)
     {
         OnPropertyChanged(nameof(EmptyHint));
+        OnPropertyChanged(nameof(CanOrganizeSelection));
         if (!_suppressFolderLoad)
         {
             _ = LoadItemsAsync();
@@ -894,8 +978,43 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     private bool CanImport => !IsBusy;
 
-    private async Task ImportFileAsync(StorageFile file, string? folder)
+    private async Task<bool?> ChooseLinkAsync(int count)
     {
+        var root = WindowRoot();
+        if (root is null)
+        {
+            return false;
+        }
+
+        var choice = await ImportChoiceDialog.AskAsync(root, count);
+        return choice switch
+        {
+            ImportChoice.Copy => false,
+            ImportChoice.Link => true,
+            _ => null
+        };
+    }
+
+    private static XamlRoot? WindowRoot()
+    {
+        try
+        {
+            return App.MainAppWindow.Content is UIElement element ? element.XamlRoot : null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private async Task ImportFileAsync(StorageFile file, string? folder, bool link)
+    {
+        if (link && !string.IsNullOrWhiteSpace(file.Path) && File.Exists(file.Path))
+        {
+            await Task.Run(() => _library.LinkMedia(file.Path, folder));
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(file.Path) && File.Exists(file.Path))
         {
             await Task.Run(() => _library.ImportMedia(file.Path, folder));
@@ -911,7 +1030,7 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     private async Task LoadDetailsExtraAsync(MediaItem? item)
     {
-        if (item is null)
+        if (item is null || item.IsMissing)
         {
             DetailsExtra = string.Empty;
             return;
@@ -927,8 +1046,24 @@ public sealed partial class LibraryViewModel : ObservableObject
         }
     }
 
-    private void ShowImportStatus(int imported, int failed)
+    private void ShowImportStatus(int imported, int failed, bool linked)
     {
+        if (linked)
+        {
+            if (failed == 0)
+            {
+                ShowStatus(imported == 1
+                    ? "Added 1 file from its current location."
+                    : $"Added {imported} files from their current location.", InfoBarSeverity.Success);
+            }
+            else
+            {
+                ShowStatus($"Added {imported} from their current location, skipped {failed}.", InfoBarSeverity.Warning);
+            }
+
+            return;
+        }
+
         if (failed == 0)
         {
             ShowStatus($"Imported {imported} file{(imported == 1 ? "" : "s")}.", InfoBarSeverity.Success);
@@ -937,6 +1072,26 @@ public sealed partial class LibraryViewModel : ObservableObject
         {
             ShowStatus($"Imported {imported}, skipped {failed}.", InfoBarSeverity.Warning);
         }
+    }
+
+    private void ShowDeleteStatus(IReadOnlyList<MediaItem> selected)
+    {
+        var linked = selected.Count(item => item.IsLinked);
+        if (linked == selected.Count)
+        {
+            ShowStatus(selected.Count == 1
+                ? $"Removed {selected[0].DisplayName} from the library. The original file stays where it is."
+                : $"Removed {selected.Count} items from the library. The original files stay where they are.", InfoBarSeverity.Success);
+            return;
+        }
+
+        if (linked > 0)
+        {
+            ShowStatus($"Removed {selected.Count} items. Copies can be restored from Recently deleted for 7 days. Linked files stay where they are.", InfoBarSeverity.Success);
+            return;
+        }
+
+        ShowStatus($"Deleted {selected.Count} item{(selected.Count == 1 ? "" : "s")}. You can restore them from Recently deleted for 7 days.", InfoBarSeverity.Success);
     }
 
     internal void ShowStatus(string message, InfoBarSeverity severity)

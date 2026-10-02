@@ -4,10 +4,14 @@ namespace PersonalMediaPlayer.App.Download;
 
 internal static class DownloadQueueStore
 {
-    private static readonly string FilePath = Path.Combine(
+    private static readonly string DefaultFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PersonalMediaPlayer",
         "download-queue.json");
+
+    internal static string? StoreOverride { get; set; }
+
+    private static string FilePath => StoreOverride ?? DefaultFilePath;
 
     public static IReadOnlyList<DownloadQueueItem> Load()
     {

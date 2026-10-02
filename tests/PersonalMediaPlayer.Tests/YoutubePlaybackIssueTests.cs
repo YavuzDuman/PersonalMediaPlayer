@@ -25,7 +25,7 @@ public class YoutubePlaybackIssueTests
         using var resolveLimit = new CancellationTokenSource(TimeSpan.FromSeconds(40));
         var choice = await YoutubeDownloader.ResolvePlaybackAsync(Page, null, resolveLimit.Token);
         var libvlc = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64");
-        Core.Initialize(libvlc);
+        LibVLCSharp.Shared.Core.Initialize(libvlc);
         var lib = new LibVLC("--no-video", "--aout=dummy");
         var media = new Media(lib, choice.Media.AbsoluteUri, FromType.FromLocation);
         media.AddOption(":http-user-agent=" + BrowserUserAgent);
@@ -166,7 +166,7 @@ public class YoutubePlaybackIssueTests
         var path = Path.Combine(folder, Guid.NewGuid().ToString("N") + ".m3u8");
         await File.WriteAllTextAsync(path, rewritten);
         var libvlc = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64");
-        Core.Initialize(libvlc);
+        LibVLCSharp.Shared.Core.Initialize(libvlc);
         var lib = new LibVLC("--no-video", "--aout=dummy");
         var media = new Media(lib, path, FromType.FromPath);
         media.AddOption(":http-user-agent=" + BrowserUserAgent);

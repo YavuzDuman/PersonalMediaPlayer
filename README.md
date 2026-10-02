@@ -33,6 +33,7 @@ The first launch creates the library at `%LocalAppData%\PersonalMediaPlayer\Libr
 flowchart LR
   subgraph shell [Shell]
     direction TB
+    Home
     Library
     Playlists
     Words[Saved words]
@@ -66,9 +67,10 @@ flowchart LR
 
 | Area | What you do there |
 | --- | --- |
-| **Library** | Import, search, album, favorite, slideshow, continue a video you left, open a direct link, and find duplicate files |
-| **Playlists** | Collect library videos and play them in order |
-| **Saved words** | Open a caption word you saved, at that moment, with the audio and captions from then |
+| **Home** | Continue a video, play a playlist from its cover or open that list, hover the cover to preview the videos, open a recent file or saved word, and see a download. All opens the full list |
+| **Library** | Import, search, album, favorite, slideshow, open a direct link, and find duplicate files |
+| **Playlists** | Collect library videos and play them in order. Search filters the list. Drag or sort, and the order is saved. The player panel can reorder that list and shows a picture for each video |
+| **Saved words** | Open a caption word you saved, at that moment, with the audio and captions from then. **Words** on the player shows that list and hides it again |
 | **Photos** | Draw, blur, crop, rotate, compare with the original, and read a selected area |
 | **Videos** | Play a file or a stream, hover the timeline for a frame, bookmark, resume, trim, edit, grab a still, and save caption words with a Turkish meaning |
 | **Merge** | Order clips, trim and fade each one, preview the sequence, and save one video. The first caption track comes along |
@@ -81,11 +83,11 @@ Details for each screen are in the [user guide](docs/guide.md).
 
 ## Library at a glance
 
-Import or drop files. Photos: `png` `jpg` `jpeg` `webp` `bmp` `gif`. Videos: `mp4` `mkv` `mov` `avi` `wmv` `webm` `m4v` `m4a`.
+Import or drop files, then choose **Copy** or **Use where it is**. Photos: `png` `jpg` `jpeg` `webp` `bmp` `gif`. Videos: `mp4` `mkv` `mov` `avi` `wmv` `webm` `m4v` `m4a`. A linked file stays in its folder. Removing it from the library does not delete it. **Locate** accepts another file of the same type and keeps saved words, bookmarks, and the playback position. A photo cannot replace a video. Ctrl+click, Shift+click, and Ctrl+A select files in the current view. The selection bar adds those videos to a playlist and adds or removes favorites together.
 
 | View | Contents |
 | --- | --- |
-| All media | Every file the app owns |
+| All media | Every copied or linked file |
 | Photos / Videos | Split by type, including screenshots and recordings |
 | This month | Imported during the current calendar month |
 | Favorites | Heart on the thumbnail. The heart shows while the pointer is over the card |
@@ -112,9 +114,9 @@ Search covers the name, the type, the album, and words read from a screenshot. A
 
 </div>
 
-Leaving a screenshot, a marked photo, a trimmed video, an open video edit, an unsaved recording, an unfinished download, or an unsaved merge asks you to stay or leave before the page changes. Closing the window with X asks the same question when that work is still open.
+Leaving a screenshot, a marked photo, a trimmed video, an open video edit, an unsaved recording, or an unsaved merge asks you to stay or leave before the page changes. Closing the window with X asks the same question when that work is still open. A download keeps running when you leave Download. Closing the app pauses it and keeps the partial file.
 
-**Open link** on Library plays a direct video address and leaves the library unchanged. The unpacked extension in `extension/` can send a page video, or a page such as YouTube, into that same player. **Save a copy** queues the page on Download and leaves the stream playing. A video that needs a license stays in the browser. Load the extension unpacked in Chrome or Edge. The app build does not include it.
+**Open link** on Library plays a direct video address and leaves the library unchanged. The unpacked extension in `extension/` can send a page video, or a page such as YouTube, into that same player. **Save a copy** starts the download and leaves the stream playing. A video that needs a license stays in the browser. Load the extension unpacked in Chrome or Edge. The app build does not include it.
 
 ## Screenshot shortcuts
 

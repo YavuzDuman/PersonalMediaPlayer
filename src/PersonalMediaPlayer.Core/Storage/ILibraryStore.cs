@@ -20,6 +20,14 @@ public interface ILibraryStore
 
     string ImportMedia(Stream content, string originalFileName, string? folderName = null);
 
+    string LinkMedia(string sourcePath, string? folderName = null);
+
+    string RelocateLink(string currentPath, string newPath);
+
+    bool IsLinked(string filePath);
+
+    DateTimeOffset? LinkAddedAt(string filePath);
+
     IReadOnlyList<string> EnumerateImageFiles();
 
     IReadOnlyList<string> EnumerateMediaFiles(string? folderName = null);

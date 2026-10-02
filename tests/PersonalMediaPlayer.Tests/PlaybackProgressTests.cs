@@ -60,6 +60,7 @@ public class PlaybackProgressTests : IDisposable
         var legacy = Assert.Single(PlaybackProgress.Unfinished());
         Assert.Equal(15_000, legacy.TimeMs);
         Assert.Equal(0, legacy.DurationMs);
+        Assert.Null(legacy.Thumbnail);
 
         var renamed = Path.Combine(_folder, "renamed.mp4");
         File.WriteAllText(renamed, "video");
@@ -67,5 +68,19 @@ public class PlaybackProgressTests : IDisposable
         PlaybackProgress.Move(video, renamed);
         Assert.Equal(40_000, PlaybackProgress.Load(renamed));
         Assert.Equal(0, PlaybackProgress.Load(video));
+    }
+
+    [Fact]
+    public void AStreamKeepsItsThumbnailWhenALaterSaveOmitsIt()
+    {
+        var page = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
+        var image = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg";
+        PlaybackProgress.Save(page, 90_000, 600_000, "Me at the zoo", image);
+        Assert.Equal(image, Assert.Single(PlaybackProgress.Unfinished()).Thumbnail);
+
+        PlaybackProgress.Save(page, 95_000, 600_000, "Me at the zoo");
+        Assert.Equal(image, Assert.Single(PlaybackProgress.Unfinished()).Thumbnail);
+        PlaybackProgress.Save(page, 100_000, 600_000, "Me at the zoo", "javascript:alert(1)");
+        Assert.Equal(image, Assert.Single(PlaybackProgress.Unfinished()).Thumbnail);
     }
 }

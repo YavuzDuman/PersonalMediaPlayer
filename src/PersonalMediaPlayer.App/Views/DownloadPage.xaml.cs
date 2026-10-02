@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Globalization;
 using LibVLCSharp.Platforms.Windows;
 using LibVLCSharp.Shared;
@@ -20,22 +21,15 @@ namespace PersonalMediaPlayer.App.Views;
 public sealed partial class DownloadPage : Page
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
-    private readonly ObservableCollection<DownloadQueueItem> _queue = [];
     private readonly ObservableCollection<DownloadHistoryEntry> _history = [];
     private CancellationTokenSource? _lookup;
-    private CancellationTokenSource? _activeDownload;
-    private DownloadQueueItem? _activeItem;
     private DownloadQueueItem? _previewItem;
-    private bool _pumping;
     private DownloadListing? _listing;
     private DownloadSubtitle? _subtitle;
     private string? _lookedUpUrl;
     private string? _previewPath;
     private bool _audioOnly;
-    private bool _downloading;
-    private bool _allowLeave;
-    private bool _detached;
-    private bool _closeWindow;
+    private bool _left;
     private bool _updatingSlider;
     private bool _dragging;
     private bool _ended;
@@ -47,21 +41,12 @@ public sealed partial class DownloadPage : Page
     private VlcMediaPlayer? _player;
     private Media? _media;
     private VideoView? _videoView;
-    private Type? _pendingPageType;
-    private object? _pendingParameter;
-    private bool _pendingIsBack;
 
     public DownloadPage()
     {
         InitializeComponent();
-        foreach (var item in DownloadQueueStore.Load())
-        {
-            Remember(item);
-            _queue.Add(item);
-        }
-
-        QueueList.ItemsSource = _queue;
-        EmptyQueue.Visibility = _queue.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        QueueList.ItemsSource = DownloadQueueHub.Items;
+        UpdateEmptyQueue();
         foreach (var entry in DownloadHistory.Load())
         {
             _history.Add(entry);
@@ -86,88 +71,44 @@ public sealed partial class DownloadPage : Page
         Playback.VolumeSlider.ValueChanged += Volume_Changed;
         Playback.SpeedCombo.SelectionChanged += (_, _) => _player?.SetRate(SelectedRate());
         Playback.FullScreenButton.Click += (_, _) => _ = ToggleFullScreenAsync();
-        DownloadQueueHub.Enqueued += OnCopyEnqueued;
-        if (_queue.Any(item => item.Status == "Queued"))
+    }
+
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        _left = false;
+        DownloadQueueHub.Items.CollectionChanged -= Queue_Changed;
+        DownloadQueueHub.Items.CollectionChanged += Queue_Changed;
+        DownloadQueueHub.ItemReady -= Download_Ready;
+        DownloadQueueHub.ItemReady += Download_Ready;
+        UpdateEmptyQueue();
+    }
+
+    private void Queue_Changed(object? sender, NotifyCollectionChangedEventArgs e) => UpdateEmptyQueue();
+
+    private void Download_Ready(object? sender, DownloadQueueItem item)
+    {
+        if (_previewItem is null)
         {
-            _ = PumpAsync();
+            OpenPreview(item);
         }
     }
 
-    private void OnCopyEnqueued(object? sender, DownloadQueueItem item)
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_detached || _queue.Any(existing => string.Equals(existing.Url, item.Url, StringComparison.OrdinalIgnoreCase)
-                && existing.Quality.Format == item.Quality.Format
-                && existing.Status is "Queued" or "Downloading" or "Paused" or "Ready"))
-            {
-                return;
-            }
-
-            Remember(item);
-            _queue.Add(item);
-            EmptyQueue.Visibility = Visibility.Collapsed;
-            _ = PumpAsync();
-        });
-    }
-
-    private bool HasUnsaved => _queue.Any(item => item.Status is "Queued" or "Downloading" or "Paused" or "Ready");
-
-    internal bool PrepareToLeave(Type? pageType, object? parameter, bool back)
-    {
-        _pendingPageType = pageType;
-        _pendingParameter = parameter;
-        _pendingIsBack = back;
-        if (_allowLeave || !HasUnsaved)
-        {
-            return true;
-        }
-
-        ShowLeavePrompt();
-        return false;
-    }
-
-    internal bool TryHandleHostClose()
-    {
-        if (_allowLeave || !HasUnsaved)
-        {
-            return false;
-        }
-
-        _closeWindow = true;
-        DispatcherQueue.TryEnqueue(ShowLeavePrompt);
-        return true;
-    }
+    private void UpdateEmptyQueue()
+        => EmptyQueue.Visibility = DownloadQueueHub.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
     protected override void OnNavigatingFrom(NavigatingCancelEventArgs e)
     {
-        if (_allowLeave || !HasUnsaved)
-        {
-            ReleasePlayer();
-            return;
-        }
-
-        e.Cancel = true;
-        _pendingPageType = e.SourcePageType;
-        _pendingParameter = e.Parameter;
-        _pendingIsBack = e.NavigationMode == Microsoft.UI.Xaml.Navigation.NavigationMode.Back;
-        if (LeavePrompt.Visibility != Visibility.Visible)
-        {
-            DispatcherQueue.TryEnqueue(ShowLeavePrompt);
-        }
+        _left = true;
+        ReleasePlayer();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _left = true;
         _timer.Stop();
         _lookup?.Cancel();
-        if (!_allowLeave)
-        {
-            PersistForExit();
-        }
-
-        _detached = true;
-        DownloadQueueHub.Enqueued -= OnCopyEnqueued;
+        DownloadQueueHub.Items.CollectionChanged -= Queue_Changed;
+        DownloadQueueHub.ItemReady -= Download_Ready;
         if (App.MainAppWindow is MainWindow window && window.IsFullScreen)
         {
             window.SetFullScreen(false);
@@ -284,79 +225,13 @@ public sealed partial class DownloadPage : Page
             return;
         }
 
-        var added = new DownloadQueueItem(_listing.Title, uri.AbsoluteUri, quality, quality.AudioOnly ? null : _subtitle);
-        Remember(added);
-        _queue.Add(added);
-        DownloadQueueStore.Save(_queue);
-        EmptyQueue.Visibility = Visibility.Collapsed;
+        DownloadQueueHub.Add(new DownloadQueueItem(_listing.Title, uri.AbsoluteUri, quality, quality.AudioOnly ? null : _subtitle));
         LinkBox.Text = string.Empty;
         _lookedUpUrl = null;
         _listing = null;
         _subtitle = null;
         QualityPanel.Visibility = Visibility.Collapsed;
         DownloadButton.IsEnabled = false;
-        _ = PumpAsync();
-    }
-
-    private async Task PumpAsync()
-    {
-        if (_pumping)
-        {
-            return;
-        }
-
-        _pumping = true;
-        try
-        {
-            while (_queue.FirstOrDefault(item => item.Status == "Queued") is { } item)
-            {
-                _activeItem = item;
-                _activeDownload = new CancellationTokenSource();
-                var continuing = item.OutputPath is not null;
-                item.OutputPath ??= YoutubeDownloader.CreateOutputPath(item.Quality.AudioOnly);
-                item.MarkDownloading(continuing);
-                _downloading = true;
-                try
-                {
-                    var path = await YoutubeDownloader.DownloadAsync(
-                        item.Url,
-                        item.Quality,
-                        item.SubtitleLanguage is null ? null : new DownloadSubtitle(item.SubtitleLanguage, item.SubtitleLabel ?? item.SubtitleLanguage, item.SubtitleAutomatic, item.SubtitleTranslated),
-                        item.Title,
-                        item.OutputPath,
-                        new Progress<double>(value => DispatcherQueue.TryEnqueue(() => item.Report(value))),
-                        _activeDownload.Token);
-                    item.MarkReady(path);
-                    if (_previewItem is null)
-                    {
-                        OpenPreview(item);
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    if (item.Status != "Paused")
-                    {
-                        DeletePartial(item);
-                        item.MarkCancelled();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    item.MarkFailed(ex.Message);
-                }
-                finally
-                {
-                    _downloading = _queue.Any(entry => entry.Status == "Downloading");
-                    _activeItem = null;
-                    _activeDownload?.Dispose();
-                    _activeDownload = null;
-                }
-            }
-        }
-        finally
-        {
-            _pumping = false;
-        }
     }
 
     private void CancelItem_Click(object sender, RoutedEventArgs e)
@@ -366,39 +241,27 @@ public sealed partial class DownloadPage : Page
             return;
         }
 
-        if (item.Status == "Queued" || item.Status == "Paused")
-        {
-            DeletePartial(item);
-            item.MarkCancelled();
-            return;
-        }
-
-        if (ReferenceEquals(item, _activeItem))
-        {
-            _activeDownload?.Cancel();
-        }
+        DownloadQueueHub.Cancel(item);
     }
 
     private void PauseItem_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not DownloadQueueItem item || !ReferenceEquals(item, _activeItem))
+        if ((sender as FrameworkElement)?.DataContext is not DownloadQueueItem item)
         {
             return;
         }
 
-        item.MarkPaused();
-        _activeDownload?.Cancel();
+        DownloadQueueHub.Pause(item);
     }
 
     private void ResumeItem_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not DownloadQueueItem item || !item.CanResume)
+        if ((sender as FrameworkElement)?.DataContext is not DownloadQueueItem item)
         {
             return;
         }
 
-        item.MarkQueued(keepProgress: true);
-        _ = PumpAsync();
+        DownloadQueueHub.Resume(item);
     }
 
     private void QueuePlaylist(DownloadQuality quality, IReadOnlyList<PlaylistVideo> videos)
@@ -407,24 +270,14 @@ public sealed partial class DownloadPage : Page
         var skipped = 0;
         foreach (var video in videos)
         {
-            if (_queue.Any(item => string.Equals(item.Url, video.Url, StringComparison.OrdinalIgnoreCase)
-                && item.Status is "Queued" or "Downloading" or "Paused" or "Ready"))
+            if (DownloadQueueHub.IsPending(video.Url))
             {
                 skipped++;
                 continue;
             }
 
-            var item = new DownloadQueueItem(video.Title, video.Url, quality);
-            Remember(item);
-            _queue.Add(item);
+            DownloadQueueHub.Add(new DownloadQueueItem(video.Title, video.Url, quality));
             added++;
-        }
-
-        if (added > 0)
-        {
-            DownloadQueueStore.Save(_queue);
-            EmptyQueue.Visibility = Visibility.Collapsed;
-            _ = PumpAsync();
         }
 
         LinkBox.Text = string.Empty;
@@ -598,13 +451,12 @@ public sealed partial class DownloadPage : Page
 
     private void RetryItem_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not DownloadQueueItem item || !item.CanRetry)
+        if ((sender as FrameworkElement)?.DataContext is not DownloadQueueItem item)
         {
             return;
         }
 
-        item.MarkQueued();
-        _ = PumpAsync();
+        DownloadQueueHub.Retry(item);
     }
 
     private void PreviewItem_Click(object sender, RoutedEventArgs e)
@@ -617,7 +469,7 @@ public sealed partial class DownloadPage : Page
 
     private void OpenPreview(DownloadQueueItem item)
     {
-        if (item.FilePath is null)
+        if (_left || item.FilePath is null)
         {
             return;
         }
@@ -630,6 +482,11 @@ public sealed partial class DownloadPage : Page
 
     private void ShowPreview(string path, string title)
     {
+        if (_left)
+        {
+            return;
+        }
+
         ReleasePlayer();
         _previewPath = path;
         _ended = false;
@@ -1128,7 +985,7 @@ public sealed partial class DownloadPage : Page
             savedItem?.MarkSaved();
             if (savedItem is not null)
             {
-                _queue.Remove(savedItem);
+                DownloadQueueHub.Remove(savedItem);
             }
 
             var entry = new DownloadHistoryEntry
@@ -1147,7 +1004,7 @@ public sealed partial class DownloadPage : Page
             StatusBar.Severity = InfoBarSeverity.Success;
             StatusBar.Message = "Saved to " + saved.Message;
             StatusBar.IsOpen = true;
-            if (_queue.FirstOrDefault(entry => entry.Status == "Ready") is { } next)
+            if (!_left && DownloadQueueHub.Items.FirstOrDefault(entry => entry.Status == "Ready") is { } next)
             {
                 OpenPreview(next);
             }
@@ -1186,13 +1043,12 @@ public sealed partial class DownloadPage : Page
 
         if (_previewItem is not null)
         {
-            _queue.Remove(_previewItem);
+            DownloadQueueHub.Remove(_previewItem);
             _previewItem = null;
         }
 
         _previewPath = null;
         ResetToEntry();
-        EmptyQueue.Visibility = _queue.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ResetToEntry()
@@ -1202,73 +1058,7 @@ public sealed partial class DownloadPage : Page
         EntryPanel.Visibility = Visibility.Visible;
         DownloadStatus.Text = string.Empty;
         DownloadButton.IsEnabled = CanDownload();
-        EmptyQueue.Visibility = _queue.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private void ShowLeavePrompt()
-    {
-        LeavePromptText.Text = _queue.Any(item => item.Status is "Queued" or "Downloading" or "Paused")
-            ? "Downloads are still in the queue. Leave and cancel them?"
-            : "A downloaded video is not saved yet. Leave without saving?";
-        LeavePrompt.Visibility = Visibility.Visible;
-    }
-
-    private void LeavePromptStay_Click(object sender, RoutedEventArgs e)
-    {
-        _closeWindow = false;
-        LeavePrompt.Visibility = Visibility.Collapsed;
-    }
-
-    private void LeavePromptConfirm_Click(object sender, RoutedEventArgs e)
-    {
-        LeavePrompt.Visibility = Visibility.Collapsed;
-        _lookup?.Cancel();
-        _activeDownload?.Cancel();
-        _downloading = false;
-        foreach (var item in _queue.Where(entry => entry.FilePath is not null).ToArray())
-        {
-            try
-            {
-                if (File.Exists(item.FilePath))
-                {
-                    File.Delete(item.FilePath);
-                }
-            }
-            catch (IOException)
-            {
-            }
-        }
-
-        _queue.Clear();
-        DownloadQueueStore.Save(_queue);
-        _previewItem = null;
-        _previewPath = null;
-        ReleasePlayer();
-        ResetToEntry();
-        _allowLeave = true;
-        if (_closeWindow)
-        {
-            _closeWindow = false;
-            App.MainAppWindow.Close();
-            return;
-        }
-
-        var moved = false;
-        if (_pendingIsBack && Frame.CanGoBack)
-        {
-            Frame.GoBack();
-            moved = true;
-        }
-        else if (_pendingPageType is not null && Frame.Navigate(_pendingPageType, _pendingParameter))
-        {
-            Frame.BackStack.Clear();
-            moved = true;
-        }
-
-        if (moved && App.MainAppWindow is MainWindow window)
-        {
-            window.SyncNavigationSelection();
-        }
+        UpdateEmptyQueue();
     }
 
     private void OpenHistoryFile_Click(object sender, RoutedEventArgs e)
@@ -1323,52 +1113,6 @@ public sealed partial class DownloadPage : Page
         _history.Remove(entry);
         DownloadHistory.Save(_history);
         EmptyHistory.Visibility = _history.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    internal void PersistForExit()
-    {
-        if (_activeItem is { Status: "Downloading" })
-        {
-            _activeItem.MarkPaused();
-            _activeDownload?.Cancel();
-        }
-
-        foreach (var item in _queue)
-        {
-            if (item.Status == "Queued")
-            {
-                item.MarkPaused();
-            }
-        }
-
-        DownloadQueueStore.Save(_queue);
-    }
-
-    private void Remember(DownloadQueueItem item)
-        => item.PropertyChanged += (_, _) =>
-        {
-            if (!_detached)
-            {
-                DownloadQueueStore.Save(_queue);
-            }
-        };
-
-    private static void DeletePartial(DownloadQueueItem item)
-    {
-        var folder = Path.GetDirectoryName(item.OutputPath);
-        item.OutputPath = null;
-        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
-        {
-            return;
-        }
-
-        try
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
     }
 
     private void ShowError(string message)

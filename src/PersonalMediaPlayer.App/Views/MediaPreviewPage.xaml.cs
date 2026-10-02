@@ -290,6 +290,7 @@ public sealed partial class MediaPreviewPage : Page
             }
 
             var previousPath = ViewModel.Item.FilePath;
+            var linked = ViewModel.Item.IsLinked;
             var original = await File.ReadAllBytesAsync(previousPath);
             var flattened = Markup.Flatten(original);
             await using var stream = new MemoryStream(flattened);
@@ -308,7 +309,14 @@ public sealed partial class MediaPreviewPage : Page
             await ScreenshotTextIndex.StoreAsync(saved.FilePath, flattened);
             if (overwrite && !string.Equals(previousPath, saved.FilePath, StringComparison.OrdinalIgnoreCase))
             {
-                ScreenshotTextIndex.Remove(previousPath);
+                if (linked)
+                {
+                    LibraryPaths.Move(previousPath, saved.FilePath);
+                }
+                else
+                {
+                    ScreenshotTextIndex.Remove(previousPath);
+                }
             }
 
             await LoadItemAsync(saved);
