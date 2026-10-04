@@ -1,4 +1,5 @@
 using PersonalMediaPlayer.Core.Models;
+using PersonalMediaPlayer.Core.Storage;
 
 namespace PersonalMediaPlayer.Core.Library;
 
@@ -25,6 +26,14 @@ public interface IMediaLibrary
     MediaItem ImportMedia(Stream content, string originalFileName, string? folderName = null);
 
     MediaItem LinkMedia(string sourcePath, string? folderName = null);
+
+    IReadOnlyList<string> ConnectedFolders();
+
+    ConnectFolderResult ConnectFolder(string path);
+
+    bool DisconnectFolder(string path);
+
+    ConnectedFolderScan RefreshConnectedFolders();
 
     MediaItem RelocateLink(string currentPath, string newPath);
 
@@ -71,4 +80,6 @@ public interface IMediaLibrary
     MediaItem SaveEditedAsNew(Stream content, string fileName);
 
     MediaItem OverwriteEdited(string existingPath, Stream content, string fileName);
+
+    void ReloadLinks();
 }

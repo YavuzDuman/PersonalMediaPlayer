@@ -15,19 +15,48 @@
 
         <Border
             x:Name="Rail"
-            Width="44"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            Padding="10,8"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="12"
             Tapped="Rail_Tapped"
             ToolTipService.ToolTip="Show playlist"
             Visibility="Collapsed">
-            <FontIcon
-                Margin="0,14,0,0"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Top"
-                Glyph="&#xE93F;" />
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Width="3" VerticalAlignment="Stretch" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="2" />
+                <Border
+                    Grid.Column="1"
+                    Width="32"
+                    Height="32"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    CornerRadius="8">
+                    <FontIcon
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="14"
+                        Glyph="&#xE93F;" />
+                </Border>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                    <TextBlock
+                        x:Name="RailName"
+                        MaxWidth="168"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        x:Name="RailCount"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                </StackPanel>
+            </Grid>
         </Border>
 
         <Border
@@ -63,14 +92,51 @@
                         <FontIcon FontSize="12" Glyph="&#xE76C;" />
                     </Button>
                 </Grid>
-                <TextBlock
-                    x:Name="PositionText"
-                    Grid.Row="1"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}" />
-                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
-                    <Button x:Name="PreviousButton" Click="Previous_Click" Content="Previous" />
-                    <Button x:Name="NextButton" Click="Next_Click" Content="Next" />
+                <StackPanel Grid.Row="1" Spacing="2">
+                    <TextBlock
+                        x:Name="PositionText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        x:Name="WatchedText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <CheckBox
+                        x:Name="UnwatchedBox"
+                        Margin="0,4,0,0"
+                        Checked="Unwatched_Changed"
+                        Content="Unwatched only"
+                        Unchecked="Unwatched_Changed" />
+                </StackPanel>
+                <StackPanel Grid.Row="2" Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="PreviousButton" Click="Previous_Click" Content="Previous" />
+                        <Button x:Name="NextButton" Click="Next_Click" Content="Next" />
+                    </StackPanel>
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="ShuffleButton" HorizontalAlignment="Stretch" Click="Shuffle_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon FontSize="14" Glyph="&#xE8B1;" />
+                                <TextBlock x:Name="ShuffleLabel" Text="Shuffle" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="RepeatButton" Grid.Column="1" HorizontalAlignment="Stretch" Click="Repeat_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon x:Name="RepeatIcon" FontSize="14" Glyph="&#xE1CD;" />
+                                <TextBlock x:Name="RepeatLabel" Text="Repeat off" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                    <TextBlock
+                        x:Name="ModeLine"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="Saved order. Repeat is off."
+                        TextWrapping="Wrap" />
                 </StackPanel>
                 <CheckBox x:Name="PlayNextBox" Grid.Row="3" Checked="PlayNext_Changed" Unchecked="PlayNext_Changed">
                     <TextBlock Text="Play the next video when this one ends" TextWrapping="Wrap" />

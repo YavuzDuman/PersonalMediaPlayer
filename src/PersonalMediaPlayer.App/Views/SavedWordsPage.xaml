@@ -65,7 +65,7 @@
                 BorderThickness="1"
                 CornerRadius="12"
                 Visibility="Collapsed">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer x:Name="WordScroll" VerticalScrollBarVisibility="Auto">
                     <StackPanel x:Name="WordList" />
                 </ScrollViewer>
             </Border>

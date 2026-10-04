@@ -318,6 +318,20 @@ internal static class Playlists
         Write(lists);
     }
 
+    public static bool SetWatched(string id, int index, bool watched)
+    {
+        var lists = Read();
+        var list = lists.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        if (list is null || index < 0 || index >= list.Videos.Count || list.Videos[index].Watched == watched)
+        {
+            return false;
+        }
+
+        list.Videos[index].Watched = watched;
+        Write(lists);
+        return true;
+    }
+
     public static void MoveFile(string oldPath, string newPath)
     {
         var from = CleanPath(oldPath);
@@ -341,6 +355,7 @@ internal static class Playlists
 
                 var replacement = PlaylistEntry.ForFile(to);
                 replacement.AddedUtc = entry.AddedUtc;
+                replacement.Watched = entry.Watched;
                 list.Videos[i] = replacement;
                 changed = true;
             }
@@ -370,6 +385,20 @@ internal static class Playlists
         }
 
         entry.Thumbnail = picture;
+        Write(lists);
+        return true;
+    }
+
+    public static bool ReplaceVideos(string id, IReadOnlyList<PlaylistEntry> videos)
+    {
+        var lists = Read();
+        var list = lists.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+        if (list is null)
+        {
+            return false;
+        }
+
+        list.Videos = videos.Select(item => item.Copy()).ToList();
         Write(lists);
         return true;
     }
@@ -427,6 +456,7 @@ internal static class Playlists
     {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(lists, JsonOptions));
+        PlaylistChanges.NoteSaved();
     }
 }
 
@@ -441,6 +471,18 @@ internal sealed class Playlist
     public bool PlayNext { get; set; }
 
     public List<PlaylistEntry> Videos { get; set; } = [];
+
+    public string WatchedSummary()
+    {
+        var total = Videos.Count;
+        if (total == 0)
+        {
+            return "No videos";
+        }
+
+        var watched = Videos.Count(video => video.Watched);
+        return $"{watched} of {total} watched";
+    }
 }
 
 [JsonConverter(typeof(PlaylistEntryConverter))]
@@ -456,7 +498,30 @@ internal sealed class PlaylistEntry
 
     public string? Thumbnail { get; set; }
 
+    public bool Watched { get; set; }
+
     public bool IsPlayable => Resolve || System.IO.File.Exists(Location);
+
+    public string? Note()
+    {
+        var place = Resolve ? "Online" : IsPlayable ? null : "Not on this PC";
+        if (!Watched)
+        {
+            return place;
+        }
+
+        return place is null ? "Watched" : place + " · Watched";
+    }
+
+    internal PlaylistEntry Copy() => new()
+    {
+        Location = Location,
+        Title = Title,
+        Resolve = Resolve,
+        AddedUtc = AddedUtc,
+        Thumbnail = Thumbnail,
+        Watched = Watched
+    };
 
     public static string? CleanThumbnail(string? value)
     {
@@ -546,6 +611,7 @@ internal sealed class PlaylistEntryConverter : JsonConverter<PlaylistEntry>
         bool? resolve = null;
         DateTimeOffset? added = null;
         string? thumbnail = null;
+        var watched = false;
         while (reader.Read())
         {
             if (reader.TokenType == JsonTokenType.EndObject)
@@ -585,6 +651,14 @@ internal sealed class PlaylistEntryConverter : JsonConverter<PlaylistEntry>
                 case "thumbnail":
                     thumbnail = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
                     break;
+                case "watched":
+                    watched = reader.TokenType == JsonTokenType.True;
+                    if (reader.TokenType is not JsonTokenType.True and not JsonTokenType.False)
+                    {
+                        reader.Skip();
+                    }
+
+                    break;
                 default:
                     reader.Skip();
                     break;
@@ -598,11 +672,13 @@ internal sealed class PlaylistEntryConverter : JsonConverter<PlaylistEntry>
             var entry = PlaylistEntry.Page(url, title);
             entry.AddedUtc = added;
             entry.Thumbnail = PlaylistEntry.CleanThumbnail(thumbnail);
+            entry.Watched = watched;
             return entry;
         }
 
         var file = PlaylistEntry.ForFile(path ?? url ?? string.Empty);
         file.AddedUtc = added;
+        file.Watched = watched;
         return file;
     }
 
@@ -622,7 +698,7 @@ internal sealed class PlaylistEntryConverter : JsonConverter<PlaylistEntry>
 
     public override void Write(Utf8JsonWriter writer, PlaylistEntry value, JsonSerializerOptions options)
     {
-        if (!value.Resolve && value.AddedUtc is null)
+        if (!value.Resolve && value.AddedUtc is null && !value.Watched)
         {
             writer.WriteStringValue(value.Location);
             return;
@@ -652,6 +728,11 @@ internal sealed class PlaylistEntryConverter : JsonConverter<PlaylistEntry>
         if (value.AddedUtc is DateTimeOffset added)
         {
             writer.WriteString("Added", added.ToString("O", CultureInfo.InvariantCulture));
+        }
+
+        if (value.Watched)
+        {
+            writer.WriteBoolean("Watched", true);
         }
 
         writer.WriteEndObject();

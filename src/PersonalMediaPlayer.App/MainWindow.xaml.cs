@@ -65,6 +65,7 @@ public sealed partial class MainWindow : Window
         _handoffCheck = null;
         App.CancelHandoffListen();
         _hotkeys?.Dispose();
+        PlayQueue.Clear();
     }
 
     internal void ReceiveHandoff(string? argument)
@@ -93,6 +94,12 @@ public sealed partial class MainWindow : Window
 
     internal void OpenResolvedPage(Uri page, long? startMs)
     {
+        if (Shell.TryKeepPlayingPage(page))
+        {
+            BringToFront();
+            return;
+        }
+
         BringToFront();
         var generation = ++_handoffGeneration;
         _handoffCheck?.Cancel();
@@ -104,6 +111,12 @@ public sealed partial class MainWindow : Window
 
     internal void OpenSavedStream(SavedWord word)
     {
+        if (word.TimeMs is long && StreamLink.TryNormalize(word.PageUrl, out var playing) && Shell.TryFocusPlayingPage(playing, word))
+        {
+            BringToFront();
+            return;
+        }
+
         if (word.TimeMs is not long time || !StreamLink.TryNormalize(word.PageUrl, out var page))
         {
             ShowHandoff("This word has no video address.", InfoBarSeverity.Warning);
@@ -209,7 +222,8 @@ public sealed partial class MainWindow : Window
             choice.Subtitles,
             choice.Quality,
             focus,
-            choice.Thumbnail));
+            choice.Thumbnail,
+            choice.Chapters));
     }
 
     private void ShowHandoff(string message, InfoBarSeverity severity)
@@ -271,6 +285,7 @@ public sealed partial class MainWindow : Window
 
     private void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
+        Shell.RememberPlayer();
         if (ScreenshotSession.TryHandleHostClose())
         {
             args.Cancel = true;
@@ -311,6 +326,18 @@ public sealed partial class MainWindow : Window
     }
 
     internal void SyncNavigationSelection() => Shell.SyncNavSelection();
+
+    internal bool ShowPlayer(object? parameter) => Shell.ShowPlayer(parameter);
+
+    internal void ClosePlayer() => Shell.ClosePlayer();
+
+    internal void ExpandPlayer() => Shell.ExpandPlayer();
+
+    internal bool LeavePlayerFor(Type pageType, object? parameter, string? navTag)
+        => Shell.LeavePlayerFor(pageType, parameter, navTag);
+
+    internal void CompletePlayerLeave(bool back, Type? pageType, object? parameter)
+        => Shell.CompletePlayerLeave(back, pageType, parameter);
 
     private void TitleBar_PaneToggleRequested(TitleBar sender, object args)
     {

@@ -126,7 +126,7 @@ public sealed partial class PhotoEditorPage : Page
 
         if (pageType is not null)
         {
-            Frame.Navigate(pageType, parameter);
+            NavigationHelper.Follow(Frame, pageType, parameter, clearBackStack: false);
         }
         else if (Frame.CanGoBack)
         {

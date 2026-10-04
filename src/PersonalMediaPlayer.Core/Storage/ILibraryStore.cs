@@ -22,6 +22,14 @@ public interface ILibraryStore
 
     string LinkMedia(string sourcePath, string? folderName = null);
 
+    IReadOnlyList<string> ConnectedFolders();
+
+    ConnectFolderResult ConnectFolder(string path);
+
+    bool DisconnectFolder(string path);
+
+    ConnectedFolderScan RefreshConnectedFolders();
+
     string RelocateLink(string currentPath, string newPath);
 
     bool IsLinked(string filePath);
@@ -71,4 +79,6 @@ public interface ILibraryStore
     string SaveNewImage(Stream content, string fileName);
 
     string ReplaceImage(string existingPath, Stream content, string fileName);
+
+    void ReloadLinks();
 }

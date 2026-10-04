@@ -5,14 +5,17 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using PersonalMediaPlayer.App.Controls;
 using PersonalMediaPlayer.App.Download;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Storage;
 using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Models;
 using Windows.Foundation;
 using Windows.Storage;
+using Windows.Storage.FileProperties;
 
 namespace PersonalMediaPlayer.App.Views;
 
@@ -28,10 +31,13 @@ public sealed partial class HomePage : Page
     private bool _previewHiding;
     private bool _left;
     private bool _continueAll;
+    private int _searchGeneration;
 
     public HomePage()
     {
         InitializeComponent();
+        LibraryWatch.Changed += OnLibraryWatchChanged;
+        Unloaded += (_, _) => LibraryWatch.Changed -= OnLibraryWatchChanged;
         PlaylistPreview.PointerEntered += (_, _) => _previewTicket++;
         PlaylistPreview.PointerExited += PlaylistPreview_Exited;
         ContinueSection.SizeChanged += (_, _) => LayoutContinueGrid();
@@ -41,8 +47,15 @@ public sealed partial class HomePage : Page
     {
         _left = false;
         _continueAll = e.Parameter is HomeView.ContinueAll;
+        var saved = default(SearchSession.Entry);
         if (!_continueAll)
         {
+            saved = SearchSession.Recall(SearchSession.Home);
+            if (!string.Equals(SearchBox.Text, saved.Text, StringComparison.Ordinal))
+            {
+                SearchBox.Text = saved.Text;
+            }
+
             DownloadQueueHub.Items.CollectionChanged += Downloads_Changed;
             foreach (var item in DownloadQueueHub.Items)
             {
@@ -51,10 +64,23 @@ public sealed partial class HomePage : Page
         }
 
         Show();
+        if (!_continueAll && !string.IsNullOrWhiteSpace(saved.Text))
+        {
+            SearchScroll.Restore(PageScroll, saved.Offset);
+        }
     }
 
     protected override void OnNavigatedFrom(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
     {
+        if (!_continueAll)
+        {
+            SearchSession.Remember(
+                SearchSession.Home,
+                SearchBox.Text,
+                PageScroll.VerticalOffset,
+                PageScroll.ScrollableHeight > 0);
+        }
+
         _left = true;
         _previewTicket++;
         _linkGeneration++;
@@ -69,6 +95,16 @@ public sealed partial class HomePage : Page
         _watchedDownloads.Clear();
     }
 
+    private void OnLibraryWatchChanged(object? sender, EventArgs e)
+    {
+        if (_left)
+        {
+            return;
+        }
+
+        Show();
+    }
+
     private void Show()
     {
         if (_left)
@@ -80,6 +116,8 @@ public sealed partial class HomePage : Page
         {
             PageTitle.Text = "Continue watching";
             PageLead.Text = "Everything you left in the middle.";
+            SearchBox.Visibility = Visibility.Collapsed;
+            SearchSection.Visibility = Visibility.Collapsed;
             EmptyTitle.Text = "Nothing to continue.";
             EmptyLead.Text = "A video shows up here after you leave it in the middle.";
             EmptyActions.Visibility = Visibility.Collapsed;
@@ -94,9 +132,18 @@ public sealed partial class HomePage : Page
 
         PageTitle.Text = "Home";
         PageLead.Text = "Continue a video, open a playlist, or go back to something you just added.";
+        SearchBox.Visibility = Visibility.Visible;
         EmptyTitle.Text = "Nothing here yet.";
         EmptyLead.Text = "Import a file or open a video link.";
         EmptyActions.Visibility = Visibility.Visible;
+        if (HasSearch())
+        {
+            ClosePreview();
+            ShowSearch();
+            return;
+        }
+
+        SearchSection.Visibility = Visibility.Collapsed;
         ShowContinue();
         ShowPlaylists();
         ShowRecent();
@@ -203,7 +250,7 @@ public sealed partial class HomePage : Page
 
         if (file is not null && File.Exists(file.FilePath))
         {
-            Frame.Navigate(typeof(VideoPlayerPage), file);
+            NavigationHelper.OpenPlayer(file);
             return;
         }
 
@@ -259,7 +306,7 @@ public sealed partial class HomePage : Page
         {
             if (index >= 0)
             {
-                Frame.Navigate(typeof(VideoPlayerPage), new PlaylistOpenRequest(id, index));
+                NavigationHelper.OpenPlayer(new PlaylistOpenRequest(id, index));
             }
         };
         card.OpenChosen += (_, _) => OpenSection(typeof(PlaylistsPage), id);
@@ -365,7 +412,7 @@ public sealed partial class HomePage : Page
                 return;
             }
 
-            Frame.Navigate(typeof(VideoPlayerPage), new PlaylistOpenRequest(playlistId, index));
+            NavigationHelper.OpenPlayer(new PlaylistOpenRequest(playlistId, index));
         };
         return card;
     }
@@ -569,6 +616,320 @@ public sealed partial class HomePage : Page
         }
     }
 
+    private void Search_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput || _continueAll || _left)
+        {
+            return;
+        }
+
+        Show();
+    }
+
+    private bool HasSearch()
+        => !_continueAll && !string.IsNullOrWhiteSpace(SearchBox.Text);
+
+    private void ShowSearch()
+    {
+        ContinueSection.Visibility = Visibility.Collapsed;
+        PlaylistsSection.Visibility = Visibility.Collapsed;
+        RecentSection.Visibility = Visibility.Collapsed;
+        WordsSection.Visibility = Visibility.Collapsed;
+        DownloadsSection.Visibility = Visibility.Collapsed;
+        EmptyState.Visibility = Visibility.Collapsed;
+        SearchSection.Visibility = Visibility.Visible;
+        SearchList.Children.Clear();
+        var generation = ++_searchGeneration;
+        var hits = HomeSearch.Find(SearchBox.Text, App.MediaLibrary.GetItems(), Playlists.All());
+        SearchEmpty.Visibility = hits.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var hit in hits)
+        {
+            SearchList.Children.Add(SearchRow(hit, generation));
+        }
+    }
+
+    private UIElement SearchRow(HomeHit hit, int generation)
+    {
+        var photo = hit.Kind == HomeHitKind.LibraryPhoto;
+        var image = new Image
+        {
+            Stretch = Stretch.UniformToFill,
+            IsHitTestVisible = false
+        };
+        image.ImageFailed += (_, _) => image.Source = null;
+        var thumb = new Border
+        {
+            Width = 120,
+            Height = 68,
+            CornerRadius = new CornerRadius(6),
+            Background = ThemeBrush("SubtleFillColorSecondaryBrush"),
+            IsHitTestVisible = false,
+            Child = new Grid
+            {
+                IsHitTestVisible = false,
+                Children =
+                {
+                    new FontIcon
+                    {
+                        Glyph = photo ? "\uE91B" : "\uE714",
+                        FontSize = 20,
+                        Foreground = ThemeBrush("TextFillColorSecondaryBrush"),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        IsHitTestVisible = false
+                    },
+                    image
+                }
+            }
+        };
+        ShowPicture(image, hit, generation);
+        var text = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = 2,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = hit.Title,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    TextWrapping = TextWrapping.NoWrap
+                },
+                new TextBlock
+                {
+                    Text = hit.Source,
+                    Opacity = 0.7,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 2
+                }
+            }
+        };
+        var row = new Grid { ColumnSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(text, 1);
+        row.Children.Add(thumb);
+        row.Children.Add(text);
+        var button = new Button
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(8),
+            Content = row
+        };
+        button.SizeChanged += (_, args) =>
+        {
+            var room = args.NewSize.Width - thumb.Width - row.ColumnSpacing - button.Padding.Left - button.Padding.Right;
+            text.MaxWidth = room > 40 ? room : 40;
+        };
+        button.Click += (_, _) => OpenHit(hit);
+        if (photo)
+        {
+            return button;
+        }
+
+        var actions = new StackPanel
+        {
+            Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        actions.Children.Add(QueueButton("Play next", "Put this first in the queue", next: true));
+        actions.Children.Add(QueueButton("Add to queue", "Add this at the end of the queue", next: false));
+        var playNext = new MenuFlyoutItem { Text = "Play next" };
+        playNext.Click += (_, _) => QueueHit(hit, next: true);
+        var add = new MenuFlyoutItem { Text = "Add to queue" };
+        add.Click += (_, _) => QueueHit(hit, next: false);
+        var menu = new MenuFlyout();
+        menu.Items.Add(playNext);
+        menu.Items.Add(add);
+        button.ContextFlyout = menu;
+        var shell = new Grid { ColumnSpacing = 8 };
+        shell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        shell.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(actions, 1);
+        shell.Children.Add(button);
+        shell.Children.Add(actions);
+        return shell;
+
+        Button QueueButton(string label, string tip, bool next)
+        {
+            var queue = new Button
+            {
+                Content = label,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(10, 4, 10, 4)
+            };
+            ToolTipService.SetToolTip(queue, tip);
+            queue.Click += (_, _) => QueueHit(hit, next);
+            return queue;
+        }
+    }
+
+    private void ShowPicture(Image image, HomeHit hit, int generation)
+    {
+        if (hit.Kind != HomeHitKind.Online && !string.IsNullOrWhiteSpace(hit.FilePath))
+        {
+            if (hit.Kind == HomeHitKind.LibraryPhoto)
+            {
+                if (!File.Exists(hit.FilePath))
+                {
+                    return;
+                }
+
+                try
+                {
+                    image.Source = new BitmapImage
+                    {
+                        DecodePixelWidth = 240,
+                        UriSource = new Uri(hit.FilePath, UriKind.Absolute),
+                        CreateOptions = BitmapCreateOptions.IgnoreImageCache
+                    };
+                }
+                catch (Exception)
+                {
+                    image.Source = null;
+                }
+
+                return;
+            }
+
+            _ = LoadVideoThumbAsync(image, hit.FilePath, generation);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(hit.Thumbnail))
+        {
+            LoadRemoteThumb(image, hit.Thumbnail);
+        }
+    }
+
+    private static void LoadRemoteThumb(Image image, string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var imageUri))
+        {
+            return;
+        }
+
+        try
+        {
+            image.Source = new BitmapImage
+            {
+                DecodePixelWidth = 240,
+                UriSource = imageUri
+            };
+        }
+        catch (Exception)
+        {
+            image.Source = null;
+        }
+    }
+
+    private async Task LoadVideoThumbAsync(Image image, string path, int generation)
+    {
+        try
+        {
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 240);
+            if (generation != _searchGeneration || _left || thumb is null || thumb.Size == 0)
+            {
+                return;
+            }
+
+            var bitmap = new BitmapImage();
+            await bitmap.SetSourceAsync(thumb);
+            if (generation != _searchGeneration || _left)
+            {
+                return;
+            }
+
+            image.Source = bitmap;
+        }
+        catch (Exception)
+        {
+            if (generation == _searchGeneration)
+            {
+                image.Source = null;
+            }
+        }
+    }
+
+    private static Brush? ThemeBrush(string key)
+        => Application.Current.Resources.TryGetValue(key, out var value) ? value as Brush : null;
+
+    private void QueueHit(HomeHit hit, bool next)
+    {
+        if (hit.Kind == HomeHitKind.LibraryPhoto)
+        {
+            return;
+        }
+
+        if (hit.Kind == HomeHitKind.LibraryVideo)
+        {
+            if (string.IsNullOrWhiteSpace(hit.FilePath) || !File.Exists(hit.FilePath))
+            {
+                Status("That video is no longer on this PC.", InfoBarSeverity.Warning);
+                return;
+            }
+
+            var added = next
+                ? PlayQueue.PlayNextFile(hit.Title, hit.FilePath)
+                : PlayQueue.AddFile(hit.Title, hit.FilePath);
+            Status(
+                added is null
+                    ? "That video could not be queued."
+                    : next ? $"\"{hit.Title}\" will play next." : $"Added \"{hit.Title}\" to the queue.",
+                added is null ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+            return;
+        }
+
+        var list = string.IsNullOrEmpty(hit.PlaylistId) ? null : Playlists.Find(hit.PlaylistId);
+        if (list is null || hit.PlaylistIndex < 0 || hit.PlaylistIndex >= list.Videos.Count)
+        {
+            Status("That video is no longer in a playlist.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var queued = next
+            ? PlayQueue.PlayNext(list.Videos[hit.PlaylistIndex])
+            : PlayQueue.Add(list.Videos[hit.PlaylistIndex]);
+        Status(
+            queued is null
+                ? "That video could not be queued."
+                : next ? $"\"{queued.Title}\" will play next." : $"Added \"{queued.Title}\" to the queue.",
+            queued is null ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+    }
+
+    private void OpenHit(HomeHit hit)
+    {
+        if (hit.Kind == HomeHitKind.Online)
+        {
+            if (!string.IsNullOrEmpty(hit.PlaylistId))
+            {
+                NavigationHelper.OpenPlayer(new PlaylistOpenRequest(hit.PlaylistId, hit.PlaylistIndex));
+            }
+
+            return;
+        }
+
+        var item = App.MediaLibrary.GetItems().FirstOrDefault(media =>
+            string.Equals(media.FilePath, hit.FilePath, StringComparison.OrdinalIgnoreCase));
+        if (item is null || !File.Exists(item.FilePath))
+        {
+            Status(item is { IsMissing: true }
+                ? "This file is missing. Locate it in the library to keep saved words, bookmarks, and the playback position."
+                : "That file is no longer on this PC.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        if (item.IsVideo)
+        {
+            NavigationHelper.OpenPlayer(item);
+            return;
+        }
+
+        Frame.Navigate(typeof(MediaPreviewPage), item);
+    }
+
     private void OpenRecent(MediaItem item)
     {
         if (!File.Exists(item.FilePath))
@@ -580,7 +941,13 @@ public sealed partial class HomePage : Page
             return;
         }
 
-        Frame.Navigate(item.IsVideo ? typeof(VideoPlayerPage) : typeof(MediaPreviewPage), item);
+        if (item.IsVideo)
+        {
+            NavigationHelper.OpenPlayer(item);
+            return;
+        }
+
+        Frame.Navigate(typeof(MediaPreviewPage), item);
     }
 
     private static string RecentLabel(MediaItem item)
@@ -668,7 +1035,7 @@ public sealed partial class HomePage : Page
                 ImportedAt = new DateTimeOffset(File.GetCreationTimeUtc(word.VideoPath)),
                 FileSizeBytes = new FileInfo(word.VideoPath).Length
             };
-        Frame.Navigate(typeof(VideoPlayerPage), new VideoOpenRequest(item, time, word));
+        NavigationHelper.OpenPlayer(new VideoOpenRequest(item, time, word));
     }
 
     private static string WordPlace(SavedWord word)
@@ -824,6 +1191,11 @@ public sealed partial class HomePage : Page
 
     private void RefreshAfterDownload()
     {
+        if (HasSearch())
+        {
+            return;
+        }
+
         ShowDownloads();
         var any = ContinueSection.Visibility == Visibility.Visible
             || PlaylistsSection.Visibility == Visibility.Visible
@@ -971,7 +1343,7 @@ public sealed partial class HomePage : Page
                 return;
             }
 
-            Frame.Navigate(typeof(VideoPlayerPage), new StreamOpenRequest(result.Url, StreamLink.DisplayName(result.Url)));
+            NavigationHelper.OpenPlayer(new StreamOpenRequest(result.Url, StreamLink.DisplayName(result.Url)));
         }
         catch (OperationCanceledException)
         {

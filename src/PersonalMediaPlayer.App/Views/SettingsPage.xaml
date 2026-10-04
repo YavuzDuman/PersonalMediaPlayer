@@ -13,7 +13,7 @@
             <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Settings" />
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="Appearance, online playback, library, screenshot shortcuts, and app info" />
+                Text="Appearance, online playback, library, backup, screenshot shortcuts, and app info" />
         </StackPanel>
 
         <Border
@@ -88,6 +88,33 @@
                     Command="{x:Bind ViewModel.OpenLibraryFolderCommand}"
                     Content="Open folder" />
             </Grid>
+        </Border>
+
+        <Border
+            Padding="16"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Backup" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap"
+                    Text="Export backup saves playlists, including watched marks, saved words, bookmarks, playback positions, favorites, library links, and settings. Videos, photos, albums, recordings, and downloads stay where they are. Restore backup replaces that saved data after you confirm." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        Click="ExportBackup_Click"
+                        Content="Export backup"
+                        Style="{StaticResource AccentButtonStyle}" />
+                    <Button Click="RestoreBackup_Click" Content="Restore backup" />
+                </StackPanel>
+                <InfoBar
+                    x:Name="BackupStatus"
+                    IsClosable="True"
+                    IsOpen="False"
+                    Visibility="Collapsed" />
+            </StackPanel>
         </Border>
 
         <Border

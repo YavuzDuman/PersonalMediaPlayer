@@ -15,6 +15,8 @@ public sealed class MediaLibrary : IMediaLibrary
 
     public string LibraryRoot => _store.LibraryRoot;
 
+    public void ReloadLinks() => _store.ReloadLinks();
+
     public IReadOnlyList<MediaItem> GetImages()
         => _store.EnumerateImageFiles().Select(ToItem).ToArray();
 
@@ -100,6 +102,14 @@ public sealed class MediaLibrary : IMediaLibrary
 
     public MediaItem LinkMedia(string sourcePath, string? folderName = null)
         => ToItem(_store.LinkMedia(sourcePath, folderName));
+
+    public IReadOnlyList<string> ConnectedFolders() => _store.ConnectedFolders();
+
+    public ConnectFolderResult ConnectFolder(string path) => _store.ConnectFolder(path);
+
+    public bool DisconnectFolder(string path) => _store.DisconnectFolder(path);
+
+    public ConnectedFolderScan RefreshConnectedFolders() => _store.RefreshConnectedFolders();
 
     public MediaItem RelocateLink(string currentPath, string newPath)
         => ToItem(_store.RelocateLink(currentPath, newPath));

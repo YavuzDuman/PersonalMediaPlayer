@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Models;
@@ -18,13 +19,18 @@ public sealed partial class PlaylistsPage : Page
     private string? _searchForId;
     private string _videoSearch = string.Empty;
     private bool _settingSearch;
+    private bool _unwatchedOnly;
+    private bool _showingUndo;
+    private int _closeSuppress;
     private int? _dragFrom;
 
     public PlaylistsPage()
     {
         InitializeComponent();
-        StatusBar.Closed += (_, _) => StatusBar.Visibility = Visibility.Collapsed;
+        StatusBar.Closed += StatusBar_Closed;
         ActualThemeChanged += (_, _) => DispatcherQueue.TryEnqueue(ShowLists);
+        PlaylistChanges.Changed += OnPlaylistChangesChanged;
+        Unloaded += (_, _) => PlaylistChanges.Changed -= OnPlaylistChangesChanged;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -36,10 +42,28 @@ public sealed partial class PlaylistsPage : Page
         }
         else if (_selectedId is null || lists.All(list => list.Id != _selectedId))
         {
-            _selectedId = lists.FirstOrDefault()?.Id;
+            var open = SearchSession.Recall(SearchSession.OpenPlaylist).Text;
+            _selectedId = lists.Any(list => string.Equals(list.Id, open, StringComparison.Ordinal))
+                ? open
+                : lists.FirstOrDefault()?.Id;
         }
 
         ShowLists();
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        if (_selectedId is null)
+        {
+            return;
+        }
+
+        SearchSession.Remember(
+            SearchSession.Playlist(_selectedId),
+            _videoSearch,
+            VideoScroller.VerticalOffset,
+            VideoScroller.ScrollableHeight > 0);
+        SearchSession.Remember(SearchSession.OpenPlaylist, _selectedId, 0);
     }
 
     private void NameBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -231,7 +255,7 @@ public sealed partial class PlaylistsPage : Page
         for (var index = 0; index < list.Videos.Count; index++)
         {
             var entry = list.Videos[index];
-            if (entry.Matches(_videoSearch, LibraryName) && entry.IsPlayable)
+            if (entry.Matches(_videoSearch, LibraryName) && entry.IsPlayable && ShowsEntry(entry))
             {
                 return index;
             }
@@ -276,6 +300,18 @@ public sealed partial class PlaylistsPage : Page
         }
 
         ShowVideos(Selected());
+        UpdateUndoMessage();
+    }
+
+    private void Unwatched_Changed(object sender, RoutedEventArgs e)
+    {
+        if (VideoRows is null)
+        {
+            return;
+        }
+
+        _unwatchedOnly = UnwatchedBox.IsChecked == true;
+        ShowVideos(Selected());
     }
 
     private void VideoSearch_TextChanged(object sender, TextChangedEventArgs e)
@@ -313,16 +349,16 @@ public sealed partial class PlaylistsPage : Page
             if (byName)
             {
                 var names = LibraryNames();
-                Playlists.SortByName(_selectedId, path => names.TryGetValue(path, out var known) ? known : null);
-                ShowStatus("Sorted by name.", InfoBarSeverity.Success);
+                PlaylistChanges.Apply(_selectedId, "Sorted by name.", () =>
+                    Playlists.SortByName(_selectedId, path => names.TryGetValue(path, out var known) ? known : null));
             }
             else
             {
-                Playlists.SortByAdded(_selectedId);
-                ShowStatus("Sorted by date added. Newest first.", InfoBarSeverity.Success);
+                PlaylistChanges.Apply(_selectedId, "Sorted by date added. Newest first.", () =>
+                    Playlists.SortByAdded(_selectedId));
             }
 
-            ShowVideos(Selected());
+            ShowLists();
         }
         catch (IOException)
         {
@@ -339,19 +375,36 @@ public sealed partial class PlaylistsPage : Page
         var showDetail = selected is not null;
         EmptyDetail.Visibility = showDetail ? Visibility.Collapsed : Visibility.Visible;
         DetailCard.Visibility = showDetail ? Visibility.Visible : Visibility.Collapsed;
+        double? restoreOffset = null;
+        if (!string.Equals(_searchForId, selected?.Id, StringComparison.Ordinal))
+        {
+            if (_searchForId is not null)
+            {
+                SearchSession.Remember(
+                    SearchSession.Playlist(_searchForId),
+                    _videoSearch,
+                    VideoScroller.VerticalOffset,
+                    VideoScroller.ScrollableHeight > 0);
+            }
+
+            _searchForId = selected?.Id;
+            var saved = selected is null
+                ? new SearchSession.Entry(string.Empty, 0)
+                : SearchSession.Recall(SearchSession.Playlist(selected.Id));
+            _videoSearch = saved.Text;
+            _settingSearch = true;
+            VideoSearch.Text = saved.Text;
+            _settingSearch = false;
+            if (selected is not null && !string.IsNullOrWhiteSpace(saved.Text) && saved.Offset > 0)
+            {
+                restoreOffset = saved.Offset;
+            }
+        }
+
         VideoRows.Children.Clear();
         if (selected is null)
         {
             return;
-        }
-
-        if (!string.Equals(_searchForId, selected.Id, StringComparison.Ordinal))
-        {
-            _searchForId = selected.Id;
-            _videoSearch = string.Empty;
-            _settingSearch = true;
-            VideoSearch.Text = string.Empty;
-            _settingSearch = false;
         }
 
         DetailTitle.Text = selected.Name;
@@ -361,13 +414,17 @@ public sealed partial class PlaylistsPage : Page
         var visible = new List<int>();
         for (var i = 0; i < selected.Videos.Count; i++)
         {
-            if (selected.Videos[i].Matches(_videoSearch, LibraryName))
+            if (selected.Videos[i].Matches(_videoSearch, LibraryName) && ShowsEntry(selected.Videos[i]))
             {
                 visible.Add(i);
             }
         }
 
-        DetailCount.Text = FilterLabel(visible.Count, selected.Videos.Count);
+        var watched = selected.Videos.Count(video => video.Watched);
+        var searching = !string.IsNullOrWhiteSpace(_videoSearch);
+        DetailCount.Text = visible.Count == selected.Videos.Count || (!searching && visible.Count == 0)
+            ? selected.WatchedSummary()
+            : $"{FilterLabel(visible.Count, selected.Videos.Count)} · {watched} watched";
         var anyPlayable = false;
         for (var place = 0; place < visible.Count; place++)
         {
@@ -384,10 +441,16 @@ public sealed partial class PlaylistsPage : Page
         var noMatch = !empty && visible.Count == 0;
         EmptyVideos.Text = empty
             ? "Add videos from your library, or add a stream from the player."
-            : "No videos match that search.";
+            : _unwatchedOnly && string.IsNullOrWhiteSpace(_videoSearch)
+                ? "Every video is marked watched."
+                : "No videos match that search.";
         EmptyVideos.Visibility = empty || noMatch ? Visibility.Visible : Visibility.Collapsed;
         VideoHost.Visibility = visible.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         PlayButton.IsEnabled = anyPlayable;
+        if (restoreOffset is double offset)
+        {
+            SearchScroll.Restore(VideoScroller, offset);
+        }
     }
 
     private void VideoScroller_DragOver(object sender, DragEventArgs e)
@@ -480,7 +543,7 @@ public sealed partial class PlaylistsPage : Page
     {
         var playable = entry.IsPlayable;
         var title = entry.DisplayTitle(path => names.TryGetValue(path, out var known) ? known : null);
-        var note = entry.Resolve ? "Online" : playable ? null : "Not on this PC";
+        var note = entry.Note();
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
         text.Children.Add(new TextBlock
         {
@@ -585,6 +648,12 @@ public sealed partial class PlaylistsPage : Page
             Child = surface
         };
         ToolTipService.SetToolTip(host, note is null ? title : $"{title}{Environment.NewLine}{note}");
+        var watchedNow = entry.Watched;
+        host.ContextFlyout = RowMenu(
+            watchedNow,
+            () => ToggleWatched(playlistId, rowIndex, !watchedNow),
+            () => QueueEntry(entry, names, next: false),
+            () => QueueEntry(entry, names, next: true));
         void HideInsert()
         {
             topLine.Visibility = Visibility.Collapsed;
@@ -682,12 +751,8 @@ public sealed partial class PlaylistsPage : Page
     {
         try
         {
-            if (!Playlists.MoveTo(id, from, to))
-            {
-                return;
-            }
-
-            ShowVideos(Selected());
+            PlaylistChanges.Apply(id, "Moved a video.", () => Playlists.MoveTo(id, from, to));
+            ShowLists();
         }
         catch (IOException)
         {
@@ -699,11 +764,66 @@ public sealed partial class PlaylistsPage : Page
         }
     }
 
+    private void ToggleWatched(string id, int index, bool watched)
+    {
+        try
+        {
+            Playlists.SetWatched(id, index, watched);
+            ShowVideos(Selected());
+        }
+        catch (IOException)
+        {
+            ShowStatus("Could not save that change.", InfoBarSeverity.Error);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ShowStatus("Could not save that change.", InfoBarSeverity.Error);
+        }
+    }
+
+    private void QueueEntry(PlaylistEntry entry, IReadOnlyDictionary<string, string> names, bool next)
+    {
+        if (!entry.Resolve && !entry.IsPlayable)
+        {
+            ShowStatus("That video is no longer on this PC.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        string? Name(string path) => names.TryGetValue(path, out var known) ? known : null;
+        var added = next ? PlayQueue.PlayNext(entry, Name) : PlayQueue.Add(entry, Name);
+        if (added is null)
+        {
+            ShowStatus("That video could not be queued.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        ShowStatus(
+            next ? $"\"{added.Title}\" will play next." : $"Added \"{added.Title}\" to the queue.",
+            InfoBarSeverity.Success);
+    }
+
+    private static MenuFlyout RowMenu(bool watched, Action toggle, Action queue, Action playNext)
+    {
+        var next = new MenuFlyoutItem { Text = "Play next" };
+        next.Click += (_, _) => playNext();
+        var add = new MenuFlyoutItem { Text = "Add to queue" };
+        add.Click += (_, _) => queue();
+        var item = new MenuFlyoutItem { Text = watched ? "Mark as unwatched" : "Mark as watched" };
+        item.Click += (_, _) => toggle();
+        var flyout = new MenuFlyout();
+        flyout.Items.Add(next);
+        flyout.Items.Add(add);
+        flyout.Items.Add(item);
+        return flyout;
+    }
+
+    private bool ShowsEntry(PlaylistEntry entry) => !_unwatchedOnly || !entry.Watched;
+
     private void RemoveVideo(string id, int index)
     {
         try
         {
-            Playlists.RemoveAt(id, index);
+            PlaylistChanges.Apply(id, "Removed a video.", () => Playlists.RemoveAt(id, index));
             ShowLists();
         }
         catch (IOException)
@@ -717,7 +837,7 @@ public sealed partial class PlaylistsPage : Page
     }
 
     private void OpenVideo(string playlistId, int index)
-        => Frame.Navigate(typeof(VideoPlayerPage), new PlaylistOpenRequest(playlistId, index));
+        => NavigationHelper.OpenPlayer(new PlaylistOpenRequest(playlistId, index));
 
     private async Task<IReadOnlyList<string>> PickVideosAsync(string playlistId)
     {
@@ -873,12 +993,109 @@ public sealed partial class PlaylistsPage : Page
         return true;
     }
 
+    private void OnPlaylistChangesChanged()
+    {
+        if (!DispatcherQueue.TryEnqueue(UpdateUndoMessage))
+        {
+            UpdateUndoMessage();
+        }
+    }
+
+    private void UpdateUndoMessage()
+    {
+        if (PlaylistChanges.IsPending(_selectedId, out var message))
+        {
+            PresentUndo(message);
+            return;
+        }
+
+        if (_showingUndo)
+        {
+            _showingUndo = false;
+            HideStatus();
+        }
+    }
+
+    private void PresentUndo(string message)
+    {
+        _showingUndo = true;
+        StatusBar.Severity = InfoBarSeverity.Informational;
+        StatusBar.Message = message;
+        StatusBar.ActionButton = UndoButton();
+        StatusBar.Visibility = Visibility.Visible;
+        StatusBar.IsOpen = true;
+    }
+
+    private void UndoLast()
+    {
+        try
+        {
+            PlaylistChanges.Undo();
+            _showingUndo = false;
+            HideStatus();
+            ShowLists();
+        }
+        catch (IOException)
+        {
+            ShowStatus("Could not undo that change.", InfoBarSeverity.Error);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ShowStatus("Could not undo that change.", InfoBarSeverity.Error);
+        }
+    }
+
+    private Button UndoButton()
+    {
+        var button = new Button { Content = "Undo" };
+        button.Click += (_, _) => UndoLast();
+        return button;
+    }
+
+    private void StatusBar_Closed(InfoBar sender, InfoBarClosedEventArgs args)
+    {
+        StatusBar.Visibility = Visibility.Collapsed;
+        if (_closeSuppress > 0)
+        {
+            _closeSuppress--;
+            return;
+        }
+
+        if (_showingUndo)
+        {
+            _showingUndo = false;
+            StatusBar.ActionButton = null;
+            PlaylistChanges.Dismiss();
+            return;
+        }
+
+        if (PlaylistChanges.IsPending(_selectedId, out var message))
+        {
+            PresentUndo(message);
+        }
+    }
+
+    private void HideStatus()
+    {
+        StatusBar.ActionButton = null;
+        if (!StatusBar.IsOpen)
+        {
+            StatusBar.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        _closeSuppress++;
+        StatusBar.IsOpen = false;
+        StatusBar.Visibility = Visibility.Collapsed;
+    }
+
     private void ShowStatus(string? message, InfoBarSeverity severity = InfoBarSeverity.Informational)
     {
+        _showingUndo = false;
+        StatusBar.ActionButton = null;
         if (string.IsNullOrWhiteSpace(message))
         {
-            StatusBar.IsOpen = false;
-            StatusBar.Visibility = Visibility.Collapsed;
+            HideStatus();
             return;
         }
 

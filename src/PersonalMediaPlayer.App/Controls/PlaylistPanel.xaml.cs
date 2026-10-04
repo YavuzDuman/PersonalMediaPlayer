@@ -16,21 +16,57 @@ public sealed partial class PlaylistPanel : UserControl
     private string? _playlistId;
     private int _index = -1;
     private bool _loading;
+    private bool _unwatchedOnly;
     private Border? _currentHost;
     private int? _dragFrom;
+    private bool _showingUndo;
+    private int _closeSuppress;
 
     public PlaylistPanel()
     {
         InitializeComponent();
-        Status.Closed += (_, _) => Status.Visibility = Visibility.Collapsed;
+        Status.Closed += Status_Closed;
         ActualThemeChanged += (_, _) => DispatcherQueue.TryEnqueue(() => Refresh());
+        PlaylistChanges.Changed += OnPlaylistChangesChanged;
+        PlayQueue.Changed += OnQueueChanged;
+        Unloaded += (_, _) =>
+        {
+            PlaylistChanges.Changed -= OnPlaylistChangesChanged;
+            PlayQueue.Changed -= OnQueueChanged;
+        };
     }
 
     internal event EventHandler<int>? VideoChosen;
 
+    internal event EventHandler? ReplayChosen;
+
+    internal event EventHandler? ModeChanged;
+
+    internal event EventHandler? NextChosen;
+
     internal event EventHandler<int>? OrderChanged;
 
     public bool IsOpen => Panel.Visibility == Visibility.Visible;
+
+    public bool UnwatchedOnly => _unwatchedOnly;
+
+    public void Sync(string playlistId, int index)
+    {
+        _playlistId = playlistId;
+        _index = index;
+        if (Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        if (IsOpen)
+        {
+            Refresh();
+            return;
+        }
+
+        UpdateRail();
+    }
 
     public void Show(string playlistId, int index)
     {
@@ -47,7 +83,10 @@ public sealed partial class PlaylistPanel : UserControl
         if (IsOpen)
         {
             Refresh();
+            return;
         }
+
+        UpdateRail();
     }
 
     public void Hide()
@@ -71,16 +110,17 @@ public sealed partial class PlaylistPanel : UserControl
         }
     }
 
-    public void SetStatus(string? message)
+    public void SetStatus(string? message, InfoBarSeverity severity = InfoBarSeverity.Warning)
     {
         if (string.IsNullOrWhiteSpace(message))
         {
-            Status.IsOpen = false;
-            Status.Visibility = Visibility.Collapsed;
+            ShowPendingUndo(replaceStatus: true);
             return;
         }
 
-        Status.Severity = InfoBarSeverity.Warning;
+        _showingUndo = false;
+        Status.ActionButton = null;
+        Status.Severity = severity;
         Status.Message = message;
         Status.Visibility = Visibility.Visible;
         Status.IsOpen = true;
@@ -88,6 +128,10 @@ public sealed partial class PlaylistPanel : UserControl
 
     private void Open()
     {
+        Grid.SetColumn(this, 3);
+        HorizontalAlignment = HorizontalAlignment.Stretch;
+        VerticalAlignment = VerticalAlignment.Stretch;
+        Margin = new Thickness(12, 0, 0, 0);
         Rail.Visibility = Visibility.Collapsed;
         Panel.Visibility = Visibility.Visible;
         Refresh();
@@ -96,7 +140,49 @@ public sealed partial class PlaylistPanel : UserControl
     private void Collapse()
     {
         Panel.Visibility = Visibility.Collapsed;
+        Grid.SetColumn(this, 0);
+        HorizontalAlignment = HorizontalAlignment.Left;
+        VerticalAlignment = VerticalAlignment.Top;
+        Margin = new Thickness(16, 12, 0, 0);
+        UpdateRail();
         Rail.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateRail()
+    {
+        var list = _playlistId is null ? null : Playlists.Find(_playlistId);
+        if (list is null)
+        {
+            RailName.Text = "Playlist";
+            RailCount.Text = "Show playlist";
+            ToolTipService.SetToolTip(Rail, "Show playlist");
+            return;
+        }
+
+        RailName.Text = list.Name;
+        var note = PlaylistRuns.For(list.Id).ActiveNote;
+        RailCount.Text = note is null ? list.WatchedSummary() : list.WatchedSummary() + " · " + note;
+        var tip = list.Name + Environment.NewLine + list.WatchedSummary();
+        if (note is not null)
+        {
+            tip += Environment.NewLine + note;
+        }
+
+        ToolTipService.SetToolTip(Rail, tip + Environment.NewLine + "Show playlist");
+    }
+
+    private void Unwatched_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading || List is null)
+        {
+            return;
+        }
+
+        _unwatchedOnly = UnwatchedBox.IsChecked == true;
+        if (IsOpen)
+        {
+            Refresh(bringCurrentIntoView: false);
+        }
     }
 
     private void Rail_Tapped(object sender, TappedRoutedEventArgs e)
@@ -107,9 +193,44 @@ public sealed partial class PlaylistPanel : UserControl
 
     private void Collapse_Click(object sender, RoutedEventArgs e) => Collapse();
 
-    private void Previous_Click(object sender, RoutedEventArgs e) => ChooseNeighbor(-1);
+    private void Previous_Click(object sender, RoutedEventArgs e) => ChooseNeighbor(forward: false);
 
-    private void Next_Click(object sender, RoutedEventArgs e) => ChooseNeighbor(1);
+    private void Next_Click(object sender, RoutedEventArgs e)
+    {
+        if (NextChosen is not null)
+        {
+            NextChosen.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        ChooseNeighbor(forward: true);
+    }
+
+    internal void PlayForward() => ChooseNeighbor(forward: true);
+
+    private void Shuffle_Click(object sender, RoutedEventArgs e)
+    {
+        var run = CurrentRun();
+        if (run is null)
+        {
+            return;
+        }
+
+        run.SetShuffle(!run.Shuffle);
+        ShowMode();
+    }
+
+    private void Repeat_Click(object sender, RoutedEventArgs e)
+    {
+        var run = CurrentRun();
+        if (run is null)
+        {
+            return;
+        }
+
+        run.CycleRepeat();
+        ShowMode();
+    }
 
     private void PlayNext_Changed(object sender, RoutedEventArgs e)
     {
@@ -132,14 +253,90 @@ public sealed partial class PlaylistPanel : UserControl
         }
     }
 
-    private void ChooseNeighbor(int delta)
+    private void ChooseNeighbor(bool forward)
     {
         var list = _playlistId is null ? null : Playlists.Find(_playlistId);
-        var next = list is null ? -1 : Neighbor(list, _index, delta);
-        if (next >= 0)
+        var run = CurrentRun();
+        if (list is null || run is null)
         {
-            VideoChosen?.Invoke(this, next);
+            return;
         }
+
+        var step = run.Move(
+            PlaylistRun.Keys(list),
+            index => PlaylistRun.Include(list, index, _index, _unwatchedOnly),
+            _index,
+            playNext: true,
+            fromEnd: false,
+            forward,
+            PlaylistRuns.Random);
+        if (step.Kind == PlaylistStepKind.Open)
+        {
+            VideoChosen?.Invoke(this, step.Index);
+        }
+        else if (step.Kind == PlaylistStepKind.Replay)
+        {
+            ReplayChosen?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private PlaylistRun? CurrentRun()
+        => _playlistId is null ? null : PlaylistRuns.For(_playlistId);
+
+    private void ShowMode()
+    {
+        var run = CurrentRun();
+        var list = _playlistId is null ? null : Playlists.Find(_playlistId);
+        var enabled = run is not null && list is { Videos.Count: > 0 };
+        ShuffleButton.IsEnabled = enabled;
+        RepeatButton.IsEnabled = enabled;
+        if (run is null)
+        {
+            ShuffleLabel.Text = "Shuffle";
+            RepeatLabel.Text = "Repeat off";
+            RepeatIcon.Glyph = "\uE1CD";
+            ShuffleButton.Style = null;
+            RepeatButton.Style = null;
+            ModeLine.Text = "Saved order. Repeat is off.";
+            PreviousButton.IsEnabled = false;
+            NextButton.IsEnabled = PlayQueue.Count > 0;
+            UpdateRail();
+            return;
+        }
+
+        ShuffleLabel.Text = run.ShuffleLabel;
+        RepeatLabel.Text = run.RepeatLabel;
+        RepeatIcon.Glyph = run.RepeatGlyph;
+        ModeLine.Text = run.Summary;
+        Style? accent = Application.Current.Resources.TryGetValue("AccentButtonStyle", out var style) ? style as Style : null;
+        ShuffleButton.Style = run.Shuffle ? accent : null;
+        RepeatButton.Style = run.Repeat == PlaylistRepeat.Off ? null : accent;
+        ToolTipService.SetToolTip(
+            ShuffleButton,
+            run.Shuffle
+                ? "Shuffle is on. Each video plays once before one plays again."
+                : "Shuffle is off. Click to play in a random order.");
+        ToolTipService.SetToolTip(RepeatButton, run.Repeat switch
+        {
+            PlaylistRepeat.All => "Repeating the playlist. Click to repeat this video.",
+            PlaylistRepeat.One => "Repeating this video. Click to turn repeat off.",
+            _ => "Repeat is off. Click to repeat the playlist."
+        });
+        if (list is null)
+        {
+            PreviousButton.IsEnabled = false;
+            NextButton.IsEnabled = PlayQueue.Count > 0;
+        }
+        else
+        {
+            var keys = PlaylistRun.Keys(list);
+            bool Include(int index) => PlaylistRun.Include(list, index, _index, _unwatchedOnly);
+            PreviousButton.IsEnabled = run.HasMove(keys, Include, _index, forward: false);
+            NextButton.IsEnabled = PlayQueue.Count > 0 || run.HasMove(keys, Include, _index, forward: true);
+        }
+
+        UpdateRail();
+        ModeChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void Scroller_DragOver(object sender, DragEventArgs e)
@@ -164,6 +361,19 @@ public sealed partial class PlaylistPanel : UserControl
 
     private void Refresh(bool bringCurrentIntoView = true)
     {
+        try
+        {
+            Rebuild(bringCurrentIntoView);
+        }
+        finally
+        {
+            ShowMode();
+            ShowPendingUndo(replaceStatus: false);
+        }
+    }
+
+    private void Rebuild(bool bringCurrentIntoView)
+    {
         var keptOffset = bringCurrentIntoView ? 0 : Scroller.VerticalOffset;
         List.Children.Clear();
         _currentHost = null;
@@ -172,8 +382,8 @@ public sealed partial class PlaylistPanel : UserControl
         {
             PlaylistName.Text = "Playlist";
             PositionText.Text = "This playlist is no longer available.";
-            PreviousButton.IsEnabled = false;
-            NextButton.IsEnabled = false;
+            WatchedText.Visibility = Visibility.Collapsed;
+            UnwatchedBox.IsEnabled = false;
             PlayNextBox.IsEnabled = false;
             Scroller.Visibility = Visibility.Collapsed;
             Empty.Visibility = Visibility.Visible;
@@ -184,19 +394,31 @@ public sealed partial class PlaylistPanel : UserControl
         PlaylistName.Text = list.Name;
         ToolTipService.SetToolTip(PlaylistName, list.Name);
         var count = list.Videos.Count;
-        var place = _index >= 0 && _index < count ? _index + 1 : 0;
-        PositionText.Text = count == 0 ? "No videos" : $"{place} of {count}";
-        PreviousButton.IsEnabled = Neighbor(list, _index, -1) >= 0;
-        NextButton.IsEnabled = Neighbor(list, _index, 1) >= 0;
+        var position = _index >= 0 && _index < count ? _index + 1 : 0;
+        PositionText.Text = count == 0 ? "No videos" : $"{position} of {count}";
+        WatchedText.Text = list.WatchedSummary();
+        WatchedText.Visibility = count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        UnwatchedBox.IsEnabled = count > 0;
         PlayNextBox.IsEnabled = true;
         _loading = true;
         PlayNextBox.IsChecked = list.PlayNext;
         _loading = false;
-        if (count == 0)
+        var visible = new List<int>();
+        for (var i = 0; i < count; i++)
+        {
+            if (_unwatchedOnly && list.Videos[i].Watched)
+            {
+                continue;
+            }
+
+            visible.Add(i);
+        }
+
+        if (visible.Count == 0)
         {
             Scroller.Visibility = Visibility.Collapsed;
             Empty.Visibility = Visibility.Visible;
-            Empty.Text = "This playlist is empty.";
+            Empty.Text = count == 0 ? "This playlist is empty." : "Every video is marked watched.";
             return;
         }
 
@@ -205,9 +427,10 @@ public sealed partial class PlaylistPanel : UserControl
         var names = App.MediaLibrary.GetItems()
             .GroupBy(item => item.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().DisplayName, StringComparer.OrdinalIgnoreCase);
-        for (var i = 0; i < list.Videos.Count; i++)
+        for (var place = 0; place < visible.Count; place++)
         {
-            List.Children.Add(CreateRow(list.Videos[i], i, list.Videos.Count, names));
+            var index = visible[place];
+            List.Children.Add(CreateRow(list.Videos[index], index, visible, place, names));
         }
 
         if (bringCurrentIntoView && _currentHost is Border current)
@@ -228,12 +451,17 @@ public sealed partial class PlaylistPanel : UserControl
         }
     }
 
-    private Border CreateRow(PlaylistEntry entry, int index, int count, IReadOnlyDictionary<string, string> names)
+    private Border CreateRow(
+        PlaylistEntry entry,
+        int index,
+        IReadOnlyList<int> visible,
+        int place,
+        IReadOnlyDictionary<string, string> names)
     {
         var current = index == _index;
         var playable = entry.IsPlayable;
         var title = entry.DisplayTitle(path => names.TryGetValue(path, out var known) ? known : null);
-        var note = entry.Resolve ? "Online" : playable ? null : "Not on this PC";
+        var note = entry.Note();
         var body = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         body.Children.Add(new TextBlock
         {
@@ -272,12 +500,14 @@ public sealed partial class PlaylistPanel : UserControl
         heading.Children.Add(titleBlock);
         body.Children.Insert(0, heading);
 
-        var canMoveUp = index > 0;
-        var canMoveDown = index < count - 1;
+        var canMoveUp = place > 0;
+        var canMoveDown = place < visible.Count - 1;
+        var upTo = canMoveUp ? visible[place - 1] : 0;
+        var downTo = canMoveDown ? visible[place + 1] + 1 : 0;
         var actions = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         var rowIndex = index;
-        actions.Children.Add(IconButton("\uE70E", "Move up", canMoveUp, () => MoveRow(rowIndex, rowIndex - 1)));
-        actions.Children.Add(IconButton("\uE70D", "Move down", canMoveDown, () => MoveRow(rowIndex, rowIndex + 2)));
+        actions.Children.Add(IconButton("\uE70E", "Move up", canMoveUp, () => MoveRow(rowIndex, upTo)));
+        actions.Children.Add(IconButton("\uE70D", "Move down", canMoveDown, () => MoveRow(rowIndex, downTo)));
 
         var grip = new Border
         {
@@ -366,6 +596,12 @@ public sealed partial class PlaylistPanel : UserControl
             Child = shell
         };
         ToolTipService.SetToolTip(host, note is null ? title : $"{title}{Environment.NewLine}{note}");
+        var watchedNow = entry.Watched;
+        host.ContextFlyout = RowMenu(
+            watchedNow,
+            () => ToggleWatched(rowIndex, !watchedNow),
+            () => QueueEntry(entry, names, next: false),
+            () => QueueEntry(entry, names, next: true));
         void HideInsert()
         {
             topLine.Visibility = Visibility.Collapsed;
@@ -588,7 +824,7 @@ public sealed partial class PlaylistPanel : UserControl
         var playing = list.Videos[_index];
         try
         {
-            if (!Playlists.MoveTo(_playlistId, from, to))
+            if (!PlaylistChanges.Apply(_playlistId, "Moved a video.", () => Playlists.MoveTo(_playlistId, from, to)))
             {
                 return;
             }
@@ -604,17 +840,135 @@ public sealed partial class PlaylistPanel : UserControl
             return;
         }
 
-        var updated = Playlists.Find(_playlistId);
-        var next = updated?.Videos.FindIndex(item => SameEntry(item, playing)) ?? -1;
-        var last = Math.Max(0, (updated?.Videos.Count ?? 1) - 1);
-        _index = next >= 0 ? next : Math.Clamp(_index, 0, last);
+        KeepPlaying(playing);
+        ShowPendingUndo(replaceStatus: true);
+    }
+
+    private void KeepPlaying(PlaylistEntry playing)
+    {
+        var updated = _playlistId is null ? null : Playlists.Find(_playlistId);
+        var count = updated?.Videos.Count ?? 0;
+        if (updated is null || count == 0)
+        {
+            _index = -1;
+            Refresh(bringCurrentIntoView: false);
+            return;
+        }
+
+        var next = PlaylistChanges.IndexOf(updated.Videos, playing);
+        _index = next >= 0 ? next : Math.Clamp(_index, 0, count - 1);
         Refresh(bringCurrentIntoView: false);
         OrderChanged?.Invoke(this, _index);
     }
 
-    private static bool SameEntry(PlaylistEntry left, PlaylistEntry right)
-        => left.Resolve == right.Resolve
-           && string.Equals(left.Location, right.Location, StringComparison.OrdinalIgnoreCase);
+    private void OnPlaylistChangesChanged()
+    {
+        if (!DispatcherQueue.TryEnqueue(() => ShowPendingUndo(replaceStatus: false)))
+        {
+            ShowPendingUndo(replaceStatus: false);
+        }
+    }
+
+    private void ShowPendingUndo(bool replaceStatus)
+    {
+        if (!replaceStatus && !_showingUndo && Status.IsOpen)
+        {
+            return;
+        }
+
+        if (_playlistId is null || !PlaylistChanges.IsPending(_playlistId, out var message))
+        {
+            if (_showingUndo)
+            {
+                _showingUndo = false;
+                HideStatus();
+            }
+
+            return;
+        }
+
+        _showingUndo = true;
+        Status.Severity = InfoBarSeverity.Informational;
+        Status.Message = message;
+        Status.ActionButton = UndoButton();
+        Status.Visibility = Visibility.Visible;
+        Status.IsOpen = true;
+    }
+
+    private void UndoLast()
+    {
+        if (_playlistId is null)
+        {
+            return;
+        }
+
+        var list = Playlists.Find(_playlistId);
+        var playing = list is not null && _index >= 0 && _index < list.Videos.Count
+            ? list.Videos[_index]
+            : null;
+        try
+        {
+            var id = PlaylistChanges.Undo();
+            _showingUndo = false;
+            HideStatus();
+            if (playing is null || !string.Equals(id, _playlistId, StringComparison.Ordinal))
+            {
+                Refresh(bringCurrentIntoView: false);
+                return;
+            }
+
+            KeepPlaying(playing);
+        }
+        catch (IOException)
+        {
+            SetStatus("Could not undo that change.");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            SetStatus("Could not undo that change.");
+        }
+    }
+
+    private Button UndoButton()
+    {
+        var button = new Button { Content = "Undo" };
+        button.Click += (_, _) => UndoLast();
+        return button;
+    }
+
+    private void Status_Closed(InfoBar sender, InfoBarClosedEventArgs args)
+    {
+        Status.Visibility = Visibility.Collapsed;
+        if (_closeSuppress > 0)
+        {
+            _closeSuppress--;
+            return;
+        }
+
+        if (_showingUndo)
+        {
+            _showingUndo = false;
+            Status.ActionButton = null;
+            PlaylistChanges.Dismiss();
+            return;
+        }
+
+        ShowPendingUndo(replaceStatus: true);
+    }
+
+    private void HideStatus()
+    {
+        Status.ActionButton = null;
+        if (!Status.IsOpen)
+        {
+            Status.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        _closeSuppress++;
+        Status.IsOpen = false;
+        Status.Visibility = Visibility.Collapsed;
+    }
 
     private static bool IsInside(DependencyObject source, DependencyObject ancestor)
     {
@@ -629,16 +983,99 @@ public sealed partial class PlaylistPanel : UserControl
         return false;
     }
 
-    private static int Neighbor(Playlist list, int index, int delta)
+    private void ToggleWatched(int index, bool watched)
     {
-        for (var i = index + delta; i >= 0 && i < list.Videos.Count; i += delta)
+        if (_playlistId is null)
         {
-            if (list.Videos[i].IsPlayable)
-            {
-                return i;
-            }
+            return;
         }
 
-        return -1;
+        try
+        {
+            Playlists.SetWatched(_playlistId, index, watched);
+        }
+        catch (IOException)
+        {
+            SetStatus("Could not save that change.");
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            SetStatus("Could not save that change.");
+            return;
+        }
+
+        if (IsOpen)
+        {
+            Refresh(bringCurrentIntoView: false);
+        }
+        else
+        {
+            UpdateRail();
+        }
+    }
+
+    private void OnQueueChanged(object? sender, EventArgs e)
+        => DispatcherQueue.TryEnqueue(ApplyNextForQueue);
+
+    private void ApplyNextForQueue()
+    {
+        if (PlayQueue.Count > 0)
+        {
+            NextButton.IsEnabled = true;
+            return;
+        }
+
+        var list = _playlistId is null ? null : Playlists.Find(_playlistId);
+        var run = CurrentRun();
+        if (list is null || run is null || list.Videos.Count == 0)
+        {
+            NextButton.IsEnabled = false;
+            return;
+        }
+
+        var keys = PlaylistRun.Keys(list);
+        NextButton.IsEnabled = run.HasMove(
+            keys,
+            index => PlaylistRun.Include(list, index, _index, _unwatchedOnly),
+            _index,
+            forward: true);
+    }
+
+    private void QueueEntry(PlaylistEntry entry, IReadOnlyDictionary<string, string> names, bool next)
+    {
+        if (!entry.Resolve && !entry.IsPlayable)
+        {
+            SetStatus("That video is no longer on this PC.");
+            return;
+        }
+
+        string? Name(string path) => names.TryGetValue(path, out var known) ? known : null;
+        var queued = next ? PlayQueue.PlayNext(entry, Name) : PlayQueue.Add(entry, Name);
+        if (queued is null)
+        {
+            SetStatus("That video could not be queued.");
+            return;
+        }
+
+        if (next)
+        {
+            SetStatus($"\"{queued.Title}\" will play next.", InfoBarSeverity.Success);
+        }
+    }
+
+    private static MenuFlyout RowMenu(bool watched, Action toggle, Action queue, Action playNext)
+    {
+        var next = new MenuFlyoutItem { Text = "Play next" };
+        next.Click += (_, _) => playNext();
+        var add = new MenuFlyoutItem { Text = "Add to queue" };
+        add.Click += (_, _) => queue();
+        var item = new MenuFlyoutItem { Text = watched ? "Mark as unwatched" : "Mark as watched" };
+        item.Click += (_, _) => toggle();
+        var flyout = new MenuFlyout();
+        flyout.Items.Add(next);
+        flyout.Items.Add(add);
+        flyout.Items.Add(item);
+        return flyout;
     }
 }

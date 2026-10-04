@@ -11,6 +11,7 @@ using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Controls;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Storage;
 using PersonalMediaPlayer.App.ViewModels;
 using PersonalMediaPlayer.Core.Models;
 using MediaCard = PersonalMediaPlayer.App.Controls.MediaCard;
@@ -28,6 +29,7 @@ public sealed partial class LibraryPage : Page
     private List<MediaItem> _slides = [];
     private int _slideIndex;
     private int _linkGeneration;
+    private int _visit;
     private CancellationTokenSource? _linkCheck;
     private MediaItem? _selectionAnchor;
     private List<MediaItem>? _pendingSelection;
@@ -37,6 +39,8 @@ public sealed partial class LibraryPage : Page
     {
         ViewModel = new LibraryViewModel(App.MediaLibrary);
         InitializeComponent();
+        LibraryWatch.Changed += OnLibraryWatchChanged;
+        Unloaded += (_, _) => LibraryWatch.Changed -= OnLibraryWatchChanged;
         MediaGrid.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(MediaGrid_PointerReleased), true);
         ViewModel.PropertyChanged += (_, args) =>
         {
@@ -51,13 +55,64 @@ public sealed partial class LibraryPage : Page
 
     public LibraryViewModel ViewModel { get; }
 
+    private async void OnLibraryWatchChanged(object? sender, EventArgs e)
+    {
+        if (ViewModel.IsBusy)
+        {
+            return;
+        }
+
+        await ViewModel.LoadAsync();
+    }
+
+    private async void DisconnectFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string path })
+        {
+            await ViewModel.DisconnectPcFolderAsync(path);
+        }
+    }
+
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
+        var visit = ++_visit;
+        var saved = SearchSession.Recall(SearchSession.Library);
+        var album = SearchSession.Recall(SearchSession.LibraryAlbum).Text;
+        if (!string.Equals(ViewModel.SearchText, saved.Text, StringComparison.Ordinal))
+        {
+            ViewModel.SearchText = saved.Text;
+        }
+
+        ViewModel.KeepFolder(album);
         await ViewModel.LoadAsync();
+        if (visit != _visit)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(album) && FolderList.SelectedItem is not null)
+        {
+            FolderList.ScrollIntoView(FolderList.SelectedItem);
+        }
+
+        if (string.IsNullOrWhiteSpace(saved.Text))
+        {
+            return;
+        }
+
+        SearchScroll.RestoreInside(MediaGrid, saved.Offset);
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _visit++;
+        var viewer = SearchScroll.Find(MediaGrid);
+        SearchSession.Remember(
+            SearchSession.Library,
+            ViewModel.SearchText,
+            viewer?.VerticalOffset ?? 0,
+            viewer is { ScrollableHeight: > 0 });
+        SearchSession.Remember(SearchSession.LibraryAlbum, ViewModel.SelectedFolder?.Name, 0);
         _linkGeneration++;
         _linkCheck?.Cancel();
         if (Slideshow.Visibility == Visibility.Visible)
@@ -115,7 +170,7 @@ public sealed partial class LibraryPage : Page
                 return;
             }
 
-            Frame.Navigate(typeof(VideoPlayerPage), new StreamOpenRequest(result.Url, StreamLink.DisplayName(result.Url)));
+            NavigationHelper.OpenPlayer(new StreamOpenRequest(result.Url, StreamLink.DisplayName(result.Url)));
         }
         catch (OperationCanceledException)
         {
@@ -1267,7 +1322,7 @@ public sealed partial class LibraryPage : Page
 
         if (item.IsVideo)
         {
-            Frame.Navigate(typeof(VideoPlayerPage), item);
+            NavigationHelper.OpenPlayer(item);
             return;
         }
 
@@ -1289,6 +1344,23 @@ public sealed partial class LibraryPage : Page
         }
 
         flyout.Items.Add(new MenuFlyoutSeparator());
+        var queueable = selected.Count(item => item.IsVideo && !item.IsMissing && !string.IsNullOrWhiteSpace(item.FilePath));
+        if (queueable > 0)
+        {
+            var playNext = new MenuFlyoutItem
+            {
+                Text = queueable == 1 ? "Play next" : $"Play {queueable} next"
+            };
+            playNext.Click += async (_, _) => await QueueSelectionAsync(next: true);
+            flyout.Items.Add(playNext);
+            var queue = new MenuFlyoutItem
+            {
+                Text = queueable == 1 ? "Add to queue" : $"Add {queueable} to queue"
+            };
+            queue.Click += async (_, _) => await QueueSelectionAsync(next: false);
+            flyout.Items.Add(queue);
+        }
+
         var playlist = new MenuFlyoutItem { Text = "Add to playlist" };
         playlist.Click += async (_, _) => await AddSelectionToPlaylistAsync();
         flyout.Items.Add(playlist);
@@ -1314,6 +1386,12 @@ public sealed partial class LibraryPage : Page
         _selectionAnchor = null;
         MediaGrid.SelectedItems.Clear();
     }
+
+    private async void PlayNext_Click(object sender, RoutedEventArgs e)
+        => await QueueSelectionAsync(next: true);
+
+    private async void AddToQueue_Click(object sender, RoutedEventArgs e)
+        => await QueueSelectionAsync(next: false);
 
     private async void AddToPlaylist_Click(object sender, RoutedEventArgs e)
         => await AddSelectionToPlaylistAsync();
@@ -1367,6 +1445,38 @@ public sealed partial class LibraryPage : Page
                 card.RefreshFavorite();
             }
         }
+    }
+
+    private async Task QueueSelectionAsync(bool next)
+    {
+        if (ViewModel.SelectedFolder?.IsRecentlyDeleted == true)
+        {
+            return;
+        }
+
+        var selected = SelectedItems()
+            .Where(item => item.IsVideo && !item.IsMissing && !string.IsNullOrWhiteSpace(item.FilePath))
+            .Select(item => (Title: item.DisplayName, Path: item.FilePath))
+            .ToArray();
+        if (selected.Length == 0)
+        {
+            ViewModel.ShowStatus("Choose a video that is on this PC. Photos are not added to the queue.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var videos = await Task.Run(() => selected.Where(item => File.Exists(item.Path)).ToArray());
+        if (videos.Length == 0)
+        {
+            ViewModel.ShowStatus("Choose a video that is on this PC. Photos are not added to the queue.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var added = PlayQueue.AddFiles(videos, next);
+        ViewModel.ShowStatus(
+            next
+                ? added == 1 ? "1 video will play next." : $"{added} videos will play next."
+                : added == 1 ? "Added 1 video to the queue." : $"Added {added} videos to the queue.",
+            InfoBarSeverity.Success);
     }
 
     private async Task AddSelectionToPlaylistAsync()

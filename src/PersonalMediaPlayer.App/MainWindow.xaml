@@ -23,7 +23,7 @@
                 x:Name="AppTitleBar"
                 Title="Personal Media Player"
                 BackRequested="TitleBar_BackRequested"
-                IsBackButtonVisible="{x:Bind Shell.ContentFrame.CanGoBack, Mode=OneWay}"
+                IsBackButtonVisible="{x:Bind Shell.ShowBackButton, Mode=OneWay}"
                 IsPaneToggleButtonVisible="True"
                 PaneToggleRequested="TitleBar_PaneToggleRequested">
                 <TitleBar.IconSource>

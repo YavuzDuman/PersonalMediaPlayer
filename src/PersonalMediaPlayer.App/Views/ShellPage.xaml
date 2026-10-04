@@ -59,6 +59,18 @@
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
         </NavigationView.MenuItems>
-        <Frame x:Name="NavFrame" />
+        <Grid>
+            <Frame x:Name="NavFrame" />
+            <Border
+                x:Name="PlayerHost"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0"
+                Canvas.ZIndex="2"
+                CornerRadius="0"
+                Visibility="Collapsed" />
+        </Grid>
     </NavigationView>
 </UserControl>

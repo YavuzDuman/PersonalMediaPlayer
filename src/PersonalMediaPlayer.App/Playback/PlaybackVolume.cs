@@ -11,6 +11,11 @@ internal static class PlaybackVolume
         "PersonalMediaPlayer",
         "playback-volume.json");
 
+    // The download preview is a different player. Its level stays in memory for this
+    // session and must not read or write the watching player's file.
+    private static double _previewLevel = 80;
+    private static double _previewAudible = 80;
+
     public static PlaybackVolumeState Load()
     {
         try
@@ -58,6 +63,29 @@ internal static class PlaybackVolume
         {
             // A missed volume should not stop playback.
         }
+    }
+
+    public static PlaybackVolumeState LoadPreview()
+    {
+        var audible = Clamp(_previewAudible, 80);
+        if (audible <= 0)
+        {
+            audible = 80;
+        }
+
+        return new PlaybackVolumeState(Clamp(_previewLevel, 80), audible);
+    }
+
+    public static void SavePreview(double level)
+    {
+        var audible = level > 0 ? Clamp(level, 80) : _previewAudible;
+        if (audible <= 0)
+        {
+            audible = 80;
+        }
+
+        _previewLevel = Clamp(level, 0);
+        _previewAudible = audible;
     }
 
     private static double Clamp(double value, double fallback)

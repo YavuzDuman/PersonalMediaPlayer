@@ -124,10 +124,13 @@ public sealed class FileLibraryStore : ILibraryStore
             throw new NotSupportedException($"'{Path.GetExtension(full)}' is not a supported media type.");
         }
 
-        if (!IsManagedCopy(full) && !IsLinked(full))
+        lock (_catalog)
         {
-            Links.Add(new LinkRecord { Path = full, AddedUtc = DateTimeOffset.UtcNow });
-            SaveLinks();
+            if (!IsManagedCopy(full) && FindLink(full) is null)
+            {
+                Links.Add(new LinkRecord { Path = full, AddedUtc = DateTimeOffset.UtcNow });
+                SaveLinks();
+            }
         }
 
         if (CanAddImportedFileTo(folderName))
@@ -188,7 +191,10 @@ public sealed class FileLibraryStore : ILibraryStore
         }
 
         var full = Path.GetFullPath(filePath);
-        return !IsManagedCopy(full) && FindLink(full) is not null;
+        lock (_catalog)
+        {
+            return !IsManagedCopy(full) && FindLink(full) is not null;
+        }
     }
 
     public DateTimeOffset? LinkAddedAt(string filePath)
@@ -204,7 +210,10 @@ public sealed class FileLibraryStore : ILibraryStore
             return null;
         }
 
-        return FindLink(full)?.AddedUtc;
+        lock (_catalog)
+        {
+            return FindLink(full)?.AddedUtc;
+        }
     }
 
     public IReadOnlyList<string> EnumerateImageFiles()
@@ -1198,29 +1207,218 @@ public sealed class FileLibraryStore : ILibraryStore
     private static bool IsSupportedMedia(string fullPath)
         => MediaFileTypes.IsImage(fullPath) || MediaFileTypes.IsVideo(fullPath);
 
+    private readonly object _catalog = new();
+
     private string LinksFile => Path.Combine(LibraryRoot, "links.json");
+
+    private string ConnectedFoldersFile => Path.Combine(LibraryRoot, "connected-folders.json");
 
     private List<LinkRecord>? _links;
 
-    private List<LinkRecord> Links => _links ??= ReadLinks();
+    private List<FolderRecord>? _folders;
+
+    public void ReloadLinks()
+    {
+        lock (_catalog)
+        {
+            _links = null;
+            _folders = null;
+        }
+    }
+
+    public IReadOnlyList<string> ConnectedFolders()
+    {
+        lock (_catalog)
+        {
+            return Folders.Select(folder => folder.Path).ToArray();
+        }
+    }
+
+    public ConnectFolderResult ConnectFolder(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return ConnectFolderResult.NotAFolder;
+        }
+
+        string full;
+        try
+        {
+            full = NormalizeDirectory(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return ConnectFolderResult.NotAFolder;
+        }
+
+        if (!Directory.Exists(full))
+        {
+            return ConnectFolderResult.NotAFolder;
+        }
+
+        var library = NormalizeDirectory(LibraryRoot);
+        if (IsSameOrInside(full, library))
+        {
+            return ConnectFolderResult.InsideLibrary;
+        }
+
+        if (IsSameOrInside(library, full))
+        {
+            return ConnectFolderResult.CoversLibrary;
+        }
+
+        lock (_catalog)
+        {
+            foreach (var folder in Folders)
+            {
+                if (string.Equals(folder.Path, full, StringComparison.OrdinalIgnoreCase))
+                {
+                    return ConnectFolderResult.AlreadyConnected;
+                }
+
+                if (IsSameOrInside(full, folder.Path) || IsSameOrInside(folder.Path, full))
+                {
+                    return ConnectFolderResult.Overlaps;
+                }
+            }
+
+            Folders.Add(new FolderRecord { Path = full, AddedUtc = DateTimeOffset.UtcNow });
+            SaveFolders();
+            return ConnectFolderResult.Connected;
+        }
+    }
+
+    public bool DisconnectFolder(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string full;
+        try
+        {
+            full = NormalizeDirectory(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+
+        lock (_catalog)
+        {
+            var removed = Folders.RemoveAll(folder => string.Equals(folder.Path, full, StringComparison.OrdinalIgnoreCase));
+            if (removed == 0)
+            {
+                return false;
+            }
+
+            SaveFolders();
+            return true;
+        }
+    }
+
+    public ConnectedFolderScan RefreshConnectedFolders()
+    {
+        string[] folders;
+        lock (_catalog)
+        {
+            folders = Folders.Select(folder => folder.Path).ToArray();
+        }
+
+        var found = new List<string>();
+        var missingFolders = 0;
+        foreach (var folder in folders)
+        {
+            if (!Directory.Exists(folder))
+            {
+                missingFolders++;
+                continue;
+            }
+
+            try
+            {
+                found.AddRange(EnumerateConnectedFiles(folder));
+            }
+            catch (IOException)
+            {
+                missingFolders++;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                missingFolders++;
+            }
+        }
+
+        var added = 0;
+        var already = 0;
+        lock (_catalog)
+        {
+            var changed = false;
+            foreach (var path in found)
+            {
+                if (IsManagedCopy(path) || FindLink(path) is not null)
+                {
+                    already++;
+                    continue;
+                }
+
+                Links.Add(new LinkRecord { Path = path, AddedUtc = DateTimeOffset.UtcNow });
+                added++;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                SaveLinks();
+            }
+        }
+
+        return new ConnectedFolderScan(added, already, missingFolders);
+    }
+
+    private List<LinkRecord> Links
+    {
+        get
+        {
+            lock (_catalog)
+            {
+                return _links ??= ReadLinks();
+            }
+        }
+    }
+
+    private List<FolderRecord> Folders
+    {
+        get
+        {
+            lock (_catalog)
+            {
+                return _folders ??= ReadFolders();
+            }
+        }
+    }
 
     private LinkRecord? FindLink(string fullPath)
         => Links.FirstOrDefault(link => string.Equals(Path.GetFullPath(link.Path), fullPath, StringComparison.OrdinalIgnoreCase));
 
     private Dictionary<string, DateTimeOffset> LinkMap()
     {
-        var map = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
-        foreach (var link in Links)
+        lock (_catalog)
         {
-            if (string.IsNullOrWhiteSpace(link.Path) || IsManagedCopy(link.Path))
+            var map = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+            foreach (var link in Links)
             {
-                continue;
+                if (string.IsNullOrWhiteSpace(link.Path) || IsManagedCopy(link.Path))
+                {
+                    continue;
+                }
+
+                map.TryAdd(Path.GetFullPath(link.Path), link.AddedUtc);
             }
 
-            map.TryAdd(Path.GetFullPath(link.Path), link.AddedUtc);
+            return map;
         }
-
-        return map;
     }
 
     private List<LinkRecord> ReadLinks()
@@ -1282,22 +1480,31 @@ public sealed class FileLibraryStore : ILibraryStore
     private void RemoveLink(string fullPath)
     {
         var full = Path.GetFullPath(fullPath);
-        Links.RemoveAll(link => string.Equals(Path.GetFullPath(link.Path), full, StringComparison.OrdinalIgnoreCase));
-        SaveLinks();
+        lock (_catalog)
+        {
+            Links.RemoveAll(link => string.Equals(Path.GetFullPath(link.Path), full, StringComparison.OrdinalIgnoreCase));
+            SaveLinks();
+        }
     }
 
     private void RetargetLink(string oldPath, string newPath, string? backupToMove)
     {
         var oldFull = Path.GetFullPath(oldPath);
-        var entry = FindLink(oldFull) ?? throw new InvalidOperationException("This file is not a linked library item.");
-        entry.Path = Path.GetFullPath(newPath);
-        SaveLinks();
+        string updated;
+        lock (_catalog)
+        {
+            var entry = FindLink(oldFull) ?? throw new InvalidOperationException("This file is not a linked library item.");
+            entry.Path = Path.GetFullPath(newPath);
+            updated = entry.Path;
+            SaveLinks();
+        }
+
         if (string.IsNullOrWhiteSpace(backupToMove) || !File.Exists(backupToMove))
         {
             return;
         }
 
-        var target = LinkBackupPath(entry.Path);
+        var target = LinkBackupPath(updated);
         if (string.Equals(backupToMove, target, StringComparison.OrdinalIgnoreCase) || File.Exists(target))
         {
             return;
@@ -1358,6 +1565,164 @@ public sealed class FileLibraryStore : ILibraryStore
         public string Path { get; set; } = string.Empty;
 
         public DateTimeOffset AddedUtc { get; set; }
+    }
+
+    private sealed class FolderRecord
+    {
+        public string Path { get; set; } = string.Empty;
+
+        public DateTimeOffset AddedUtc { get; set; }
+    }
+
+    private List<FolderRecord> ReadFolders()
+    {
+        if (!File.Exists(ConnectedFoldersFile))
+        {
+            return [];
+        }
+
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<List<FolderRecord>>(File.ReadAllText(ConnectedFoldersFile)) ?? [];
+            var unique = new List<FolderRecord>();
+            foreach (var entry in loaded)
+            {
+                if (string.IsNullOrWhiteSpace(entry.Path))
+                {
+                    continue;
+                }
+
+                string full;
+                try
+                {
+                    full = NormalizeDirectory(entry.Path);
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                    continue;
+                }
+
+                if (IsSameOrInside(full, NormalizeDirectory(LibraryRoot)))
+                {
+                    continue;
+                }
+
+                if (unique.Any(item => string.Equals(item.Path, full, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                entry.Path = full;
+                unique.Add(entry);
+            }
+
+            return unique;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+    }
+
+    private void SaveFolders()
+    {
+        var list = Folders;
+        if (list.Count == 0)
+        {
+            if (File.Exists(ConnectedFoldersFile))
+            {
+                File.Delete(ConnectedFoldersFile);
+            }
+
+            return;
+        }
+
+        File.WriteAllText(ConnectedFoldersFile, JsonSerializer.Serialize(list));
+    }
+
+    private static IEnumerable<string> EnumerateConnectedFiles(string folder)
+    {
+        var pending = new Stack<string>();
+        pending.Push(folder);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            IEnumerable<string> entries;
+            try
+            {
+                entries = Directory.EnumerateFileSystemEntries(current);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                FileAttributes attributes;
+                try
+                {
+                    attributes = File.GetAttributes(entry);
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                if ((attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint)) != 0)
+                {
+                    continue;
+                }
+
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    pending.Push(entry);
+                    continue;
+                }
+
+                if (IsSupportedMedia(entry))
+                {
+                    yield return Path.GetFullPath(entry);
+                }
+            }
+        }
+    }
+
+    private static string NormalizeDirectory(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full);
+        if (root is not null && string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return root;
+        }
+
+        return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static bool IsSameOrInside(string path, string parent)
+    {
+        var left = NormalizeDirectory(path);
+        var right = NormalizeDirectory(parent);
+        if (string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var prefix = right.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return left.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeFolderName(string name)

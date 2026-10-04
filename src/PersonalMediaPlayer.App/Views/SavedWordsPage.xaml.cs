@@ -3,6 +3,8 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using PersonalMediaPlayer.App.Helpers;
+using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Models;
 
@@ -27,7 +29,26 @@ public sealed partial class SavedWordsPage : Page
     {
         StatusBar.IsOpen = false;
         StatusBar.Visibility = Visibility.Collapsed;
+        var saved = SearchSession.Recall(SearchSession.SavedWords);
+        if (!string.Equals(SearchBox.Text, saved.Text, StringComparison.Ordinal))
+        {
+            SearchBox.Text = saved.Text;
+        }
+
         ShowWords();
+        if (!string.IsNullOrWhiteSpace(saved.Text))
+        {
+            SearchScroll.Restore(WordScroll, saved.Offset);
+        }
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        SearchSession.Remember(
+            SearchSession.SavedWords,
+            SearchBox.Text,
+            WordScroll.VerticalOffset,
+            WordScroll.ScrollableHeight > 0);
     }
 
     private void Search_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -327,7 +348,7 @@ public sealed partial class SavedWordsPage : Page
                 ImportedAt = new DateTimeOffset(File.GetCreationTimeUtc(word.VideoPath)),
                 FileSizeBytes = new FileInfo(word.VideoPath).Length
             };
-        Frame.Navigate(typeof(VideoPlayerPage), new VideoOpenRequest(item, time, word));
+        NavigationHelper.OpenPlayer(new VideoOpenRequest(item, time, word));
     }
 
     private void ShowStatus(string message)

@@ -10,6 +10,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     private double _progress;
     private string? _error;
     private string? _filePath;
+    private bool _selected;
 
     public DownloadQueueItem(string title, string url, DownloadQuality quality, DownloadSubtitle? subtitle = null)
     {
@@ -49,6 +50,12 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
             }
 
             _status = value;
+            if (_status != "Ready" && _selected)
+            {
+                _selected = false;
+                Notify(nameof(Selected));
+            }
+
             Notify(nameof(Status));
             Notify(nameof(Detail));
             Notify(nameof(CanCancel));
@@ -61,6 +68,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
             Notify(nameof(PauseVisibility));
             Notify(nameof(ResumeVisibility));
             Notify(nameof(ProgressVisibility));
+            Notify(nameof(SelectVisibility));
         }
     }
 
@@ -111,6 +119,28 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     public bool CanResume => Status == "Paused";
 
     public bool CanPreview => Status is "Ready";
+
+    public bool Selected
+    {
+        get => _selected;
+        set
+        {
+            if (_selected == value)
+            {
+                return;
+            }
+
+            if (value && Status != "Ready")
+            {
+                return;
+            }
+
+            _selected = value;
+            Notify(nameof(Selected));
+        }
+    }
+
+    public Visibility SelectVisibility => Status == "Ready" ? Visibility.Visible : Visibility.Collapsed;
 
     public bool ShowProgress => Status is "Downloading" or "Paused";
 

@@ -25,7 +25,7 @@
             <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Playlists" />
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="Search by name, drag to rearrange, or sort. The order is saved." />
+                Text="Search by name, drag to rearrange, or sort. Right-click a video to mark it watched. The last change can be undone." />
         </StackPanel>
         <InfoBar
             x:Name="StatusBar"
@@ -102,16 +102,29 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <StackPanel Padding="16,14,16,12" Spacing="12">
-                            <StackPanel Spacing="2">
-                                <TextBlock
-                                    x:Name="DetailTitle"
-                                    Style="{StaticResource SubtitleTextBlockStyle}"
-                                    TextTrimming="CharacterEllipsis" />
-                                <TextBlock
-                                    x:Name="DetailCount"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{StaticResource CaptionTextBlockStyle}" />
-                            </StackPanel>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <TextBlock
+                                        x:Name="DetailTitle"
+                                        Style="{StaticResource SubtitleTextBlockStyle}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        x:Name="DetailCount"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                </StackPanel>
+                                <CheckBox
+                                    x:Name="UnwatchedBox"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Checked="Unwatched_Changed"
+                                    Content="Unwatched only"
+                                    Unchecked="Unwatched_Changed" />
+                            </Grid>
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button
                                     x:Name="PlayButton"

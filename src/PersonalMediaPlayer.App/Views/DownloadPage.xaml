@@ -22,7 +22,7 @@
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 TextWrapping="Wrap"
-                Text="Add a YouTube video or a playlist. A playlist lets you choose the episodes. Downloads keep going when you leave this page. Preview and save each file when it is ready." />
+                Text="Add a YouTube video or a playlist. A playlist lets you choose the episodes. Downloads keep going when you leave this page. Preview and save each file when it is ready, or select finished downloads and save them into one folder." />
         </StackPanel>
 
         <InfoBar
@@ -80,7 +80,17 @@
                     </StackPanel>
 
                     <StackPanel Spacing="8">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Queue" />
+                        <Grid>
+                            <TextBlock VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Queue" />
+                            <Button
+                                x:Name="SaveSelectedButton"
+                                HorizontalAlignment="Right"
+                                Click="SaveSelected_Click"
+                                Content="Save selected"
+                                IsEnabled="False"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Visibility="Collapsed" />
+                        </Grid>
                         <TextBlock
                             x:Name="EmptyQueue"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -91,6 +101,7 @@
                                 <DataTemplate x:DataType="download:DownloadQueueItem">
                                     <Grid Padding="0,8" ColumnSpacing="8" RowSpacing="4">
                                         <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
@@ -99,18 +110,26 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Title}" TextWrapping="Wrap" />
+                                        <CheckBox
+                                            Grid.RowSpan="3"
+                                            VerticalAlignment="Center"
+                                            IsChecked="{x:Bind Selected, Mode=TwoWay}"
+                                            ToolTipService.ToolTip="Include this finished download"
+                                            Visibility="{x:Bind SelectVisibility, Mode=OneWay}" />
+                                        <TextBlock Grid.Column="1" Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Title}" TextWrapping="Wrap" />
                                         <TextBlock
                                             Grid.Row="1"
+                                            Grid.Column="1"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                             Text="{x:Bind Detail, Mode=OneWay}"
                                             TextWrapping="Wrap" />
                                         <ProgressBar
                                             Grid.Row="2"
+                                            Grid.Column="1"
                                             Maximum="100"
                                             Value="{x:Bind Progress, Mode=OneWay}"
                                             Visibility="{x:Bind ProgressVisibility, Mode=OneWay}" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                        <StackPanel Grid.Column="2" Grid.RowSpan="3" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                             <Button Click="PreviewItem_Click" Content="Preview" Visibility="{x:Bind PreviewVisibility, Mode=OneWay}" />
                                             <Button Click="RetryItem_Click" Content="Retry" Visibility="{x:Bind RetryVisibility, Mode=OneWay}" />
                                             <Button Click="PauseItem_Click" Content="Pause" Visibility="{x:Bind PauseVisibility, Mode=OneWay}" />
@@ -126,48 +145,66 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <Grid x:Name="PreviewPanel" Grid.Column="1" RowSpacing="12" Visibility="Collapsed">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <Grid x:Name="PreviewTitleRow" ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        x:Name="PreviewTitle"
-                        VerticalAlignment="Center"
-                        Style="{StaticResource SubtitleTextBlockStyle}"
-                        TextWrapping="Wrap" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                        <Button Click="Save_Click" Content="Save" Style="{StaticResource AccentButtonStyle}" />
-                        <Button Click="Discard_Click" Content="Discard" />
-                    </StackPanel>
+            <Border
+                x:Name="PreviewPanel"
+                Grid.Column="1"
+                Padding="16"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                BorderThickness="2"
+                CornerRadius="16"
+                Visibility="Collapsed">
+                <Grid RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid x:Name="PreviewTitleRow" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="0" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="PreviewTitle"
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            MaxLines="2"
+                            Style="{StaticResource SubtitleTextBlockStyle}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="Wrap" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <Button Click="Save_Click" Content="Save" Style="{StaticResource AccentButtonStyle}" />
+                            <Button Click="Discard_Click" Content="Discard" />
+                        </StackPanel>
+                    </Grid>
+                    <Grid Grid.Row="1">
+                        <Border Background="Black" CornerRadius="16">
+                            <Grid>
+                                <Border
+                                    x:Name="VideoHost"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch" />
+                                <controls:HoverCaptions x:Name="Captions" />
+                                <StackPanel
+                                    x:Name="AudioMark"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Spacing="8"
+                                    Visibility="Collapsed">
+                                    <FontIcon FontSize="48" Foreground="White" Glyph="&#xE8D6;" />
+                                    <TextBlock Foreground="White" Style="{StaticResource SubtitleTextBlockStyle}" Text="Audio" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <controls:VideoPlaybackBar
+                            x:Name="Playback"
+                            Margin="16"
+                            VerticalAlignment="Bottom"
+                            RequestedTheme="Dark" />
+                    </Grid>
                 </Grid>
-                <Grid Grid.Row="1">
-                    <Border Background="Black" CornerRadius="16">
-                        <Grid>
-                            <Border x:Name="VideoHost" />
-                            <controls:HoverCaptions x:Name="Captions" />
-                            <StackPanel
-                                x:Name="AudioMark"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Spacing="8"
-                                Visibility="Collapsed">
-                                <FontIcon FontSize="48" Foreground="White" Glyph="&#xE8D6;" />
-                                <TextBlock Foreground="White" Text="Audio" />
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-                    <controls:VideoPlaybackBar
-                        x:Name="Playback"
-                        Margin="16"
-                        VerticalAlignment="Bottom" />
-                </Grid>
-            </Grid>
+            </Border>
         </Grid>
 
         <Border
@@ -180,13 +217,17 @@
             CornerRadius="12">
             <StackPanel Spacing="12">
                 <Grid>
-                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="History" />
-                    <TextBlock
+                    <TextBlock VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="History" />
+                    <Button
+                        x:Name="HistoryToggle"
                         HorizontalAlignment="Right"
-                        VerticalAlignment="Center"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Removing an entry does not delete the file." />
+                        Click="HistoryToggle_Click"
+                        Content="Show" />
                 </Grid>
+                <StackPanel x:Name="HistoryBody" Spacing="12" Visibility="Collapsed">
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Removing an entry does not delete the file." />
                 <TextBlock
                     x:Name="EmptyHistory"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -279,6 +320,7 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
+                </StackPanel>
             </StackPanel>
         </Border>
     </Grid>

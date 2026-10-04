@@ -110,6 +110,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Folders" />
                     <ListView
@@ -130,6 +131,47 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
+                    <StackPanel Grid.Row="2" Spacing="8">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="On this PC" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="New photos and videos in a connected folder show up on Refresh and when the app opens."
+                            TextWrapping="Wrap" />
+                        <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.ConnectedPcFolders, Mode=OneWay}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="viewmodels:ConnectedPcFolder">
+                                        <Grid Margin="0,0,0,6" ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                Text="{x:Bind Label}"
+                                                TextTrimming="CharacterEllipsis"
+                                                ToolTipService.ToolTip="{x:Bind Path}" />
+                                            <Button
+                                                Grid.Column="1"
+                                                Padding="8,4"
+                                                Click="DisconnectFolder_Click"
+                                                Content="Disconnect"
+                                                Tag="{x:Bind Path}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Command="{x:Bind ViewModel.ConnectPcFolderCommand}"
+                            Content="Connect folder" />
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            Command="{x:Bind ViewModel.RefreshPcFoldersCommand}"
+                            Content="Refresh" />
+                    </StackPanel>
                 </Grid>
             </Border>
 
@@ -203,6 +245,8 @@
                             Orientation="Horizontal"
                             Spacing="8"
                             Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
+                            <Button Padding="10,4" Click="PlayNext_Click" Content="Play next" />
+                            <Button Padding="10,4" Click="AddToQueue_Click" Content="Add to queue" />
                             <Button Padding="10,4" Click="AddToPlaylist_Click" Content="Add to playlist" />
                             <Button Padding="10,4" Click="AddFavorites_Click" Content="Add to favorites" />
                             <Button Padding="10,4" Click="RemoveFavorites_Click" Content="Remove from favorites" />

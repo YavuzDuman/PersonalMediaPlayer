@@ -27,7 +27,7 @@ internal static class StreamThumbnail
         return id is null ? null : "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg";
     }
 
-    private static string? YoutubeId(string? page)
+    internal static string? YoutubeId(string? page)
     {
         if (string.IsNullOrWhiteSpace(page))
         {

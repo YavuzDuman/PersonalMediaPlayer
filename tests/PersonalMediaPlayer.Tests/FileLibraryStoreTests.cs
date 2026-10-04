@@ -160,6 +160,173 @@ public class FileLibraryStoreTests
         Assert.True(store.HasOriginal(replaced));
     }
 
+    [Fact]
+    public void ReloadLinks_reads_the_file_again()
+    {
+        using var root = new TempFolder();
+        var first = root.WriteOutside("one.mp4", [1]);
+        var second = root.WriteOutside("two.mp4", [2]);
+        var store = new FileLibraryStore(root.Library);
+        store.LinkMedia(first);
+
+        var jsonPath = Path.GetFullPath(second).Replace("\\", "\\\\");
+        File.WriteAllText(
+            Path.Combine(root.Library, "links.json"),
+            $"[{{\"Path\":\"{jsonPath}\",\"AddedUtc\":\"2026-01-01T00:00:00Z\"}}]");
+
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, first));
+        Assert.DoesNotContain(store.EnumerateMediaFiles(), path => Same(path, second));
+
+        store.ReloadLinks();
+
+        Assert.DoesNotContain(store.EnumerateMediaFiles(), path => Same(path, first));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, second));
+    }
+
+    [Fact]
+    public void ConnectingAFolderLinksNewFilesAndRefreshDoesNotDuplicateThem()
+    {
+        using var root = new TempFolder();
+        var media = Path.Combine(root.Outside, "media");
+        var day = Path.Combine(media, "day");
+        Directory.CreateDirectory(day);
+        var clip = Path.Combine(media, "clip.mp4");
+        var photo = Path.Combine(media, "shot.jpg");
+        var nested = Path.Combine(day, "extra.mkv");
+        var hidden = Path.Combine(media, "secret.mp4");
+        File.WriteAllBytes(clip, [1, 2, 3]);
+        File.WriteAllBytes(photo, [4, 5]);
+        File.WriteAllBytes(nested, [6]);
+        File.WriteAllBytes(hidden, [7]);
+        File.SetAttributes(hidden, FileAttributes.Hidden);
+        File.WriteAllText(Path.Combine(media, "notes.txt"), "skip");
+        var store = new FileLibraryStore(root.Library);
+        store.LinkMedia(clip);
+
+        Assert.Equal(ConnectFolderResult.Connected, store.ConnectFolder(media));
+        Assert.Equal(ConnectFolderResult.AlreadyConnected, store.ConnectFolder(media + Path.DirectorySeparatorChar));
+        Assert.Equal(ConnectFolderResult.NotAFolder, store.ConnectFolder(clip));
+        var first = store.RefreshConnectedFolders();
+
+        Assert.Equal(2, first.Added);
+        Assert.Equal(1, first.AlreadyThere);
+        Assert.Equal(0, first.MissingFolders);
+        Assert.Single(store.ConnectedFolders());
+        Assert.Empty(Directory.EnumerateFiles(store.VideosDirectory));
+        Assert.Empty(Directory.EnumerateFiles(store.ImagesDirectory));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, clip));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, photo));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, nested));
+        Assert.DoesNotContain(store.EnumerateMediaFiles(), path => Same(path, hidden));
+        Assert.Equal(3, store.EnumerateMediaFiles().Count);
+        Assert.Equal(1, File.ReadAllText(Path.Combine(root.Library, "links.json")).Split("clip.mp4").Length - 1);
+
+        var again = store.RefreshConnectedFolders();
+        Assert.Equal(0, again.Added);
+        Assert.Equal(3, again.AlreadyThere);
+        Assert.Equal(3, store.EnumerateMediaFiles().Count);
+
+        var late = Path.Combine(media, "late.png");
+        File.WriteAllBytes(late, [8]);
+        var found = store.RefreshConnectedFolders();
+        Assert.Equal(1, found.Added);
+        Assert.Equal(3, found.AlreadyThere);
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, late));
+        Assert.Empty(Directory.EnumerateFiles(store.ImagesDirectory));
+        Assert.True(File.Exists(clip));
+        Assert.True(File.Exists(photo));
+    }
+
+    [Fact]
+    public void RefreshKeepsAMissingFileAndItsAlbum()
+    {
+        using var root = new TempFolder();
+        var media = Path.Combine(root.Outside, "media");
+        Directory.CreateDirectory(media);
+        var clip = Path.Combine(media, "clip.mp4");
+        var photo = Path.Combine(media, "shot.jpg");
+        File.WriteAllBytes(clip, [1, 2, 3]);
+        File.WriteAllBytes(photo, [4]);
+        var store = new FileLibraryStore(root.Library);
+        var library = new MediaLibrary(store);
+        Assert.Equal(ConnectFolderResult.Connected, store.ConnectFolder(media));
+        Assert.Equal(2, store.RefreshConnectedFolders().Added);
+        store.AddToFolder(clip, "Trip");
+
+        File.Delete(clip);
+        var scan = store.RefreshConnectedFolders();
+
+        Assert.Equal(0, scan.Added);
+        Assert.False(File.Exists(clip));
+        Assert.True(File.Exists(photo));
+        Assert.Contains(store.EnumerateMediaFiles("Trip"), path => Same(path, clip));
+        var missing = library.GetItems().Single(item => Same(item.FilePath, clip));
+        Assert.True(missing.IsMissing);
+        Assert.True(missing.IsLinked);
+        Assert.Contains("Trip", missing.FolderName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Path.GetFullPath(clip), missing.FilePath);
+
+        Directory.Delete(media, recursive: true);
+        var unavailable = store.RefreshConnectedFolders();
+        Assert.Equal(1, unavailable.MissingFolders);
+        Assert.Equal(0, unavailable.Added);
+        Assert.Contains(store.ConnectedFolders(), path => Same(path, media));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, clip));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, photo));
+    }
+
+    [Fact]
+    public void DisconnectingAFolderLeavesTheFilesInPlace()
+    {
+        using var root = new TempFolder();
+        var media = Path.Combine(root.Outside, "media");
+        Directory.CreateDirectory(media);
+        var clip = Path.Combine(media, "clip.mp4");
+        File.WriteAllBytes(clip, [1, 2, 3, 4]);
+        var elsewhere = root.WriteOutside("other.mp4", [9]);
+        var store = new FileLibraryStore(root.Library);
+        store.LinkMedia(elsewhere);
+        Assert.Equal(ConnectFolderResult.Connected, store.ConnectFolder(media));
+        Assert.Equal(1, store.RefreshConnectedFolders().Added);
+
+        Assert.True(store.DisconnectFolder(media));
+        Assert.False(store.DisconnectFolder(media));
+        Assert.Empty(store.ConnectedFolders());
+        Assert.True(File.Exists(clip));
+        Assert.True(File.Exists(elsewhere));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, clip));
+        Assert.Contains(store.EnumerateMediaFiles(), path => Same(path, elsewhere));
+        Assert.Empty(Directory.EnumerateFiles(store.VideosDirectory));
+
+        var added = Path.Combine(media, "new.mp4");
+        File.WriteAllBytes(added, [5]);
+        var scan = store.RefreshConnectedFolders();
+        Assert.Equal(0, scan.Added);
+        Assert.DoesNotContain(store.EnumerateMediaFiles(), path => Same(path, added));
+        Assert.True(File.Exists(added));
+        Assert.False(File.Exists(Path.Combine(root.Library, "connected-folders.json")));
+    }
+
+    [Fact]
+    public void ConnectingRefusesTheLibraryAndAnOverlappingFolder()
+    {
+        using var root = new TempFolder();
+        var media = Path.Combine(root.Outside, "media");
+        var day = Path.Combine(media, "day");
+        Directory.CreateDirectory(day);
+        var store = new FileLibraryStore(root.Library);
+
+        Assert.Equal(ConnectFolderResult.InsideLibrary, store.ConnectFolder(store.LibraryRoot));
+        Assert.Equal(ConnectFolderResult.InsideLibrary, store.ConnectFolder(store.VideosDirectory));
+        Assert.Equal(ConnectFolderResult.CoversLibrary, store.ConnectFolder(root.Root));
+        Assert.Equal(ConnectFolderResult.Connected, store.ConnectFolder(media));
+        Assert.Equal(ConnectFolderResult.Overlaps, store.ConnectFolder(day));
+        Assert.Equal(ConnectFolderResult.Overlaps, store.ConnectFolder(root.Outside));
+        Assert.Equal(new[] { Path.GetFullPath(media) }, store.ConnectedFolders().Select(Path.GetFullPath));
+        Assert.Empty(store.EnumerateMediaFiles());
+        Assert.False(File.Exists(Path.Combine(store.VideosDirectory, "day")));
+    }
+
     private static bool Same(string left, string right)
         => string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
 

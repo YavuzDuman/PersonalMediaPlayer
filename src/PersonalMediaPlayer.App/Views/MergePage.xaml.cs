@@ -17,7 +17,7 @@ using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 
 namespace PersonalMediaPlayer.App.Views;
 
-public sealed partial class MergePage : Page
+public sealed partial class MergePage : Page, IPlaybackSource
 {
     private static readonly Color[] Palette =
     [
@@ -54,6 +54,7 @@ public sealed partial class MergePage : Page
     private long _seekHoldMs = -1;
     private int _seekHoldTicks;
     private bool _holdPause;
+    private bool _pausedForOther;
     private bool _dirty;
     private bool _allowLeave;
     private bool _closeWindow;
@@ -85,6 +86,7 @@ public sealed partial class MergePage : Page
         Playback.SeekSlider.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(Seek_Released), true);
         Playback.SeekSlider.ValueChanged += Seek_Changed;
         _timer.Tick += (_, _) => UpdateClock();
+        PlaybackFocus.Register(this);
     }
 
     internal bool PrepareToLeave(Type? pageType, object? parameter, bool back)
@@ -331,7 +333,7 @@ public sealed partial class MergePage : Page
             Frame.GoBack();
             moved = true;
         }
-        else if (_pendingPageType is not null && Frame.Navigate(_pendingPageType, _pendingParameter))
+        else if (_pendingPageType is not null && NavigationHelper.Follow(Frame, _pendingPageType, _pendingParameter, clearBackStack: true))
         {
             Frame.BackStack.Clear();
             moved = true;
@@ -889,18 +891,33 @@ public sealed partial class MergePage : Page
 
     private void VideoView_Initialized(object? sender, InitializedEventArgs e)
     {
-        _libVlc = new LibVLC(false, e.SwapChainOptions);
+        _libVlc = new LibVLC(false, PlaybackAudio.Options(e.SwapChainOptions));
         _player = new VlcMediaPlayer(_libVlc);
         _player.LengthChanged += (_, args) => DispatcherQueue.TryEnqueue(() => ApplyPendingSeek(args.Length));
         _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
-            if (_holdPause && _player is not null)
+            if (_player is null)
             {
-                _player.SetPause(true);
-                _holdPause = false;
                 return;
             }
 
+            if (_pausedForOther || _holdPause)
+            {
+                try
+                {
+                    _player.SetPause(true);
+                }
+                catch (Exception)
+                {
+                    // Playback already moved to another video.
+                }
+
+                _holdPause = false;
+                UpdatePlayIcon();
+                return;
+            }
+
+            PlaybackFocus.Claim(this);
             UpdatePlayIcon();
         });
         _player.Paused += (_, _) => DispatcherQueue.TryEnqueue(UpdatePlayIcon);
@@ -934,7 +951,44 @@ public sealed partial class MergePage : Page
         _ended = false;
         _media?.Dispose();
         _media = new Media(_libVlc, path, FromType.FromPath);
+        if (_pausedForOther)
+        {
+            return;
+        }
+
+        if (!_holdPause)
+        {
+            TakePlayback();
+        }
+
         _player.Play(_media);
+        UpdatePlayIcon();
+    }
+
+    private void TakePlayback()
+    {
+        _pausedForOther = false;
+        PlaybackFocus.Claim(this);
+    }
+
+    void IPlaybackSource.PauseForOther()
+    {
+        _pausedForOther = true;
+        if (_player is not { IsPlaying: true })
+        {
+            UpdatePlayIcon();
+            return;
+        }
+
+        try
+        {
+            _player.SetPause(true);
+        }
+        catch (Exception)
+        {
+            // The preview can already be stopped when another video starts.
+        }
+
         UpdatePlayIcon();
     }
 
@@ -964,6 +1018,7 @@ public sealed partial class MergePage : Page
 
         if (_ended || _clipIndex < 0 || _player is null)
         {
+            _pausedForOther = false;
             OpenClip(0, 0);
             return;
         }
@@ -974,6 +1029,7 @@ public sealed partial class MergePage : Page
         }
         else
         {
+            TakePlayback();
             _player.Play();
         }
 

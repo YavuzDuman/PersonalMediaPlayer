@@ -173,6 +173,19 @@ internal static class StreamLanguageSettings
         return grouped;
     }
 
+    internal static bool IsStoredChoice(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return false;
+        }
+
+        var trimmed = code.Trim();
+        return trimmed.Equals("original", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("off", StringComparison.OrdinalIgnoreCase)
+            || AudioIndex(trimmed) > 0;
+    }
+
     private static string? KnownLanguage(string? language)
     {
         if (string.IsNullOrWhiteSpace(language))

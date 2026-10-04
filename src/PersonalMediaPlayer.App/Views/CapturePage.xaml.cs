@@ -140,7 +140,7 @@ public sealed partial class CapturePage : Page
             Frame.GoBack();
             moved = true;
         }
-        else if (_pendingPageType is not null && Frame.Navigate(_pendingPageType, _pendingParameter))
+        else if (_pendingPageType is not null && NavigationHelper.Follow(Frame, _pendingPageType, _pendingParameter, clearBackStack: true))
         {
             Frame.BackStack.Clear();
             moved = true;

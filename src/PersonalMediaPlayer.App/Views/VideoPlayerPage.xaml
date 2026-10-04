@@ -7,31 +7,41 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:lvs="using:LibVLCSharp.Platforms.Windows"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Background="Transparent"
     mc:Ignorable="d">
 
-    <Grid x:Name="RootGrid" Padding="24,8,24,24" RowSpacing="12">
+    <Grid x:Name="RootGrid" Padding="24,8,24,24" RowSpacing="12" Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid x:Name="HeaderPanel">
+        <Grid x:Name="HeaderPanel" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" MinWidth="0" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel Spacing="4">
+            <Grid MinWidth="0" RowSpacing="4" VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <TextBlock
                     x:Name="TitleText"
                     Style="{StaticResource TitleTextBlockStyle}"
                     Text="Video"
-                    TextTrimming="CharacterEllipsis" />
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap" />
                 <TextBlock
                     x:Name="AddedText"
+                    Grid.Row="1"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    MaxLines="2"
                     Style="{StaticResource CaptionTextBlockStyle}"
+                    TextTrimming="CharacterEllipsis"
                     TextWrapping="Wrap" />
-            </StackPanel>
+            </Grid>
             <StackPanel
                 x:Name="WatchActions"
                 Grid.Column="1"
@@ -58,6 +68,12 @@
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon FontSize="16" Glyph="&#xE93F;" />
                         <TextBlock Text="Playlist" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ChaptersButton" Click="ChaptersButton_Click" ToolTipService.ToolTip="Chapters" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE8FD;" />
+                        <TextBlock Text="Chapters" />
                     </StackPanel>
                 </Button>
                 <Button x:Name="WordsButton" Click="WordsButton_Click" ToolTipService.ToolTip="Saved words">
@@ -97,6 +113,8 @@
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
@@ -145,21 +163,125 @@
                 </Border>
             </Grid>
             </Grid>
+            <controls:ChapterPanel
+                x:Name="ChapterPanel"
+                Grid.Column="1"
+                Margin="12,0,0,0"
+                Visibility="Collapsed" />
+            <controls:QueuePanel
+                x:Name="QueuePanel"
+                Grid.Column="2"
+                Margin="12,0,0,0"
+                Visibility="Collapsed" />
             <controls:PlaylistPanel
                 x:Name="PlaylistPanel"
-                Grid.Column="1"
+                Grid.Column="3"
                 Margin="12,0,0,0"
                 Visibility="Collapsed" />
             <controls:SavedWordsPanel
                 x:Name="WordsPanel"
-                Grid.Column="2"
+                Grid.Column="4"
                 Margin="12,0,0,0"
                 Visibility="Collapsed" />
         </Grid>
 
         <Grid
+            x:Name="MiniBar"
+            Grid.Row="2"
+            Padding="10,8,10,10"
+            RowSpacing="6"
+            Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock
+                x:Name="MiniTitle"
+                FontWeight="SemiBold"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Text="{x:Bind TitleText.Text, Mode=OneWay}"
+                TextTrimming="CharacterEllipsis" />
+            <Grid Grid.Row="1" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    x:Name="MiniPosition"
+                    MinWidth="40"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    FontSize="12"
+                    Text="00:00" />
+                <Slider
+                    x:Name="MiniSeek"
+                    Grid.Column="1"
+                    Maximum="1000"
+                    Minimum="0"
+                    IsEnabled="False"
+                    AutomationProperties.Name="Position"
+                    VerticalAlignment="Center" />
+                <TextBlock
+                    x:Name="MiniDuration"
+                    Grid.Column="2"
+                    MinWidth="40"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    FontSize="12"
+                    Text="--:--" />
+            </Grid>
+            <Grid Grid.Row="2" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button
+                    x:Name="MiniPlay"
+                    Width="36"
+                    Height="36"
+                    Padding="0"
+                    AutomationProperties.Name="Play or pause"
+                    Click="PlayPauseButton_Click"
+                    ToolTipService.ToolTip="Play or pause">
+                    <FontIcon x:Name="MiniPlayIcon" FontSize="14" Glyph="&#xE768;" />
+                </Button>
+                <Slider
+                    x:Name="MiniVolume"
+                    Grid.Column="1"
+                    Maximum="100"
+                    Minimum="0"
+                    AutomationProperties.Name="Volume"
+                    VerticalAlignment="Center" />
+                <Button
+                    Grid.Column="2"
+                    Width="36"
+                    Height="36"
+                    Padding="0"
+                    AutomationProperties.Name="Full player"
+                    Click="MiniExpand_Click"
+                    ToolTipService.ToolTip="Full player">
+                    <FontIcon FontSize="14" Glyph="&#xE740;" />
+                </Button>
+                <Button
+                    Grid.Column="3"
+                    Width="36"
+                    Height="36"
+                    Padding="0"
+                    AutomationProperties.Name="Close"
+                    Click="MiniClose_Click"
+                    ToolTipService.ToolTip="Close">
+                    <FontIcon FontSize="14" Glyph="&#xE711;" />
+                </Button>
+            </Grid>
+        </Grid>
+
+        <Grid
             x:Name="LeavePrompt"
-            Grid.RowSpan="2"
+            Grid.RowSpan="3"
             Padding="24"
             Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             Visibility="Collapsed">

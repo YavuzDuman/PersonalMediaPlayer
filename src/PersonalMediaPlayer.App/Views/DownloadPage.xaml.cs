@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using LibVLCSharp.Platforms.Windows;
 using LibVLCSharp.Shared;
@@ -18,7 +19,7 @@ using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 
 namespace PersonalMediaPlayer.App.Views;
 
-public sealed partial class DownloadPage : Page
+public sealed partial class DownloadPage : Page, IPlaybackSource
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly ObservableCollection<DownloadHistoryEntry> _history = [];
@@ -30,9 +31,13 @@ public sealed partial class DownloadPage : Page
     private string? _previewPath;
     private bool _audioOnly;
     private bool _left;
+    private bool _savingBatch;
+    private static bool _historyOpen;
+    private readonly HashSet<DownloadQueueItem> _hookedQueue = [];
     private bool _updatingSlider;
     private bool _dragging;
     private bool _ended;
+    private bool _pausedForOther;
     private bool _hasDuration;
     private bool _transitioning;
     private long _durationMs;
@@ -54,6 +59,7 @@ public sealed partial class DownloadPage : Page
 
         HistoryList.ItemsSource = _history;
         EmptyHistory.Visibility = _history.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ApplyHistory();
         _timer.Tick += (_, _) => UpdateClock();
         Playback.SubtitlesChanged += (_, shown) => Captions.SetShown(shown);
         Playback.SeekSlider.AddHandler(PointerPressedEvent, new PointerEventHandler(Seek_Pressed), true);
@@ -64,13 +70,26 @@ public sealed partial class DownloadPage : Page
         Playback.BackButton.Click += (_, _) => Skip(-10_000);
         Playback.ForwardButton.Click += (_, _) => Skip(10_000);
         Playback.MuteButton.Click += Mute_Click;
-        var remembered = PlaybackVolume.Load();
+        var remembered = PlaybackVolume.LoadPreview();
         _lastVolume = remembered.Audible;
         Playback.VolumeSlider.Value = remembered.Level;
         ApplyVolume();
         Playback.VolumeSlider.ValueChanged += Volume_Changed;
         Playback.SpeedCombo.SelectionChanged += (_, _) => _player?.SetRate(SelectedRate());
         Playback.FullScreenButton.Click += (_, _) => _ = ToggleFullScreenAsync();
+        PlaybackFocus.Register(this);
+    }
+
+    private void HistoryToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _historyOpen = !_historyOpen;
+        ApplyHistory();
+    }
+
+    private void ApplyHistory()
+    {
+        HistoryBody.Visibility = _historyOpen ? Visibility.Visible : Visibility.Collapsed;
+        HistoryToggle.Content = _historyOpen ? "Hide" : "Show";
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -80,10 +99,77 @@ public sealed partial class DownloadPage : Page
         DownloadQueueHub.Items.CollectionChanged += Queue_Changed;
         DownloadQueueHub.ItemReady -= Download_Ready;
         DownloadQueueHub.ItemReady += Download_Ready;
+        TrackQueueItems();
         UpdateEmptyQueue();
     }
 
-    private void Queue_Changed(object? sender, NotifyCollectionChangedEventArgs e) => UpdateEmptyQueue();
+    private void Queue_Changed(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        TrackQueueItems();
+        UpdateEmptyQueue();
+    }
+
+    private void TrackQueueItems()
+    {
+        foreach (var item in _hookedQueue.ToArray())
+        {
+            if (!DownloadQueueHub.Items.Contains(item))
+            {
+                item.PropertyChanged -= QueueItem_Changed;
+                _hookedQueue.Remove(item);
+            }
+        }
+
+        foreach (var item in DownloadQueueHub.Items)
+        {
+            if (_hookedQueue.Add(item))
+            {
+                item.PropertyChanged += QueueItem_Changed;
+            }
+        }
+
+        UpdateSaveSelected();
+    }
+
+    private void UntrackQueueItems()
+    {
+        foreach (var item in _hookedQueue)
+        {
+            item.PropertyChanged -= QueueItem_Changed;
+        }
+
+        _hookedQueue.Clear();
+    }
+
+    private void QueueItem_Changed(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is null or nameof(DownloadQueueItem.Selected) or nameof(DownloadQueueItem.Status))
+        {
+            UpdateSaveSelected();
+        }
+    }
+
+    private void UpdateSaveSelected()
+    {
+        var ready = false;
+        var selected = false;
+        foreach (var item in DownloadQueueHub.Items)
+        {
+            if (item.Status != "Ready")
+            {
+                continue;
+            }
+
+            ready = true;
+            if (item.Selected)
+            {
+                selected = true;
+            }
+        }
+
+        SaveSelectedButton.Visibility = ready ? Visibility.Visible : Visibility.Collapsed;
+        SaveSelectedButton.IsEnabled = selected && !_savingBatch;
+    }
 
     private void Download_Ready(object? sender, DownloadQueueItem item)
     {
@@ -109,6 +195,7 @@ public sealed partial class DownloadPage : Page
         _lookup?.Cancel();
         DownloadQueueHub.Items.CollectionChanged -= Queue_Changed;
         DownloadQueueHub.ItemReady -= Download_Ready;
+        UntrackQueueItems();
         if (App.MainAppWindow is MainWindow window && window.IsFullScreen)
         {
             window.SetFullScreen(false);
@@ -488,6 +575,8 @@ public sealed partial class DownloadPage : Page
         }
 
         ReleasePlayer();
+        _pausedForOther = false;
+        PlaybackFocus.Claim(this);
         _previewPath = path;
         _ended = false;
         _hasDuration = false;
@@ -500,7 +589,7 @@ public sealed partial class DownloadPage : Page
         ResetBar();
         if (_audioOnly)
         {
-            _libVlc = new LibVLC("--intf", "dummy", "--no-sub-autodetect-file");
+            _libVlc = new LibVLC(PlaybackAudio.Options("--intf", "dummy", "--no-sub-autodetect-file"));
             _player = new VlcMediaPlayer(_libVlc);
             HookPlayer();
             ApplyVolume();
@@ -516,7 +605,11 @@ public sealed partial class DownloadPage : Page
     {
         if (_videoView is null)
         {
-            _videoView = new VideoView();
+            _videoView = new VideoView
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
             _videoView.Initialized += VideoView_Initialized;
         }
 
@@ -528,7 +621,7 @@ public sealed partial class DownloadPage : Page
 
     private void VideoView_Initialized(object? sender, InitializedEventArgs e)
     {
-        _libVlc = new LibVLC(false, e.SwapChainOptions.Concat(new[] { "--no-sub-autodetect-file" }).ToArray());
+        _libVlc = new LibVLC(false, PlaybackAudio.Options(e.SwapChainOptions.Concat(new[] { "--no-sub-autodetect-file" }).ToArray()));
         _player = new VlcMediaPlayer(_libVlc);
         HookPlayer();
         if (_videoView is not null)
@@ -554,7 +647,28 @@ public sealed partial class DownloadPage : Page
         _player.LengthChanged += Player_LengthChanged;
         _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
-            Playback.UseSubtitles(_player!);
+            if (_player is null)
+            {
+                return;
+            }
+
+            if (_pausedForOther)
+            {
+                try
+                {
+                    _player.SetPause(true);
+                }
+                catch (Exception)
+                {
+                    // Playback already moved to another video.
+                }
+
+                UpdatePlayIcon();
+                return;
+            }
+
+            PlaybackFocus.Claim(this);
+            Playback.UseSubtitles(_player);
             UpdatePlayIcon();
         });
         _player.Paused += (_, _) => DispatcherQueue.TryEnqueue(UpdatePlayIcon);
@@ -585,6 +699,12 @@ public sealed partial class DownloadPage : Page
 
         _media.Parse(MediaParseOptions.ParseLocal);
         ApplyDuration(_media.Duration);
+        if (_pausedForOther)
+        {
+            return;
+        }
+
+        TakePlayback();
         _player.Play(_media);
         _player.SetRate(SelectedRate());
         UpdatePlayIcon();
@@ -613,10 +733,12 @@ public sealed partial class DownloadPage : Page
         }
         else if (_ended && _previewPath is not null)
         {
+            _pausedForOther = false;
             PlayFile(_previewPath);
         }
         else
         {
+            TakePlayback();
             _player.Play();
         }
 
@@ -699,7 +821,7 @@ public sealed partial class DownloadPage : Page
             _lastVolume = e.NewValue;
         }
 
-        PlaybackVolume.Save(e.NewValue);
+        PlaybackVolume.SavePreview(e.NewValue);
         ApplyVolume();
     }
 
@@ -972,33 +1094,7 @@ public sealed partial class DownloadPage : Page
         try
         {
             var saved = await write(source);
-            SavedWords.Move(source, saved.Path);
-            Playlists.MoveFile(source, saved.Path);
-            try
-            {
-                File.Delete(source);
-            }
-            catch (IOException)
-            {
-            }
-
-            savedItem?.MarkSaved();
-            if (savedItem is not null)
-            {
-                DownloadQueueHub.Remove(savedItem);
-            }
-
-            var entry = new DownloadHistoryEntry
-            {
-                Name = Path.GetFileName(saved.Path),
-                Url = savedItem?.Url ?? string.Empty,
-                Quality = savedItem?.Quality.Label ?? string.Empty,
-                SavedAt = DateTimeOffset.Now,
-                Location = saved.Path
-            };
-            _history.Insert(0, entry);
-            DownloadHistory.Save(_history);
-            EmptyHistory.Visibility = Visibility.Collapsed;
+            RememberSavedDownload(savedItem, source, saved.Path);
             _previewItem = null;
             ResetToEntry();
             StatusBar.Severity = InfoBarSeverity.Success;
@@ -1017,7 +1113,413 @@ public sealed partial class DownloadPage : Page
         }
     }
 
+    private void RememberSavedDownload(DownloadQueueItem? item, string source, string savedPath)
+    {
+        SavedWords.Move(source, savedPath);
+        Playlists.MoveFile(source, savedPath);
+        try
+        {
+            File.Delete(source);
+        }
+        catch (IOException)
+        {
+        }
+
+        item?.MarkSaved();
+        if (item is not null)
+        {
+            DownloadQueueHub.Remove(item);
+        }
+
+        _history.Insert(0, new DownloadHistoryEntry
+        {
+            Name = Path.GetFileName(savedPath),
+            Url = item?.Url ?? string.Empty,
+            Quality = item?.Quality.Label ?? string.Empty,
+            SavedAt = DateTimeOffset.Now,
+            Location = savedPath
+        });
+        DownloadHistory.Save(_history);
+        EmptyHistory.Visibility = Visibility.Collapsed;
+    }
+
+    private async void SaveSelected_Click(object sender, RoutedEventArgs e)
+    {
+        if (_savingBatch)
+        {
+            return;
+        }
+
+        var chosen = DownloadQueueHub.Items.Where(item => item.Selected && item.Status == "Ready").ToList();
+        if (chosen.Count == 0)
+        {
+            return;
+        }
+
+        _savingBatch = true;
+        UpdateSaveSelected();
+        try
+        {
+            if (App.MainAppWindow is MainWindow window && window.IsFullScreen)
+            {
+                await window.SetFullScreenAsync(false);
+                RestoreWindowedLayout();
+            }
+
+            var choice = await AskSelectedSaveAsync(chosen.Count);
+            if (choice is null)
+            {
+                return;
+            }
+
+            if (choice.OnPc)
+            {
+                var folder = await FilePickerHelper.PickFolderAsync(App.MainAppWindow);
+                if (folder is null || string.IsNullOrWhiteSpace(folder.Path))
+                {
+                    return;
+                }
+
+                await SaveSelectedToFolderAsync(chosen, folder.Path);
+                return;
+            }
+
+            await SaveSelectedToLibraryAsync(chosen, choice.Album);
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex.Message);
+        }
+        finally
+        {
+            _savingBatch = false;
+            UpdateSaveSelected();
+        }
+    }
+
+    private async Task SaveSelectedToFolderAsync(IReadOnlyList<DownloadQueueItem> chosen, string folder)
+    {
+        var ready = new List<DownloadQueueItem>();
+        var results = new List<DownloadBatchResult>();
+        foreach (var item in chosen)
+        {
+            if (string.IsNullOrWhiteSpace(item.FilePath) || !File.Exists(item.FilePath))
+            {
+                results.Add(FailedResult(item, "That download is no longer there."));
+                continue;
+            }
+
+            ready.Add(item);
+        }
+
+        IReadOnlyList<DownloadSaveTarget> plans = ready.Count == 0
+            ? []
+            : DownloadBatchSave.Plan(ready.Select(item => new DownloadBatchFile(item.Title, item.FilePath!, item.Quality.AudioOnly)).ToList(), folder);
+        var replace = true;
+        if (plans.Any(plan => plan.AlreadyThere))
+        {
+            var conflicts = plans.Where(plan => plan.AlreadyThere).Select(plan => plan.FileName).ToList();
+            var choice = await AskReplaceAsync(conflicts);
+            if (choice == DownloadReplaceChoice.Cancel)
+            {
+                return;
+            }
+
+            replace = choice == DownloadReplaceChoice.Replace;
+        }
+
+        var previewInBatch = ReleasePreviewIfSelected(chosen);
+        ShowSaving();
+        if (plans.Count > 0)
+        {
+            var copied = await Task.Run(() => DownloadBatchSave.CopyAll(plans, replace));
+            foreach (var result in copied)
+            {
+                results.Add(CommitCopied(ready, result));
+            }
+        }
+
+        FinishBatch(previewInBatch, results, "that folder");
+    }
+
+    private async Task SaveSelectedToLibraryAsync(IReadOnlyList<DownloadQueueItem> chosen, string? album)
+    {
+        var previewInBatch = ReleasePreviewIfSelected(chosen);
+        ShowSaving();
+        var results = new List<DownloadBatchResult>();
+        foreach (var item in chosen)
+        {
+            var source = item.FilePath;
+            if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
+            {
+                results.Add(FailedResult(item, "That download is no longer there."));
+                continue;
+            }
+
+            try
+            {
+                var name = DownloadBatchSave.SavedName(item.Title, source, item.Quality.AudioOnly);
+                var savedPath = await Task.Run(() =>
+                {
+                    using var input = File.OpenRead(source);
+                    return App.MediaLibrary.ImportMedia(input, name, album).FilePath;
+                });
+                RememberSavedDownload(item, source, savedPath);
+                results.Add(new DownloadBatchResult(source, item.Title, Path.GetFileName(savedPath), DownloadBatchOutcome.Saved, savedPath, null));
+            }
+            catch (Exception ex)
+            {
+                results.Add(item.Status == "Saved"
+                    ? new DownloadBatchResult(source, item.Title, Path.GetFileName(source), DownloadBatchOutcome.Saved, null, null)
+                    : FailedResult(item, DownloadBatchSave.Shorten(ex.Message)));
+            }
+        }
+
+        var place = string.IsNullOrWhiteSpace(album) ? "the library" : "the " + album + " album";
+        FinishBatch(previewInBatch, results, place);
+    }
+
+    private DownloadBatchResult CommitCopied(IReadOnlyList<DownloadQueueItem> ready, DownloadBatchResult result)
+    {
+        if (result.Outcome != DownloadBatchOutcome.Saved || result.SavedPath is null)
+        {
+            return result;
+        }
+
+        var item = ready.FirstOrDefault(entry => string.Equals(entry.FilePath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
+        if (item is null)
+        {
+            return result with { Outcome = DownloadBatchOutcome.Failed, SavedPath = null, Detail = "That download is no longer in the queue." };
+        }
+
+        try
+        {
+            RememberSavedDownload(item, result.SourcePath, result.SavedPath);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return item.Status == "Saved"
+                ? result
+                : result with { Outcome = DownloadBatchOutcome.Failed, SavedPath = null, Detail = DownloadBatchSave.Shorten(ex.Message) };
+        }
+    }
+
+    private static DownloadBatchResult FailedResult(DownloadQueueItem item, string detail)
+        => new(item.FilePath ?? string.Empty, item.Title, item.Title, DownloadBatchOutcome.Failed, null, detail);
+
+    private bool ReleasePreviewIfSelected(IReadOnlyList<DownloadQueueItem> chosen)
+    {
+        if (_previewItem is null || !chosen.Contains(_previewItem))
+        {
+            return false;
+        }
+
+        ReleasePlayer();
+        _previewPath = null;
+        return true;
+    }
+
+    private void ShowSaving()
+    {
+        StatusBar.Severity = InfoBarSeverity.Informational;
+        StatusBar.Message = "Saving the selected downloads…";
+        StatusBar.IsOpen = true;
+    }
+
+    private void FinishBatch(bool previewInBatch, IReadOnlyList<DownloadBatchResult> results, string place)
+    {
+        if (!_left)
+        {
+            RestorePreviewAfterBatch(previewInBatch);
+        }
+
+        if (results.Count == 0)
+        {
+            return;
+        }
+
+        StatusBar.Severity = BatchSeverity(results);
+        StatusBar.Message = DownloadBatchSave.Describe(results, place);
+        StatusBar.IsOpen = true;
+    }
+
+    private void RestorePreviewAfterBatch(bool previewInBatch)
+    {
+        if (!previewInBatch)
+        {
+            return;
+        }
+
+        if (_previewItem is { Status: "Ready", FilePath: { } path } preview && File.Exists(path))
+        {
+            _audioOnly = preview.Quality.AudioOnly;
+            _listing = new DownloadListing(preview.Title, [preview.Quality], []);
+            ShowPreview(path, preview.Title);
+            return;
+        }
+
+        _previewItem = null;
+        _previewPath = null;
+        ResetToEntry();
+        if (!_left && DownloadQueueHub.Items.FirstOrDefault(entry => entry.Status == "Ready" && entry.FilePath is { } readyPath && File.Exists(readyPath)) is { } next)
+        {
+            OpenPreview(next);
+        }
+    }
+
+    private static InfoBarSeverity BatchSeverity(IReadOnlyList<DownloadBatchResult> results)
+    {
+        var saved = results.Any(item => item.Outcome == DownloadBatchOutcome.Saved);
+        var notSaved = results.Any(item => item.Outcome != DownloadBatchOutcome.Saved);
+        if (saved && notSaved)
+        {
+            return InfoBarSeverity.Warning;
+        }
+
+        if (!saved && results.Any(item => item.Outcome == DownloadBatchOutcome.Failed))
+        {
+            return InfoBarSeverity.Error;
+        }
+
+        if (saved)
+        {
+            return InfoBarSeverity.Success;
+        }
+
+        return InfoBarSeverity.Informational;
+    }
+
+    private async Task<DownloadReplaceChoice> AskReplaceAsync(IReadOnlyList<string> names)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Replace existing files?",
+            Content = new ScrollViewer
+            {
+                MaxHeight = 280,
+                Content = new StackPanel
+                {
+                    Spacing = 12,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = "These files are already in that folder. Replacing them overwrites those files.",
+                            TextWrapping = TextWrapping.Wrap
+                        },
+                        new TextBlock
+                        {
+                            Text = string.Join(Environment.NewLine, names),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    }
+                }
+            },
+            PrimaryButtonText = "Replace",
+            SecondaryButtonText = "Keep existing files",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot
+        };
+        var result = await dialog.ShowAsync();
+        return result switch
+        {
+            ContentDialogResult.Primary => DownloadReplaceChoice.Replace,
+            ContentDialogResult.Secondary => DownloadReplaceChoice.KeepExisting,
+            _ => DownloadReplaceChoice.Cancel
+        };
+    }
+
+    private async Task<SelectedSaveChoice?> AskSelectedSaveAsync(int count)
+    {
+        var method = new ComboBox
+        {
+            Header = "Save to",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Items = { "A folder in this app", "A folder on this PC" },
+            SelectedIndex = 0
+        };
+        var album = new ComboBox
+        {
+            Header = "App folder",
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        album.Items.Add("Library");
+        foreach (var folder in App.MediaLibrary.GetFolders().Where(folder => !folder.IsSystem))
+        {
+            album.Items.Add(folder.Name);
+        }
+
+        album.Items.Add("New folder…");
+        album.SelectedIndex = 0;
+        var newFolder = new TextBox { Header = "New folder name", Visibility = Visibility.Collapsed };
+        album.SelectionChanged += (_, _) =>
+        {
+            newFolder.Visibility = album.SelectedItem as string == "New folder…" ? Visibility.Visible : Visibility.Collapsed;
+        };
+        method.SelectionChanged += (_, _) =>
+        {
+            var inApp = method.SelectedIndex == 0;
+            album.Visibility = inApp ? Visibility.Visible : Visibility.Collapsed;
+            newFolder.Visibility = inApp && album.SelectedItem as string == "New folder…" ? Visibility.Visible : Visibility.Collapsed;
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Save selected downloads",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = count == 1 ? "1 finished download" : count + " finished downloads"
+                    },
+                    new TextBlock
+                    {
+                        Text = "Each file keeps its download name. A folder on this PC asks before replacing a file that is already there. A folder in this app keeps an existing library file and saves the download as a new file.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    method,
+                    album,
+                    newFolder
+                }
+            },
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return null;
+        }
+
+        if (method.SelectedIndex == 1)
+        {
+            return new SelectedSaveChoice(true, null);
+        }
+
+        if (album.SelectedItem as string == "New folder…")
+        {
+            if (string.IsNullOrWhiteSpace(newFolder.Text))
+            {
+                ShowError("Enter a folder name.");
+                return null;
+            }
+
+            var created = App.MediaLibrary.CreateFolder(newFolder.Text);
+            return new SelectedSaveChoice(false, created);
+        }
+
+        var selected = album.SelectedItem as string;
+        return new SelectedSaveChoice(false, selected == "Library" ? null : selected);
+    }
+
     private sealed record SaveChoice(string Name, bool OnPc, string? Album);
+
+    private sealed record SelectedSaveChoice(bool OnPc, string? Album);
 
     private void Discard_Click(object sender, RoutedEventArgs e) => ClearPreview();
 
@@ -1083,7 +1585,7 @@ public sealed partial class DownloadPage : Page
             ImportedAt = entry.SavedAt,
             FileSizeBytes = new FileInfo(entry.Location).Length
         };
-        Frame.Navigate(typeof(VideoPlayerPage), item);
+        NavigationHelper.OpenPlayer(item);
     }
 
     private void OpenHistoryFolder_Click(object sender, RoutedEventArgs e)
@@ -1120,6 +1622,33 @@ public sealed partial class DownloadPage : Page
         StatusBar.Severity = InfoBarSeverity.Error;
         StatusBar.Message = message;
         StatusBar.IsOpen = true;
+    }
+
+    private void TakePlayback()
+    {
+        _pausedForOther = false;
+        PlaybackFocus.Claim(this);
+    }
+
+    void IPlaybackSource.PauseForOther()
+    {
+        _pausedForOther = true;
+        if (_player is not { IsPlaying: true })
+        {
+            UpdatePlayIcon();
+            return;
+        }
+
+        try
+        {
+            _player.SetPause(true);
+        }
+        catch (Exception)
+        {
+            // The preview can already be stopped when another video starts.
+        }
+
+        UpdatePlayIcon();
     }
 
     private void ReleasePlayer()

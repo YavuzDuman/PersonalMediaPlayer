@@ -10,6 +10,8 @@ namespace PersonalMediaPlayer.App.ViewModels;
 
 public sealed partial class SettingsViewModel : ObservableObject
 {
+    private bool _applying = true;
+
     public SettingsViewModel(IMediaLibrary library)
     {
         LibraryPath = library.LibraryRoot;
@@ -21,6 +23,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         captionIndex = StreamLanguageSettings.CaptionIndex(languages.CaptionLanguage);
         AudioOptions = new[] { "Original" }.Concat(StreamLanguageSettings.Languages.Select(item => item.Name)).ToArray();
         CaptionOptions = new[] { "Off" }.Concat(StreamLanguageSettings.Languages.Select(item => item.Name)).ToArray();
+        _applying = false;
     }
 
     public string LibraryPath { get; }
@@ -61,6 +64,11 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnThemeIndexChanged(int value)
     {
+        if (_applying)
+        {
+            return;
+        }
+
         var theme = value switch
         {
             1 => AppTheme.Light,
@@ -72,17 +80,53 @@ public sealed partial class SettingsViewModel : ObservableObject
         ThemeSettings.Apply(App.MainAppWindow, theme);
     }
 
-    partial void OnIncludeCursorChanged(bool value) => CaptureSettings.SaveIncludeCursor(value);
+    partial void OnIncludeCursorChanged(bool value)
+    {
+        if (!_applying)
+        {
+            CaptureSettings.SaveIncludeCursor(value);
+        }
+    }
 
     partial void OnDelayIndexChanged(int value)
     {
+        if (_applying)
+        {
+            return;
+        }
+
         var index = Math.Clamp(value, 0, CaptureSettings.DelayChoices.Length - 1);
         CaptureSettings.SaveDelaySeconds(CaptureSettings.DelayChoices[index]);
     }
 
-    partial void OnAudioIndexChanged(int value) => SaveStreamLanguages();
+    partial void OnAudioIndexChanged(int value)
+    {
+        if (!_applying)
+        {
+            SaveStreamLanguages();
+        }
+    }
 
-    partial void OnCaptionIndexChanged(int value) => SaveStreamLanguages();
+    partial void OnCaptionIndexChanged(int value)
+    {
+        if (!_applying)
+        {
+            SaveStreamLanguages();
+        }
+    }
+
+    public void ReloadSavedChoices()
+    {
+        _applying = true;
+        ThemeIndex = (int)ThemeSettings.Load();
+        IncludeCursor = CaptureSettings.LoadIncludeCursor();
+        DelayIndex = CaptureSettings.IndexFromSeconds(CaptureSettings.LoadDelaySeconds());
+        var languages = StreamLanguageSettings.Load();
+        AudioIndex = StreamLanguageSettings.AudioIndex(languages.AudioLanguage);
+        CaptionIndex = StreamLanguageSettings.CaptionIndex(languages.CaptionLanguage);
+        _applying = false;
+        ThemeSettings.Apply(App.MainAppWindow, ThemeSettings.Load());
+    }
 
     private void SaveStreamLanguages()
     {

@@ -20,18 +20,29 @@
 
   <ItemGroup>
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\YoutubeDownloader.cs" Link="YoutubeDownloader.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\DownloadBatchSave.cs" Link="DownloadBatchSave.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleCues.cs" Link="SubtitleCues.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleEdit.cs" Link="SubtitleEdit.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SavedWords.cs" Link="SavedWords.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\Playlists.cs" Link="Playlists.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaylistChanges.cs" Link="PlaylistChanges.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaylistRun.cs" Link="PlaylistRun.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlayQueue.cs" Link="PlayQueue.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\VideoChapters.cs" Link="VideoChapters.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackVisit.cs" Link="PlaybackVisit.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackFocus.cs" Link="PlaybackFocus.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackVolume.cs" Link="PlaybackVolume.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\MediaFavorites.cs" Link="MediaFavorites.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamLink.cs" Link="StreamLink.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackProgress.cs" Link="PlaybackProgress.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamThumbnail.cs" Link="StreamThumbnail.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\HomeSearch.cs" Link="HomeSearch.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\SearchSession.cs" Link="SearchSession.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamRetry.cs" Link="StreamRetry.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamHandoff.cs" Link="StreamHandoff.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\HlsMaster.cs" Link="HlsMaster.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\LanguageLabels.cs" Link="LanguageLabels.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamLanguageSettings.cs" Link="StreamLanguageSettings.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Storage\AppDataBackup.cs" Link="AppDataBackup.cs" />
   </ItemGroup>
 </Project>

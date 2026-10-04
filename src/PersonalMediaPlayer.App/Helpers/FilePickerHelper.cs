@@ -87,6 +87,20 @@ internal static class FilePickerHelper
         return await picker.PickSaveFileAsync();
     }
 
+    public static async Task<StorageFolder?> PickFolderAsync(Window window)
+    {
+        var picker = new FolderPicker
+        {
+            SuggestedStartLocation = PickerLocationId.VideosLibrary,
+            ViewMode = PickerViewMode.Thumbnail
+        };
+        picker.FileTypeFilter.Add("*");
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        return await picker.PickSingleFolderAsync();
+    }
+
     public static async Task<IReadOnlyList<StorageFile>> PickVideosAsync(Window window)
     {
         var picker = new FileOpenPicker
@@ -129,5 +143,31 @@ internal static class FilePickerHelper
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         return await picker.PickSaveFileAsync();
+    }
+
+    public static async Task<StorageFile?> PickSaveBackupAsync(Window window)
+    {
+        var picker = new FileSavePicker
+        {
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = "PersonalMediaPlayer-backup-" + DateTime.Now.ToString("yyyy-MM-dd")
+        };
+        picker.FileTypeChoices.Add("Personal Media Player backup", [".pmpbackup"]);
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        return await picker.PickSaveFileAsync();
+    }
+
+    public static async Task<StorageFile?> PickBackupAsync(Window window)
+    {
+        var picker = new FileOpenPicker
+        {
+            ViewMode = PickerViewMode.List,
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary
+        };
+        picker.FileTypeFilter.Add(".pmpbackup");
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        return await picker.PickSingleFileAsync();
     }
 }

@@ -18,6 +18,7 @@ public class PlaylistStoreTests : IDisposable
 
     public void Dispose()
     {
+        PlaylistChanges.Dismiss();
         Playlists.StoreOverride = null;
         if (File.Exists(_store))
         {
@@ -40,6 +41,7 @@ public class PlaylistStoreTests : IDisposable
         Assert.Equal("C:\\clips\\a.mp4", video.Location);
         Assert.Null(video.AddedUtc);
         Assert.Null(video.Thumbnail);
+        Assert.False(video.Watched);
         Assert.True(list.PlayNext);
     }
 
@@ -282,5 +284,302 @@ public class PlaylistStoreTests : IDisposable
         Assert.Equal(page, saved.Location);
         Assert.Equal(picture, saved.Thumbnail);
         Assert.Contains(@"C:\videos\renamed.mp4", sorted.Videos.Select(video => video.Location));
+    }
+
+    [Fact]
+    public void UndoPutsARemovedVideoBack()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        var page = "https://vimeo.com/123456";
+        Assert.Equal(1, Playlists.AddPage(created.Id, page, "Clip"));
+        Assert.Equal(1, Playlists.Add(created.Id, [@"C:\videos\clip.mp4"]));
+        Assert.True(Playlists.RememberThumbnail(created.Id, page, "https://cdn.example/poster.jpg"));
+        Playlists.SetPlayNext(created.Id, true);
+
+        Assert.True(PlaylistChanges.Apply(created.Id, "Removed a video.", () => Playlists.RemoveAt(created.Id, 0)));
+        Assert.True(PlaylistChanges.IsPending(created.Id, out var message));
+        Assert.Equal("Removed a video.", message);
+        Assert.Single(Playlists.Find(created.Id)!.Videos);
+
+        Assert.Equal(created.Id, PlaylistChanges.Undo());
+        var restored = Playlists.Find(created.Id);
+        Assert.NotNull(restored);
+        Assert.Equal(page, restored.Videos[0].Location);
+        Assert.Equal("Clip", restored.Videos[0].Title);
+        Assert.True(restored.Videos[0].Resolve);
+        Assert.Equal("https://cdn.example/poster.jpg", restored.Videos[0].Thumbnail);
+        Assert.Equal(@"C:\videos\clip.mp4", restored.Videos[1].Location);
+        Assert.True(restored.PlayNext);
+        Assert.Equal("Evening", restored.Name);
+        Assert.False(PlaylistChanges.IsPending(created.Id, out _));
+        Assert.Null(PlaylistChanges.Undo());
+    }
+
+    [Fact]
+    public void UndoRestoresTheOrderFromBeforeASort()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        Assert.Equal(2, Playlists.Add(created.Id, [@"C:\videos\zeta.mp4", @"C:\videos\alpha.mp4"]));
+        Assert.True(PlaylistChanges.Apply(created.Id, "Sorted by name.", () =>
+            Playlists.SortByName(created.Id, path => Path.GetFileName(path))));
+        var sorted = Playlists.Find(created.Id);
+        Assert.NotNull(sorted);
+        var playing = sorted.Videos[0];
+        Assert.Equal(@"C:\videos\alpha.mp4", playing.Location);
+
+        Assert.Equal(created.Id, PlaylistChanges.Undo());
+        var restored = Playlists.Find(created.Id);
+        Assert.NotNull(restored);
+        Assert.Equal(@"C:\videos\zeta.mp4", restored.Videos[0].Location);
+        Assert.Equal(@"C:\videos\alpha.mp4", restored.Videos[1].Location);
+        Assert.Equal(playing.AddedUtc, restored.Videos[1].AddedUtc);
+        Assert.Equal(1, PlaylistChanges.IndexOf(restored.Videos, playing));
+    }
+
+    [Fact]
+    public void UndoRestoresOnlyTheLatestChange()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        Assert.Equal(3, Playlists.Add(created.Id, [@"C:\videos\a.mp4", @"C:\videos\b.mp4", @"C:\videos\c.mp4"]));
+
+        Assert.True(PlaylistChanges.Apply(created.Id, "Moved a video.", () => Playlists.MoveTo(created.Id, 2, 0)));
+        Assert.True(PlaylistChanges.Apply(created.Id, "Moved a video.", () => Playlists.MoveTo(created.Id, 0, 3)));
+        Assert.False(PlaylistChanges.Apply(created.Id, "Moved a video.", () => Playlists.MoveTo(created.Id, 0, 1)));
+        Assert.True(PlaylistChanges.IsPending(created.Id, out var message));
+        Assert.Equal("Moved a video.", message);
+
+        Assert.Equal(created.Id, PlaylistChanges.Undo());
+        var list = Playlists.Find(created.Id);
+        Assert.NotNull(list);
+        Assert.Equal(
+            [@"C:\videos\c.mp4", @"C:\videos\a.mp4", @"C:\videos\b.mp4"],
+            list.Videos.Select(video => video.Location));
+        Assert.Null(PlaylistChanges.Undo());
+    }
+
+    [Fact]
+    public void AddingAVideoDropsTheUndo()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        Assert.Equal(2, Playlists.Add(created.Id, [@"C:\videos\a.mp4", @"C:\videos\b.mp4"]));
+        Assert.True(PlaylistChanges.Apply(created.Id, "Removed a video.", () => Playlists.RemoveAt(created.Id, 0)));
+        Assert.Equal(1, Playlists.Add(created.Id, [@"C:\videos\c.mp4"]));
+
+        Assert.False(PlaylistChanges.IsPending(created.Id, out _));
+        Assert.Null(PlaylistChanges.Undo());
+        var list = Playlists.Find(created.Id);
+        Assert.NotNull(list);
+        Assert.Equal(
+            [@"C:\videos\b.mp4", @"C:\videos\c.mp4"],
+            list.Videos.Select(video => video.Location));
+    }
+
+    [Fact]
+    public void UndoingADateSortRestoresEntriesThatHadNoDate()
+    {
+        File.WriteAllText(_store, """
+            [{"Id":"abc","Name":"Evening","Videos":["C:\\clips\\older.mp4","C:\\clips\\newer.mp4"]}]
+            """);
+
+        Assert.True(PlaylistChanges.Apply("abc", "Sorted by date added. Newest first.", () => Playlists.SortByAdded("abc")));
+        var sorted = Playlists.Find("abc");
+        Assert.NotNull(sorted);
+        Assert.Equal(@"C:\clips\newer.mp4", sorted.Videos[0].Location);
+        Assert.NotNull(sorted.Videos[0].AddedUtc);
+
+        Assert.Equal("abc", PlaylistChanges.Undo());
+        var restored = Playlists.Find("abc");
+        Assert.NotNull(restored);
+        Assert.Equal(@"C:\clips\older.mp4", restored.Videos[0].Location);
+        Assert.Equal(@"C:\clips\newer.mp4", restored.Videos[1].Location);
+        Assert.Null(restored.Videos[0].AddedUtc);
+        Assert.Null(restored.Videos[1].AddedUtc);
+        Assert.DoesNotContain("Added", File.ReadAllText(_store));
+    }
+
+    [Fact]
+    public void UndoKeepsAPictureSavedAfterTheMove()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        var page = "https://vimeo.com/123456";
+        var picture = "https://cdn.example/poster.jpg";
+        Assert.Equal(1, Playlists.AddPage(created.Id, page, "Clip"));
+        Assert.Equal(1, Playlists.Add(created.Id, [@"C:\videos\clip.mp4"]));
+        Assert.True(PlaylistChanges.Apply(created.Id, "Moved a video.", () => Playlists.MoveTo(created.Id, 0, 2)));
+        Assert.True(Playlists.RememberThumbnail(created.Id, page, picture));
+        Assert.True(PlaylistChanges.IsPending(created.Id, out _));
+
+        Assert.Equal(created.Id, PlaylistChanges.Undo());
+        var list = Playlists.Find(created.Id);
+        Assert.NotNull(list);
+        Assert.Equal(page, list.Videos[0].Location);
+        Assert.Equal("Clip", list.Videos[0].Title);
+        Assert.Equal(picture, list.Videos[0].Thumbnail);
+        Assert.Equal(@"C:\videos\clip.mp4", list.Videos[1].Location);
+    }
+
+    [Fact]
+    public void AnOlderFileStartsUnwatchedAndCanBeMarked()
+    {
+        File.WriteAllText(_store, """
+            [{"Id":"abc","Name":"Evening","Videos":["C:\\clips\\a.mp4",{"Path":"C:\\clips\\b.mp4","watched":true},{"Path":"C:\\clips\\c.mp4","Watched":{"no":true}}]}]
+            """);
+
+        var list = Playlists.Find("abc");
+        Assert.NotNull(list);
+        Assert.Equal("No videos", new Playlist().WatchedSummary());
+        Assert.False(list.Videos[0].Watched);
+        Assert.True(list.Videos[1].Watched);
+        Assert.False(list.Videos[2].Watched);
+        Assert.Null(list.Videos[2].AddedUtc);
+        Assert.Equal("Not on this PC", list.Videos[0].Note());
+        Assert.Equal("Not on this PC · Watched", list.Videos[1].Note());
+        Assert.Equal("1 of 3 watched", list.WatchedSummary());
+
+        Assert.False(Playlists.SetWatched("abc", 1, true));
+        Assert.False(Playlists.SetWatched("missing", 0, true));
+        Assert.False(Playlists.SetWatched("abc", 9, true));
+        Assert.True(Playlists.SetWatched("abc", 0, true));
+        var marked = Playlists.Find("abc");
+        Assert.NotNull(marked);
+        Assert.True(marked.Videos[0].Watched);
+        Assert.Contains("\"Watched\":true", File.ReadAllText(_store));
+
+        Assert.True(Playlists.SetWatched("abc", 0, false));
+        Assert.True(Playlists.SetWatched("abc", 1, false));
+        var cleared = Playlists.Find("abc");
+        Assert.NotNull(cleared);
+        Assert.All(cleared.Videos, video => Assert.False(video.Watched));
+        Assert.Null(cleared.Videos[0].AddedUtc);
+        var saved = File.ReadAllText(_store);
+        Assert.Contains("\"C:\\\\clips\\\\a.mp4\"", saved);
+        Assert.DoesNotContain("\"Path\":\"C:\\\\clips\\\\a.mp4\"", saved);
+        Assert.DoesNotContain("Watched", saved, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MarkingAPageKeepsTheLinkAndThePicture()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        Assert.Equal("No videos", created.WatchedSummary());
+        var page = "https://vimeo.com/123456";
+        var picture = "https://cdn.example/poster.jpg";
+        Assert.Equal(1, Playlists.AddPage(created.Id, page, "Clip"));
+        Assert.True(Playlists.RememberThumbnail(created.Id, page, picture));
+        var before = Playlists.Find(created.Id);
+        Assert.NotNull(before);
+        Assert.Equal("Online", before.Videos[0].Note());
+
+        Assert.True(Playlists.SetWatched(created.Id, 0, true));
+        Assert.False(Playlists.SetWatched(created.Id, 0, true));
+        var watched = Playlists.Find(created.Id);
+        Assert.NotNull(watched);
+        Assert.True(watched.Videos[0].Watched);
+        Assert.Equal("Online · Watched", watched.Videos[0].Note());
+        Assert.Equal(page, watched.Videos[0].Location);
+        Assert.Equal("Clip", watched.Videos[0].Title);
+        Assert.True(watched.Videos[0].Resolve);
+        Assert.Equal(picture, watched.Videos[0].Thumbnail);
+        Assert.Equal(before.Videos[0].AddedUtc, watched.Videos[0].AddedUtc);
+        Assert.Equal("1 of 1 watched", watched.WatchedSummary());
+        Assert.Contains("\"Watched\":true", File.ReadAllText(_store));
+
+        Assert.True(Playlists.SetWatched(created.Id, 0, false));
+        var cleared = Playlists.Find(created.Id);
+        Assert.NotNull(cleared);
+        Assert.False(cleared.Videos[0].Watched);
+        Assert.Equal("Online", cleared.Videos[0].Note());
+        Assert.Equal(page, cleared.Videos[0].Location);
+        Assert.Equal("Clip", cleared.Videos[0].Title);
+        Assert.True(cleared.Videos[0].Resolve);
+        Assert.Equal(picture, cleared.Videos[0].Thumbnail);
+        Assert.DoesNotContain("Watched", File.ReadAllText(_store), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MovingAFileKeepsTheWatchedMark()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        var path = Path.Combine(Path.GetTempPath(), "pmp-watched-" + Guid.NewGuid().ToString("N") + ".mp4");
+        File.WriteAllBytes(path, []);
+        try
+        {
+            Assert.Equal(1, Playlists.Add(created.Id, [path]));
+            var added = Playlists.Find(created.Id);
+            Assert.NotNull(added);
+            Assert.Null(added.Videos[0].Note());
+            Assert.True(Playlists.SetWatched(created.Id, 0, true));
+            Assert.Equal("Watched", Playlists.Find(created.Id)!.Videos[0].Note());
+
+            var renamed = path + ".moved.mp4";
+            Playlists.MoveFile(path, renamed);
+
+            var after = Playlists.Find(created.Id);
+            Assert.NotNull(after);
+            Assert.Equal(renamed, after.Videos[0].Location);
+            Assert.False(after.Videos[0].Resolve);
+            Assert.True(after.Videos[0].Watched);
+            Assert.Equal(added.Videos[0].AddedUtc, after.Videos[0].AddedUtc);
+            Assert.Equal("Not on this PC · Watched", after.Videos[0].Note());
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    [Fact]
+    public void AWatchMarkStaysThroughUndo()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        Assert.Equal(2, Playlists.Add(created.Id, [@"C:\videos\a.mp4", @"C:\videos\b.mp4"]));
+        Assert.True(Playlists.SetWatched(created.Id, 0, true));
+        Assert.True(PlaylistChanges.Apply(created.Id, "Moved a video.", () => Playlists.MoveTo(created.Id, 0, 2)));
+        Assert.True(Playlists.SetWatched(created.Id, 0, true));
+        Assert.True(PlaylistChanges.IsPending(created.Id, out _));
+
+        Assert.Equal(created.Id, PlaylistChanges.Undo());
+        var list = Playlists.Find(created.Id);
+        Assert.NotNull(list);
+        Assert.Equal(@"C:\videos\a.mp4", list.Videos[0].Location);
+        Assert.Equal(@"C:\videos\b.mp4", list.Videos[1].Location);
+        Assert.True(list.Videos[0].Watched);
+        Assert.True(list.Videos[1].Watched);
+        Assert.False(PlaylistChanges.IsPending(created.Id, out _));
+    }
+
+    [Fact]
+    public void UndoRestoresTheWatchedMarkOfARemovedVideo()
+    {
+        var created = Playlists.Create("Evening");
+        Assert.NotNull(created);
+        var page = "https://vimeo.com/123456";
+        Assert.Equal(1, Playlists.AddPage(created.Id, page, "Clip"));
+        Assert.Equal(1, Playlists.Add(created.Id, [@"C:\videos\clip.mp4"]));
+        Assert.True(Playlists.SetWatched(created.Id, 0, true));
+        Assert.True(PlaylistChanges.Apply(created.Id, "Removed a video.", () => Playlists.RemoveAt(created.Id, 0)));
+        Assert.True(Playlists.SetWatched(created.Id, 0, true));
+        Assert.True(PlaylistChanges.IsPending(created.Id, out _));
+
+        Assert.Equal(created.Id, PlaylistChanges.Undo());
+        var list = Playlists.Find(created.Id);
+        Assert.NotNull(list);
+        Assert.Equal(page, list.Videos[0].Location);
+        Assert.Equal("Clip", list.Videos[0].Title);
+        Assert.True(list.Videos[0].Resolve);
+        Assert.True(list.Videos[0].Watched);
+        Assert.Equal(@"C:\videos\clip.mp4", list.Videos[1].Location);
+        Assert.True(list.Videos[1].Watched);
     }
 }

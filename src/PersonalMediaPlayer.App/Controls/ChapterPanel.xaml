@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="PersonalMediaPlayer.App.Controls.ChapterPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    VerticalAlignment="Stretch">
+    <Grid>
+        <StackPanel x:Name="ThemeInk" IsHitTestVisible="False" Visibility="Collapsed">
+            <TextBlock x:Name="PrimaryInk" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+            <TextBlock x:Name="SecondaryInk" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Border x:Name="CurrentInk" Background="{ThemeResource AccentFillColorSecondaryBrush}" />
+            <Border x:Name="MarkInk" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" />
+        </StackPanel>
+        <Border
+            Width="300"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+            <Grid Padding="12" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Chapters" />
+                <TextBlock
+                    x:Name="CountText"
+                    Grid.Row="1"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="0 chapters"
+                    TextWrapping="Wrap" />
+                <ScrollViewer x:Name="Scroller" Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="Rows" />
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

@@ -35,6 +35,14 @@
                 x:Name="PageLead"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Text="Continue a video, open a playlist, or go back to something you just added." />
+            <AutoSuggestBox
+                x:Name="SearchBox"
+                MaxWidth="420"
+                Margin="0,8,0,0"
+                HorizontalAlignment="Left"
+                PlaceholderText="Search library and playlists"
+                QueryIcon="Find"
+                TextChanged="Search_TextChanged" />
         </StackPanel>
 
         <InfoBar
@@ -43,8 +51,17 @@
             IsOpen="False"
             IsClosable="True" />
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="PageScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="28">
+                <StackPanel x:Name="SearchSection" Spacing="8" Visibility="Collapsed">
+                    <TextBlock
+                        x:Name="SearchEmpty"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="Nothing matches."
+                        Visibility="Collapsed" />
+                    <StackPanel x:Name="SearchList" MaxWidth="720" HorizontalAlignment="Stretch" Spacing="8" />
+                </StackPanel>
+
                 <StackPanel x:Name="EmptyState" Spacing="12" Visibility="Collapsed">
                     <TextBlock x:Name="EmptyTitle" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Nothing here yet." />
                     <TextBlock

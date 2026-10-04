@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Controls;
+using PersonalMediaPlayer.App.Helpers;
 using Windows.ApplicationModel.DataTransfer;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Editing;
@@ -19,7 +20,7 @@ using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 
 namespace PersonalMediaPlayer.App.Views;
 
-public sealed partial class RecordingsPage : Page
+public sealed partial class RecordingsPage : Page, IPlaybackSource
 {
     private readonly List<MonitorChoice> _monitors = [];
     private readonly List<WindowChoice> _windows = [];
@@ -31,6 +32,7 @@ public sealed partial class RecordingsPage : Page
     private bool _fullscreenTransition;
     private long? _seekAfterStart;
     private bool _pauseAfterStart;
+    private bool _pausedForOther;
     private bool _holdPauseUntilFrame;
     private string? _activePath;
     private nint _targetWindow;
@@ -121,6 +123,7 @@ public sealed partial class RecordingsPage : Page
             LoadWindows();
             ShowRecordings();
         };
+        PlaybackFocus.Register(this);
     }
 
     internal void TogglePause()
@@ -374,7 +377,7 @@ public sealed partial class RecordingsPage : Page
             Frame.GoBack();
             moved = true;
         }
-        else if (_pendingPageType is not null && Frame.Navigate(_pendingPageType, _pendingParameter))
+        else if (_pendingPageType is not null && NavigationHelper.Follow(Frame, _pendingPageType, _pendingParameter, clearBackStack: true))
         {
             Frame.BackStack.Clear();
             moved = true;
@@ -1411,6 +1414,7 @@ public sealed partial class RecordingsPage : Page
         }
         else if (_previewEnded || _previewMedia is null)
         {
+            _pausedForOther = false;
             _previewEnded = false;
             PlayFile(_previewPath);
         }
@@ -1421,6 +1425,7 @@ public sealed partial class RecordingsPage : Page
                 _player.Time = _previewTrimStartMs;
             }
 
+            TakePlayback();
             _player.Play();
         }
 
@@ -1433,7 +1438,7 @@ public sealed partial class RecordingsPage : Page
         _previewMedia = null;
         _libVlc?.Dispose();
         _player?.Dispose();
-        _libVlc = new LibVLC(enableDebugLogs: false, e.SwapChainOptions);
+        _libVlc = new LibVLC(enableDebugLogs: false, PlaybackAudio.Options(e.SwapChainOptions));
         _player = new VlcMediaPlayer(_libVlc);
         _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(OnPreviewPlaying);
         _player.Paused += (_, _) => DispatcherQueue.TryEnqueue(UpdatePlayButton);
@@ -1461,6 +1466,17 @@ public sealed partial class RecordingsPage : Page
         _previewMedia?.Dispose();
         _previewMedia = new Media(_libVlc, path, FromType.FromPath);
         _previewClock?.Start();
+        if (_pausedForOther)
+        {
+            UpdatePlayButton();
+            return;
+        }
+
+        if (!_pauseAfterStart)
+        {
+            TakePlayback();
+        }
+
         _player.Play(_previewMedia);
         ApplyPreviewRate();
         UpdatePlayButton();
@@ -1525,6 +1541,33 @@ public sealed partial class RecordingsPage : Page
         UpdatePlayButton();
     }
 
+    private void TakePlayback()
+    {
+        _pausedForOther = false;
+        PlaybackFocus.Claim(this);
+    }
+
+    void IPlaybackSource.PauseForOther()
+    {
+        _pausedForOther = true;
+        if (_player is not { IsPlaying: true })
+        {
+            UpdatePlayButton();
+            return;
+        }
+
+        try
+        {
+            _player.SetPause(true);
+        }
+        catch (Exception)
+        {
+            // The preview can already be stopped when another video starts.
+        }
+
+        UpdatePlayButton();
+    }
+
     private void OnPreviewPlaying()
     {
         if (_player is null)
@@ -1532,10 +1575,30 @@ public sealed partial class RecordingsPage : Page
             return;
         }
 
+        if (_pausedForOther)
+        {
+            try
+            {
+                _player.SetPause(true);
+            }
+            catch (Exception)
+            {
+                // Playback already moved to another video.
+            }
+
+            UpdatePlayButton();
+            return;
+        }
+
         if (_seekAfterStart is long position)
         {
             _player.Time = position;
             _seekAfterStart = null;
+        }
+
+        if (!_pauseAfterStart)
+        {
+            PlaybackFocus.Claim(this);
         }
 
         if (_pauseAfterStart)
@@ -2067,7 +2130,7 @@ public sealed partial class RecordingsPage : Page
             DisposePlayer();
         }
 
-        Frame.Navigate(typeof(VideoPlayerPage), item);
+        NavigationHelper.OpenPlayer(item);
     }
 
     private sealed record MonitorChoice(MonitorRect Monitor, string Label);

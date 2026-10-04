@@ -10,6 +10,7 @@ using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Library;
 using PersonalMediaPlayer.Core.Models;
+using PersonalMediaPlayer.Core.Storage;
 using Windows.Storage;
 
 namespace PersonalMediaPlayer.App.ViewModels;
@@ -43,6 +44,8 @@ public sealed partial class LibraryViewModel : ObservableObject
     public ObservableCollection<MediaItem> Items { get; } = [];
 
     public ObservableCollection<LibraryFolder> Folders { get; } = [];
+
+    public ObservableCollection<ConnectedPcFolder> ConnectedPcFolders { get; } = [];
 
     [ObservableProperty]
     private LibraryFolder? selectedFolder;
@@ -152,7 +155,7 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     public string EmptyHint => SelectedFolder?.IsDuplicates == true
         ? "No files share the same content."
-        : "Import or drop files here.";
+        : "Import, drop files, or connect a folder.";
 
     public bool MoveClearsOtherFolders(IReadOnlyList<MediaItem> selected)
         => !LeavesCurrentFolder && selected.Any(HasOrdinaryAlbum);
@@ -161,8 +164,21 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     public async Task LoadAsync()
     {
+        LoadConnectedFolders();
         await LoadFoldersAsync();
         await LoadItemsAsync();
+    }
+
+    public void KeepFolder(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return;
+        }
+
+        _suppressFolderLoad = true;
+        SelectedFolder = new LibraryFolder { Name = name };
+        _suppressFolderLoad = false;
     }
 
     public async Task LoadItemsAsync()
@@ -896,6 +912,8 @@ public sealed partial class LibraryViewModel : ObservableObject
     partial void OnIsBusyChanged(bool value)
     {
         ImportCommand.NotifyCanExecuteChanged();
+        ConnectPcFolderCommand.NotifyCanExecuteChanged();
+        RefreshPcFoldersCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnSearchTextChanged(string value) => ApplyFilter();
@@ -977,6 +995,181 @@ public sealed partial class LibraryViewModel : ObservableObject
     }
 
     private bool CanImport => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanImport))]
+    private async Task ConnectPcFolderAsync()
+    {
+        StorageFolder? folder;
+        try
+        {
+            folder = await FilePickerHelper.PickFolderAsync(App.MainAppWindow);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(string.IsNullOrWhiteSpace(ex.Message) ? "That folder could not be opened." : ex.Message, InfoBarSeverity.Error);
+            return;
+        }
+
+        if (folder is null || string.IsNullOrWhiteSpace(folder.Path))
+        {
+            return;
+        }
+
+        await RememberPcFolderAsync(folder.Path);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanImport))]
+    private async Task RefreshPcFoldersAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var (folders, scan) = await Task.Run(() =>
+            {
+                var connected = _library.ConnectedFolders();
+                return (connected, _library.RefreshConnectedFolders());
+            });
+            await LoadAsync();
+            ShowStatus(RefreshMessage(folders.Count, scan), scan.Added > 0
+                ? InfoBarSeverity.Success
+                : scan.MissingFolders > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(string.IsNullOrWhiteSpace(ex.Message) ? "Could not refresh the connected folders." : ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    public async Task DisconnectPcFolderAsync(string path)
+    {
+        if (IsBusy || string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var removed = await Task.Run(() => _library.DisconnectFolder(path));
+            LoadConnectedFolders();
+            ShowStatus(
+                removed
+                    ? $"Disconnected {ConnectedPcFolder.LabelOf(path)}. The files stay on this PC and in the library."
+                    : "That folder is not connected.",
+                removed ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(string.IsNullOrWhiteSpace(ex.Message) ? "Could not disconnect that folder." : ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RememberPcFolderAsync(string path)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var (result, scan) = await Task.Run(() =>
+            {
+                var connected = _library.ConnectFolder(path);
+                var found = connected is ConnectFolderResult.Connected or ConnectFolderResult.AlreadyConnected
+                    ? _library.RefreshConnectedFolders()
+                    : null;
+                return (connected, found);
+            });
+            if (result is ConnectFolderResult.Connected or ConnectFolderResult.AlreadyConnected)
+            {
+                await LoadAsync();
+            }
+
+            ShowStatus(ConnectMessage(result, path, scan), ConnectSeverity(result, scan));
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(string.IsNullOrWhiteSpace(ex.Message) ? "That folder could not be connected." : ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void LoadConnectedFolders()
+    {
+        ConnectedPcFolders.Clear();
+        foreach (var path in _library.ConnectedFolders())
+        {
+            ConnectedPcFolders.Add(new ConnectedPcFolder(path));
+        }
+    }
+
+    private static string ConnectMessage(ConnectFolderResult result, string path, ConnectedFolderScan? scan)
+    {
+        var name = ConnectedPcFolder.LabelOf(path);
+        return result switch
+        {
+            ConnectFolderResult.NotAFolder => "That folder could not be opened.",
+            ConnectFolderResult.InsideLibrary => "That folder is already part of the library.",
+            ConnectFolderResult.CoversLibrary => "Choose a media folder. This one contains the library.",
+            ConnectFolderResult.Overlaps => "That folder overlaps a folder that is already connected.",
+            ConnectFolderResult.AlreadyConnected when scan?.Added > 0 => $"Added {FileCount(scan.Added)} from {name}.",
+            ConnectFolderResult.AlreadyConnected => $"{name} is already connected.",
+            ConnectFolderResult.Connected when scan?.Added > 0 => $"Connected {name}. Added {FileCount(scan.Added)}.",
+            _ => $"Connected {name}. New photos and videos will show up on Refresh or the next time the app opens."
+        };
+    }
+
+    private static InfoBarSeverity ConnectSeverity(ConnectFolderResult result, ConnectedFolderScan? scan)
+    {
+        if (result is not (ConnectFolderResult.Connected or ConnectFolderResult.AlreadyConnected))
+        {
+            return InfoBarSeverity.Warning;
+        }
+
+        return scan?.Added > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Informational;
+    }
+
+    private static string RefreshMessage(int folders, ConnectedFolderScan scan)
+    {
+        if (folders == 0)
+        {
+            return "Connect a folder to watch it for new photos and videos.";
+        }
+
+        if (scan.Added > 0)
+        {
+            return $"Added {FileCount(scan.Added)}.";
+        }
+
+        if (scan.MissingFolders > 0)
+        {
+            return scan.MissingFolders == 1
+                ? "No new files. One connected folder could not be opened. Files already in the library stay there."
+                : $"No new files. {scan.MissingFolders} connected folders could not be opened. Files already in the library stay there.";
+        }
+
+        return "No new files.";
+    }
+
+    private static string FileCount(int count) => count == 1 ? "1 file" : $"{count} files";
 
     private async Task<bool?> ChooseLinkAsync(int count)
     {
@@ -1099,6 +1292,22 @@ public sealed partial class LibraryViewModel : ObservableObject
         StatusMessage = message;
         StatusSeverity = severity;
         HasStatus = true;
+    }
+}
+
+public sealed class ConnectedPcFolder
+{
+    public ConnectedPcFolder(string path) => Path = path;
+
+    public string Path { get; }
+
+    public string Label => LabelOf(Path);
+
+    public static string LabelOf(string path)
+    {
+        var trimmed = path.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+        var name = System.IO.Path.GetFileName(trimmed);
+        return string.IsNullOrEmpty(name) ? path : name;
     }
 }
 

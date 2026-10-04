@@ -16,7 +16,7 @@ using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 
 namespace PersonalMediaPlayer.App.Views;
 
-public sealed partial class VideoEditorPage : Page
+public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSource
 {
     private readonly DispatcherTimer _timer;
     private LibVLC? _libVlc;
@@ -28,6 +28,7 @@ public sealed partial class VideoEditorPage : Page
     private string? _pendingPath;
     private long _durationMs;
     private bool _updatingSlider;
+    private bool _pausedForOther;
     private bool _dragging;
     private bool _saving;
     private bool _allowLeave;
@@ -95,6 +96,7 @@ public sealed partial class VideoEditorPage : Page
         _history.Add(Capture());
         _historyReady = true;
         SelectTool("speed");
+        PlaybackStore.PlaybackFocus.Register(this);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -236,9 +238,10 @@ public sealed partial class VideoEditorPage : Page
     private void VideoView_Initialized(object? sender, InitializedEventArgs e)
     {
         _swapChainOptions = e.SwapChainOptions;
-        _libVlc = new LibVLC(enableDebugLogs: false, e.SwapChainOptions);
+        _libVlc = new LibVLC(enableDebugLogs: false, PlaybackStore.PlaybackAudio.Options(e.SwapChainOptions));
         _player = new VlcMediaPlayer(_libVlc);
         _player.LengthChanged += (_, args) => DispatcherQueue.TryEnqueue(() => SetDuration(args.Length));
+        _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(OnEditorPlaying);
         _player.EndReached += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
             if (!string.IsNullOrWhiteSpace(_path))
@@ -278,8 +281,63 @@ public sealed partial class VideoEditorPage : Page
         media.Parse(MediaParseOptions.ParseLocal);
         ApplyVideoSize(media);
         SetDuration(media.Duration);
+        if (_pausedForOther)
+        {
+            return;
+        }
+
+        TakePlayback();
         _player.Play(media);
         ApplyRate();
+        UpdatePlayIcon();
+    }
+
+    private void OnEditorPlaying()
+    {
+        if (_player is null)
+        {
+            return;
+        }
+
+        if (_pausedForOther)
+        {
+            try
+            {
+                _player.SetPause(true);
+            }
+            catch (Exception)
+            {
+                // Playback already moved to another video.
+            }
+        }
+
+        UpdatePlayIcon();
+    }
+
+    private void TakePlayback()
+    {
+        _pausedForOther = false;
+        PlaybackStore.PlaybackFocus.Claim(this);
+    }
+
+    void PlaybackStore.IPlaybackSource.PauseForOther()
+    {
+        _pausedForOther = true;
+        if (_player is not { IsPlaying: true })
+        {
+            UpdatePlayIcon();
+            return;
+        }
+
+        try
+        {
+            _player.SetPause(true);
+        }
+        catch (Exception)
+        {
+            // The preview can already be stopped when another video starts.
+        }
+
         UpdatePlayIcon();
     }
 
@@ -328,10 +386,12 @@ public sealed partial class VideoEditorPage : Page
         }
         else if (!string.IsNullOrWhiteSpace(_path) && _player.State == VLCState.Ended)
         {
+            _pausedForOther = false;
             PlayFile(_path);
         }
         else
         {
+            TakePlayback();
             _player.Play();
         }
 
@@ -1547,16 +1607,20 @@ public sealed partial class VideoEditorPage : Page
 
             _allowLeave = true;
             ReleasePlayer();
-            if (!Frame.Navigate(typeof(VideoPlayerPage), saved))
+            if (Frame.CanGoBack)
+            {
+                Frame.GoBack();
+                Frame.ForwardStack.Clear();
+            }
+            else if (Frame.Navigate(typeof(HomePage)))
+            {
+                Frame.BackStack.Clear();
+            }
+
+            if (App.MainAppWindow is not MainWindow window || !window.ShowPlayer(saved))
             {
                 _allowLeave = false;
                 throw new InvalidOperationException("The saved video could not be opened.");
-            }
-
-            var editor = Frame.BackStack.LastOrDefault();
-            if (editor?.SourcePageType == typeof(VideoEditorPage))
-            {
-                Frame.BackStack.Remove(editor);
             }
         }
         catch (Exception ex)
@@ -2174,7 +2238,7 @@ public sealed partial class VideoEditorPage : Page
 
         if (_pendingPageType is not null)
         {
-            Frame.Navigate(_pendingPageType, _pendingParameter);
+            NavigationHelper.Follow(Frame, _pendingPageType, _pendingParameter, clearBackStack: false);
             return;
         }
 

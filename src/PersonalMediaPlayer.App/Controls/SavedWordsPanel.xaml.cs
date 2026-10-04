@@ -1,6 +1,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using PersonalMediaPlayer.App.Helpers;
+using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.App.Subtitles;
 
 namespace PersonalMediaPlayer.App.Controls;
@@ -10,6 +12,9 @@ public sealed partial class SavedWordsPanel : UserControl
     private readonly SolidColorBrush _clear = new(Microsoft.UI.Colors.Transparent);
     private SavedWord? _selected;
     private Border? _selectedHost;
+    private string? _currentVideoPath;
+    private string? _appliedKey;
+    private double? _pendingOffset;
 
     public SavedWordsPanel()
     {
@@ -22,7 +27,43 @@ public sealed partial class SavedWordsPanel : UserControl
 
     public bool IsOpen => Visibility == Visibility.Visible;
 
-    public string? CurrentVideoPath { get; set; }
+    public string? CurrentVideoPath
+    {
+        get => _currentVideoPath;
+        set
+        {
+            if (string.Equals(_currentVideoPath, value, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (_appliedKey is not null)
+            {
+                SearchSession.Remember(
+                    SearchSession.Words(_appliedKey),
+                    Search.Text,
+                    Scroller.VerticalOffset,
+                    Scroller.ScrollableHeight > 0);
+            }
+
+            _currentVideoPath = value;
+            _appliedKey = null;
+        }
+    }
+
+    public void Remember()
+    {
+        if (string.IsNullOrWhiteSpace(_appliedKey))
+        {
+            return;
+        }
+
+        SearchSession.Remember(
+            SearchSession.Words(_appliedKey),
+            Search.Text,
+            Scroller.VerticalOffset,
+            Scroller.ScrollableHeight > 0);
+    }
 
     public void Toggle()
     {
@@ -45,6 +86,13 @@ public sealed partial class SavedWordsPanel : UserControl
     internal void Show(SavedWord word)
     {
         _selected = word;
+        if (!string.IsNullOrWhiteSpace(_currentVideoPath))
+        {
+            SearchSession.Remember(SearchSession.Words(_currentVideoPath), string.Empty, 0);
+        }
+
+        _appliedKey = _currentVideoPath;
+        _pendingOffset = null;
         Search.Text = string.Empty;
         Open();
     }
@@ -76,7 +124,16 @@ public sealed partial class SavedWordsPanel : UserControl
             return;
         }
 
+        EnsureSearch();
         var offset = Scroller.VerticalOffset;
+        var fromMemory = false;
+        if (_pendingOffset is double remembered && remembered > 0)
+        {
+            offset = remembered;
+            fromMemory = true;
+        }
+
+        _pendingOffset = null;
         List.Children.Clear();
         _selectedHost = null;
         var all = SavedWords.All();
@@ -115,9 +172,44 @@ public sealed partial class SavedWordsPanel : UserControl
             DispatcherQueue.TryEnqueue(() =>
                 selectedHost.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0.3 }));
         }
+        else if (fromMemory)
+        {
+            SearchScroll.Restore(Scroller, offset);
+        }
         else
         {
             Scroller.ChangeView(null, offset, null, true);
+        }
+    }
+
+    private void EnsureSearch()
+    {
+        if (string.Equals(_appliedKey, _currentVideoPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (_appliedKey is not null)
+        {
+            SearchSession.Remember(
+                SearchSession.Words(_appliedKey),
+                Search.Text,
+                Scroller.VerticalOffset,
+                Scroller.ScrollableHeight > 0);
+        }
+
+        _appliedKey = _currentVideoPath;
+        if (string.IsNullOrWhiteSpace(_currentVideoPath))
+        {
+            _pendingOffset = null;
+            return;
+        }
+
+        var saved = SearchSession.Recall(SearchSession.Words(_currentVideoPath));
+        _pendingOffset = string.IsNullOrWhiteSpace(saved.Text) ? null : saved.Offset;
+        if (!string.Equals(Search.Text, saved.Text, StringComparison.Ordinal))
+        {
+            Search.Text = saved.Text;
         }
     }
 

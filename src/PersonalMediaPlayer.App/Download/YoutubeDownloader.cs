@@ -24,7 +24,10 @@ public sealed record PlaylistVideo(string Title, string Url, string? Length);
 
 public sealed record PlaylistListing(string Title, IReadOnlyList<PlaylistVideo> Videos, int TotalCount);
 
-internal sealed record PlaybackSource(string Title, Uri Media, Uri? Audio, DownloadQuality Quality, IReadOnlyList<DownloadSubtitle> Subtitles, Uri? Thumbnail = null);
+internal sealed record PlaybackSource(string Title, Uri Media, Uri? Audio, DownloadQuality Quality, IReadOnlyList<DownloadSubtitle> Subtitles, Uri? Thumbnail = null)
+{
+    public IReadOnlyList<VideoChapter> Chapters { get; init; } = [];
+}
 
 internal static class YoutubeDownloader
 {
@@ -370,7 +373,10 @@ internal static class YoutubeDownloader
         var qualities = ReadQualities(root);
         var quality = qualities.FirstOrDefault(item => !item.AudioOnly)
             ?? new DownloadQuality("Best available", "bestvideo+bestaudio/best", false);
-        return new PlaybackSource(title, chosen.Address, audio, quality, ReadSubtitles(root), ReadThumbnail(root));
+        return new PlaybackSource(title, chosen.Address, audio, quality, ReadSubtitles(root), ReadThumbnail(root))
+        {
+            Chapters = VideoChapters.FromLookup(root)
+        };
     }
 
     internal static async Task<string?> FetchSubtitleAsync(string pageUrl, DownloadSubtitle subtitle, CancellationToken cancellationToken)
