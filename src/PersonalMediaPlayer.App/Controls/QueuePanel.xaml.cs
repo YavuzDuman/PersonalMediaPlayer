@@ -134,7 +134,7 @@ public sealed partial class QueuePanel : UserControl
         };
         var place = new TextBlock
         {
-            Text = item.Kind == PlayQueueKind.Page ? "Online" : "On this PC",
+            Text = item.SourceLabel,
             FontSize = 12,
             Foreground = SecondaryInk.Foreground,
             IsHitTestVisible = false

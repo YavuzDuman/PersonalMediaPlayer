@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace PersonalMediaPlayer.App.Playback;
 
 internal enum PlayQueueKind
@@ -33,21 +36,80 @@ internal sealed class PlayQueueItem
     public string Location { get; }
 
     public string? Thumbnail { get; }
+
+    public bool IsMissing
+    {
+        get
+        {
+            if (Kind != PlayQueueKind.File)
+            {
+                return false;
+            }
+
+            try
+            {
+                return !File.Exists(Location);
+            }
+            catch (Exception)
+            {
+                return true;
+            }
+        }
+    }
+
+    public string SourceLabel => Kind == PlayQueueKind.Page
+        ? "Online"
+        : IsMissing ? "Missing" : "On this PC";
 }
 
 /// <summary>
-/// Session list of videos waiting after the current one. Nothing here is written to disk or into a playlist.
+/// Videos waiting after the current one. The order is the play order, so a Play next item stays at the front.
+/// Each change is written to <c>play-queue.json</c>, separate from playlists and the download queue.
+/// <see cref="Load"/> restores that order and does not start playback. A missing local file stays in the list.
 /// Add appends. Play next inserts at the front. <see cref="Move"/> reorders this list only.
 /// <see cref="Remove"/> and <see cref="ClearWaiting"/> each keep one previous list for <see cref="Undo"/>.
-/// The window calls <see cref="Clear"/> when it closes, and that drops the list and the undo.
+/// That undo lasts until the app closes. <see cref="Clear"/> drops the in-memory list for tests and does not erase the file.
 /// An A–B section is restarted by the player before <see cref="Advance"/> is asked, so a section loop is not skipped for the queue.
 /// </summary>
 internal static class PlayQueue
 {
+    internal const string FileName = "play-queue.json";
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    private static readonly string DefaultFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PersonalMediaPlayer",
+        FileName);
+
     private static readonly List<PlayQueueItem> Items = [];
     private static PlayQueueItem[]? _before;
     private static PlayQueueItem[]? _after;
     private static string _message = string.Empty;
+    private static bool _remember;
+
+    internal static string? StoreOverride { get; set; }
+
+    /// <summary>
+    /// Stops writing the queue. Tests call this so they do not touch the queue file on this PC.
+    /// </summary>
+    internal static void SuspendPersistence() => _remember = false;
+
+    /// <summary>
+    /// Reads the waiting videos into this list. Playback is left stopped.
+    /// </summary>
+    public static void Load()
+    {
+        Items.Clear();
+        DropPending();
+        Items.AddRange(ReadStored());
+        _remember = true;
+        Raise();
+    }
 
     public static event EventHandler? Changed;
 
@@ -133,6 +195,7 @@ internal static class PlayQueue
 
         Items.Insert(to, item);
         DropPending();
+        Save();
         Raise();
         return true;
     }
@@ -153,6 +216,7 @@ internal static class PlayQueue
         Remember($"Removed \"{Items[index].Title}\".");
         Items.RemoveAt(index);
         FinishRemember();
+        Save();
         Raise();
         return true;
     }
@@ -171,6 +235,7 @@ internal static class PlayQueue
         Remember("Cleared the queue.");
         Items.Clear();
         FinishRemember();
+        Save();
         Raise();
         return true;
     }
@@ -209,6 +274,7 @@ internal static class PlayQueue
         DropPending();
         Items.Clear();
         Items.AddRange(restored);
+        Save();
         Raise();
         return true;
     }
@@ -234,6 +300,7 @@ internal static class PlayQueue
         var item = Items[0];
         Items.RemoveAt(0);
         DropPending();
+        Save();
         Raise();
         return item;
     }
@@ -241,7 +308,7 @@ internal static class PlayQueue
     public static void Notify() => Raise();
 
     /// <summary>
-    /// Drops every waiting video and any pending undo. The window calls this when it closes.
+    /// Drops the in-memory list and any pending undo. The saved file is left as it is.
     /// </summary>
     public static void Clear()
     {
@@ -301,6 +368,7 @@ internal static class PlayQueue
 
         DropPending();
         Items.Insert(index, item);
+        Save();
         if (notify)
         {
             Raise();
@@ -357,4 +425,137 @@ internal static class PlayQueue
     }
 
     private static string NewId() => Guid.NewGuid().ToString("N");
+
+    private static void Save()
+    {
+        if (!_remember)
+        {
+            return;
+        }
+
+        try
+        {
+            var stored = new List<StoredItem>(Items.Count);
+            foreach (var item in Items)
+            {
+                stored.Add(new StoredItem
+                {
+                    Id = item.Id,
+                    Title = item.Title,
+                    Kind = item.Kind == PlayQueueKind.Page ? "Page" : "File",
+                    Location = item.Location,
+                    Thumbnail = item.Thumbnail
+                });
+            }
+
+            var path = StoreOverride ?? DefaultFilePath;
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(path, JsonSerializer.Serialize(stored, JsonOptions));
+        }
+        catch (Exception)
+        {
+            // A failed snapshot leaves the previous waiting list on disk.
+        }
+    }
+
+    private static List<PlayQueueItem> ReadStored()
+    {
+        try
+        {
+            var path = StoreOverride ?? DefaultFilePath;
+            if (!File.Exists(path))
+            {
+                return [];
+            }
+
+            var stored = JsonSerializer.Deserialize<List<StoredItem>>(File.ReadAllText(path), JsonOptions) ?? [];
+            var items = new List<PlayQueueItem>();
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in stored)
+            {
+                if (TryRestore(entry, ids) is PlayQueueItem item)
+                {
+                    items.Add(item);
+                }
+            }
+
+            return items;
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
+
+    private static PlayQueueItem? TryRestore(StoredItem? entry, HashSet<string> ids)
+    {
+        if (entry is null || string.IsNullOrWhiteSpace(entry.Location))
+        {
+            return null;
+        }
+
+        if (string.Equals(entry.Kind, "Page", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!StreamLink.TryNormalize(entry.Location, out var url))
+            {
+                return null;
+            }
+
+            var picture = StreamThumbnail.ForPage(url.AbsoluteUri) ?? PlaylistEntry.CleanThumbnail(entry.Thumbnail);
+            return new PlayQueueItem(
+                UniqueId(entry.Id, ids),
+                CleanTitle(entry.Title, StreamLink.DisplayName(url)),
+                PlayQueueKind.Page,
+                url.AbsoluteUri,
+                picture);
+        }
+
+        if (!string.Equals(entry.Kind, "File", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var location = entry.Location.Trim();
+        if (location.Length == 0)
+        {
+            return null;
+        }
+
+        return new PlayQueueItem(
+            UniqueId(entry.Id, ids),
+            CleanTitle(entry.Title, Path.GetFileName(location)),
+            PlayQueueKind.File,
+            location,
+            null);
+    }
+
+    private static string UniqueId(string? id, HashSet<string> used)
+    {
+        var chosen = string.IsNullOrWhiteSpace(id) ? NewId() : id.Trim();
+        if (!used.Add(chosen))
+        {
+            chosen = NewId();
+            used.Add(chosen);
+        }
+
+        return chosen;
+    }
+
+    private sealed class StoredItem
+    {
+        public string? Id { get; set; }
+
+        public string? Title { get; set; }
+
+        public string? Kind { get; set; }
+
+        public string? Location { get; set; }
+
+        public string? Thumbnail { get; set; }
+    }
 }

@@ -18,14 +18,6 @@
             <Grid>
                 <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="12,12,0,0" />
                 <Image x:Name="Thumb" Stretch="UniformToFill" ImageFailed="Thumb_Failed" />
-                <Border x:Name="PlayShade" Background="#66000000" CornerRadius="12,12,0,0" IsHitTestVisible="False" />
-                <FontIcon
-                    x:Name="PlayMark"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    FontSize="28"
-                    Foreground="White"
-                    Glyph="&#xE768;" />
                 <ProgressBar
                     x:Name="Progress"
                     Height="4"
@@ -33,8 +25,32 @@
                     VerticalAlignment="Bottom"
                     Maximum="100"
                     Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                <Border
+                    x:Name="PlayShade"
+                    Width="44"
+                    Height="44"
+                    Margin="0,0,4,10"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Background="#99000000"
+                    CornerRadius="22"
+                    IsHitTestVisible="False" />
+                <Button
+                    x:Name="PlayButton"
+                    Margin="0,0,8,14"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Click="Play_Click"
+                    Style="{StaticResource IconAccentButtonStyle}"
+                    ToolTipService.ToolTip="Play">
+                    <FontIcon
+                        FontSize="14"
+                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                        Glyph="&#xE768;"
+                        IsHitTestVisible="False" />
+                </Button>
             </Grid>
-            <StackPanel Grid.Row="1" Padding="12,8,12,10" Spacing="2">
+            <StackPanel Grid.Row="1" Padding="12,10,12,12" Spacing="2">
                 <TextBlock
                     x:Name="Title"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
@@ -42,8 +58,8 @@
                     TextWrapping="NoWrap" />
                 <TextBlock
                     x:Name="Place"
+                    FontSize="14"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
                     TextTrimming="CharacterEllipsis"
                     TextWrapping="NoWrap" />
             </StackPanel>

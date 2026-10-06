@@ -343,10 +343,12 @@ public sealed partial class VideoPlaybackBar : UserControl
     {
         _captionChoices = null;
         _announcedCaption = int.MinValue;
+        // LibVLC faults if subtitle tracks are read after Stop, or on a player that was already released.
+        _subtitlePlayer = null;
         ApplySubtitles();
     }
 
-    public void OfferCaptionChoices(IReadOnlyList<string> names, int selectedIndex = 0)
+    public void OfferCaptionChoices(IReadOnlyList<string> names, int selectedIndex = 0, bool announce = true)
     {
         var choices = new List<(int Id, string Name)>();
         for (var index = 0; index < names.Count; index++)
@@ -355,7 +357,6 @@ public sealed partial class VideoPlaybackBar : UserControl
             choices.Add((index, name));
         }
 
-        _announcedCaption = int.MinValue;
         if (choices.Count == 0)
         {
             _captionChoices = null;
@@ -371,6 +372,7 @@ public sealed partial class VideoPlaybackBar : UserControl
                 : -1;
         }
 
+        _announcedCaption = announce ? int.MinValue : _subtitlesOn ? _subtitleTrack : -1;
         ApplySubtitles();
     }
 

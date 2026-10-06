@@ -244,7 +244,7 @@ internal static class YoutubeDownloader
     {
         var ytdlp = await EnsureYtDlpAsync(status, cancellationToken);
         var runtime = await EnsureJsRuntimeAsync(status, cancellationToken);
-        var json = await RunAsync(ytdlp, CommonArgs(runtime, "--write-auto-subs", "--dump-single-json", url), null, cancellationToken);
+        var json = await RunAsync(ytdlp, CaptionLookupArgs(runtime, url), null, cancellationToken);
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var title = root.TryGetProperty("title", out var titleElement) ? titleElement.GetString() : null;
@@ -263,7 +263,7 @@ internal static class YoutubeDownloader
         string json;
         try
         {
-            json = await RunAsync(ytdlp, CommonArgs(runtime, "--write-auto-subs", "--dump-single-json", url), null, cancellationToken);
+            json = await RunAsync(ytdlp, PlaybackLookupArgs(runtime, url), null, cancellationToken);
         }
         catch (InvalidOperationException ex) when (MentionsDrm(ex.Message))
         {
@@ -279,6 +279,28 @@ internal static class YoutubeDownloader
             throw new InvalidOperationException("The page lookup did not return a video.");
         }
     }
+
+    internal static async Task<IReadOnlyList<DownloadSubtitle>> ResolveCaptionsAsync(string url, CancellationToken cancellationToken)
+    {
+        var ytdlp = await EnsureYtDlpAsync(null, cancellationToken);
+        var runtime = await EnsureJsRuntimeAsync(null, cancellationToken);
+        var json = await RunAsync(ytdlp, CaptionLookupArgs(runtime, url), null, cancellationToken);
+        try
+        {
+            using var document = JsonDocument.Parse(JsonBody(json));
+            return ReadSubtitles(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    internal static List<string> PlaybackLookupArgs(string? runtime, string url)
+        => CommonArgs(runtime, "--dump-single-json", url);
+
+    internal static List<string> CaptionLookupArgs(string? runtime, string url)
+        => CommonArgs(runtime, "--write-auto-subs", "--dump-single-json", url);
 
     internal static PlaybackSource ReadPlayback(string json)
     {

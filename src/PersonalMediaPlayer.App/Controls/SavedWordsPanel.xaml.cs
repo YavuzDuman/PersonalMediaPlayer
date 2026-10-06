@@ -231,8 +231,10 @@ public sealed partial class SavedWordsPanel : UserControl
         var text = new TextBlock
         {
             Text = title,
-            Margin = new Thickness(8, first ? 4 : 12, 8, 2),
-            FontSize = 12,
+            Margin = new Thickness(8, first ? 6 : 12, 8, 2),
+            FontSize = 14,
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 2,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = PrimaryInk.Foreground,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -252,7 +254,7 @@ public sealed partial class SavedWordsPanel : UserControl
         var located = word.TimeMs is long && (!string.IsNullOrWhiteSpace(word.VideoPath) || !string.IsNullOrWhiteSpace(word.PageUrl));
         var body = new Grid
         {
-            Padding = new Thickness(8, 6, 8, 6),
+            Padding = new Thickness(10, 8, 10, 8),
             ColumnSpacing = 8,
             Background = _clear
         };
@@ -266,6 +268,8 @@ public sealed partial class SavedWordsPanel : UserControl
             Text = word.English,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = PrimaryInk.Foreground,
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis,
             IsHitTestVisible = false
         };
@@ -273,7 +277,10 @@ public sealed partial class SavedWordsPanel : UserControl
         {
             Text = word.Turkish,
             Margin = new Thickness(0, 2, 0, 0),
-            Foreground = PrimaryInk.Foreground,
+            FontSize = 14,
+            Foreground = SecondaryInk.Foreground,
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis,
             IsHitTestVisible = false
         };

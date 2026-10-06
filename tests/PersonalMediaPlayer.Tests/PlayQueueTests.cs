@@ -5,9 +5,19 @@ namespace PersonalMediaPlayer.Tests;
 
 public class PlayQueueTests : IDisposable
 {
-    public PlayQueueTests() => PlayQueue.Clear();
+    public PlayQueueTests()
+    {
+        PlayQueue.SuspendPersistence();
+        PlayQueue.StoreOverride = null;
+        PlayQueue.Clear();
+    }
 
-    public void Dispose() => PlayQueue.Clear();
+    public void Dispose()
+    {
+        PlayQueue.SuspendPersistence();
+        PlayQueue.StoreOverride = null;
+        PlayQueue.Clear();
+    }
 
     [Fact]
     public void VideosStayInTheOrderTheyWereAdded()
@@ -45,7 +55,7 @@ public class PlayQueueTests : IDisposable
     }
 
     [Fact]
-    public void ClosingTheAppDropsTheQueue()
+    public void ClearDropsTheWaitingVideosAndTheUndo()
     {
         PlayQueue.AddFile("A", @"C:\a.mp4");
         PlayQueue.Add(PlaylistEntry.Page("https://example.com/watch/harbor", "Harbor"));
@@ -436,6 +446,176 @@ public class PlayQueueTests : IDisposable
     }
 
     private static bool All(int _) => true;
+
+    [Fact]
+    public void WaitingVideosComeBackInOrderIncludingPlayNext()
+    {
+        UsingQueueFile(queue =>
+        {
+            var root = Path.GetDirectoryName(queue)!;
+            var kept = Path.Combine(root, "kept.mp4");
+            var missing = Path.Combine(root, "gone.mp4");
+            var now = Path.Combine(root, "now.mp4");
+            var tail = Path.Combine(root, "tail.mp4");
+            File.WriteAllText(kept, "kept");
+            var playlists = Path.Combine(root, "playlists.json");
+            var downloads = Path.Combine(root, "download-queue.json");
+            File.WriteAllText(playlists, "keep-playlists");
+            File.WriteAllText(downloads, "keep-downloads");
+
+            PlayQueue.Load();
+            Assert.Equal(0, PlayQueue.Count);
+            PlayQueue.AddFile("Later", kept);
+            PlayQueue.AddFile("After", missing);
+            var first = PlayQueue.PlayNextFile("Now", now);
+            var page = PlayQueue.PlayNextPage(
+                "Harbor",
+                "https://www.youtube.com/watch?v=abcdefghijk",
+                "https://cdn.example/media.m3u8");
+            Assert.Equal(1, PlayQueue.AddFiles([("Tail", tail)], next: false, notify: false));
+
+            var before = PlayQueue.Snapshot();
+            Assert.Equal(new[] { "Harbor", "Now", "Later", "After", "Tail" }, before.Select(item => item.Title));
+            Assert.Equal("Online", before[0].SourceLabel);
+            Assert.False(before[0].IsMissing);
+            Assert.Equal("https://www.youtube.com/watch?v=abcdefghijk", page!.Location);
+            Assert.Equal("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg", page.Thumbnail);
+            Assert.DoesNotContain("m3u8", page.Location, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("Missing", before[1].SourceLabel);
+            Assert.True(before[1].IsMissing);
+            Assert.Equal("On this PC", before[2].SourceLabel);
+            Assert.False(before[2].IsMissing);
+            Assert.Equal("Missing", before[3].SourceLabel);
+            Assert.Same(first, before[1]);
+
+            PlayQueue.Clear();
+            Assert.Equal(0, PlayQueue.Count);
+            PlayQueue.Load();
+
+            var after = PlayQueue.Snapshot();
+            Assert.Equal(5, after.Count);
+            Assert.Equal(before.Select(item => item.Id), after.Select(item => item.Id));
+            Assert.Equal(before.Select(item => item.Title), after.Select(item => item.Title));
+            Assert.Equal(before.Select(item => item.Location), after.Select(item => item.Location));
+            Assert.Equal(before.Select(item => item.Kind), after.Select(item => item.Kind));
+            Assert.Equal(page.Thumbnail, after[0].Thumbnail);
+            Assert.Equal("Harbor", after[0].Title);
+            Assert.False(PlayQueue.IsPending(out _));
+            Assert.Equal("keep-playlists", File.ReadAllText(playlists));
+            Assert.Equal("keep-downloads", File.ReadAllText(downloads));
+            Assert.Equal("play-queue.json", PlayQueue.FileName);
+
+            File.Delete(kept);
+            Assert.Equal("Missing", PlayQueue.Snapshot()[2].SourceLabel);
+            Assert.True(PlayQueue.Snapshot()[2].IsMissing);
+
+            Assert.Equal("Harbor", PlayQueue.TakeNext()!.Title);
+            Assert.True(PlayQueue.Move(0, 3));
+            PlayQueue.Clear();
+            PlayQueue.Load();
+            Assert.Equal(new[] { "Later", "After", "Now", "Tail" }, Titles());
+            Assert.Equal(4, PlayQueue.Count);
+        });
+    }
+
+    [Fact]
+    public void AClearedQueueStaysEmptyAndUndoDoesNotComeBack()
+    {
+        UsingQueueFile(_ =>
+        {
+            PlayQueue.Load();
+            PlayQueue.AddFile("A", @"C:\a.mp4");
+            PlayQueue.AddFile("B", @"C:\b.mp4");
+            PlayQueue.AddFile("C", @"C:\c.mp4");
+            Assert.True(PlayQueue.Remove(PlayQueue.Snapshot()[1].Id));
+            PlayQueue.Clear();
+            PlayQueue.Load();
+
+            Assert.Equal(new[] { "A", "C" }, Titles());
+            Assert.False(PlayQueue.IsPending(out _));
+            Assert.False(PlayQueue.Undo());
+
+            Assert.True(PlayQueue.Remove(PlayQueue.Snapshot()[0].Id));
+            Assert.True(PlayQueue.Undo());
+            PlayQueue.Clear();
+            PlayQueue.Load();
+            Assert.Equal(new[] { "A", "C" }, Titles());
+            Assert.False(PlayQueue.IsPending(out _));
+
+            Assert.True(PlayQueue.ClearWaiting());
+            PlayQueue.Clear();
+            PlayQueue.Load();
+            Assert.Empty(PlayQueue.Snapshot());
+            Assert.False(PlayQueue.Undo());
+        });
+    }
+
+    [Fact]
+    public void ABrokenQueueFileKeepsMissingFilesAndLeavesOtherStoresAlone()
+    {
+        UsingQueueFile(queue =>
+        {
+            var root = Path.GetDirectoryName(queue)!;
+            var playlists = Path.Combine(root, "playlists.json");
+            var downloads = Path.Combine(root, "download-queue.json");
+            File.WriteAllText(playlists, "keep-playlists");
+            File.WriteAllText(downloads, "keep-downloads");
+            File.WriteAllText(queue, "{");
+
+            PlayQueue.Load();
+            Assert.Equal(0, PlayQueue.Count);
+            Assert.Equal("{", File.ReadAllText(queue));
+            Assert.Equal("keep-playlists", File.ReadAllText(playlists));
+            Assert.Equal("keep-downloads", File.ReadAllText(downloads));
+
+            File.WriteAllText(queue, """
+                [
+                  {"Id":"same","Title":"Gone","Kind":"File","Location":"C:\\missing\\gone.mp4"},
+                  {"Id":"same","Title":"Again","Kind":"File","Location":"C:\\missing\\again.mp4"},
+                  {"Id":"page","Title":"Harbor","Kind":"Page","Location":"https://example.com/watch/harbor","Thumbnail":"https://cdn.example/harbor.jpg"},
+                  {"Id":"photo","Title":"Nope","Kind":"Photo","Location":"C:\\photo.jpg"},
+                  {"Id":"blank","Title":"Blank","Kind":"File","Location":"  "}
+                ]
+                """);
+
+            PlayQueue.Load();
+            var items = PlayQueue.Snapshot();
+            Assert.Equal(new[] { "Gone", "Again", "Harbor" }, items.Select(item => item.Title));
+            Assert.NotEqual(items[0].Id, items[1].Id);
+            Assert.Equal("same", items[0].Id);
+            Assert.Equal(PlayQueueKind.File, items[0].Kind);
+            Assert.Equal(@"C:\missing\gone.mp4", items[0].Location);
+            Assert.Equal("Missing", items[0].SourceLabel);
+            Assert.True(items[0].IsMissing);
+            Assert.Equal(PlayQueueKind.Page, items[2].Kind);
+            Assert.Equal("https://example.com/watch/harbor", items[2].Location);
+            Assert.Equal("https://cdn.example/harbor.jpg", items[2].Thumbnail);
+            Assert.Equal("Online", items[2].SourceLabel);
+            Assert.False(items[2].IsMissing);
+            Assert.Equal("keep-playlists", File.ReadAllText(playlists));
+            Assert.Equal("keep-downloads", File.ReadAllText(downloads));
+        });
+    }
+
+    private static void UsingQueueFile(Action<string> check)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pmp-play-queue-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var queue = Path.Combine(root, PlayQueue.FileName);
+        PlayQueue.SuspendPersistence();
+        PlayQueue.StoreOverride = queue;
+        try
+        {
+            check(queue);
+        }
+        finally
+        {
+            PlayQueue.SuspendPersistence();
+            PlayQueue.StoreOverride = null;
+            PlayQueue.Clear();
+            Directory.Delete(root, true);
+        }
+    }
 
     private static string[] Titles() => PlayQueue.Snapshot().Select(item => item.Title).ToArray();
 

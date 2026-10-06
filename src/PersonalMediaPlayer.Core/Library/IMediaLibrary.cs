@@ -35,6 +35,18 @@ public interface IMediaLibrary
 
     ConnectedFolderScan RefreshConnectedFolders();
 
+    ConnectedFileProbe ProbeConnectedFile(string path, out long length);
+
+    bool LinkConnectedFile(string path);
+
+    bool ReleaseUnfinishedConnectedFile(string path);
+
+    IReadOnlyList<ConnectedLinkMove> FollowConnectedRename(string oldPath, string newPath);
+
+    bool ContainsLinkedPath(string path);
+
+    IReadOnlyList<string> FindUnlinkedConnectedFiles(string directory);
+
     MediaItem RelocateLink(string currentPath, string newPath);
 
     IReadOnlyList<MediaItem> GetItems(string? folderName);

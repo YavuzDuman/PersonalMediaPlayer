@@ -34,6 +34,7 @@ public sealed partial class LibraryPage : Page
     private MediaItem? _selectionAnchor;
     private List<MediaItem>? _pendingSelection;
     private bool _applyingSelection;
+    private bool _connectedRefreshPending;
 
     public LibraryPage()
     {
@@ -48,9 +49,56 @@ public sealed partial class LibraryPage : Page
             {
                 UseDuplicateGroups(ViewModel.ShowingDuplicates);
             }
+
+            if (args.PropertyName == nameof(LibraryViewModel.IsBusy) && !ViewModel.IsBusy && _connectedRefreshPending)
+            {
+                _connectedRefreshPending = false;
+                _ = ViewModel.LoadAsync();
+            }
         };
         _slideTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _slideTimer.Tick += (_, _) => ShowSlide(_slideIndex + 1);
+        SizeChanged += (_, args) => ApplyPageWidth(args.NewSize.Width);
+        SelectionBar.SizeChanged += (_, _) => UpdateSelectionPadding();
+    }
+
+    private void ApplyPageWidth(double width)
+    {
+        PageRoot.Padding = width > 0 && width < 720
+            ? new Thickness(16, 8, 16, 16)
+            : new Thickness(24, 8, 24, 24);
+        var wide = width <= 0 || width >= 1080;
+        if (wide)
+        {
+            FolderColumn.Width = new GridLength(260);
+            MediaColumn.Width = new GridLength(1, GridUnitType.Star);
+            DetailsColumn.Width = new GridLength(300);
+            MainRow.Height = new GridLength(1, GridUnitType.Star);
+            DetailRow.Height = new GridLength(0);
+            PlacePane(FolderPane, column: 0, columnSpan: 1, row: 0);
+            PlacePane(MediaPane, column: 1, columnSpan: 1, row: 0);
+            PlacePane(DetailsPane, column: 2, columnSpan: 1, row: 0);
+            DetailsPane.ClearValue(FrameworkElement.MaxHeightProperty);
+            return;
+        }
+
+        FolderColumn.Width = new GridLength(220);
+        MediaColumn.Width = new GridLength(1, GridUnitType.Star);
+        DetailsColumn.Width = new GridLength(0);
+        MainRow.Height = new GridLength(1, GridUnitType.Star);
+        DetailRow.Height = GridLength.Auto;
+        PlacePane(FolderPane, column: 0, columnSpan: 1, row: 0);
+        PlacePane(MediaPane, column: 1, columnSpan: 1, row: 0);
+        PlacePane(DetailsPane, column: 0, columnSpan: 2, row: 1);
+        DetailsPane.MaxHeight = 260;
+    }
+
+    private static void PlacePane(FrameworkElement pane, int column, int columnSpan, int row)
+    {
+        Grid.SetColumn(pane, column);
+        Grid.SetColumnSpan(pane, columnSpan);
+        Grid.SetRow(pane, row);
+        Grid.SetRowSpan(pane, 1);
     }
 
     public LibraryViewModel ViewModel { get; }
@@ -59,9 +107,11 @@ public sealed partial class LibraryPage : Page
     {
         if (ViewModel.IsBusy)
         {
+            _connectedRefreshPending = true;
             return;
         }
 
+        _connectedRefreshPending = false;
         await ViewModel.LoadAsync();
     }
 
@@ -346,7 +396,13 @@ public sealed partial class LibraryPage : Page
     {
         ViewModel.SetSelection(SelectedItems());
         UpdateSelectionMarks();
-        MediaGrid.Padding = new Thickness(0, 0, 0, ViewModel.HasSelection ? 72 : 0);
+        UpdateSelectionPadding();
+    }
+
+    private void UpdateSelectionPadding()
+    {
+        var tail = ViewModel.HasSelection ? SelectionBar.ActualHeight + 12 : 0;
+        MediaGrid.Padding = new Thickness(0, 0, 0, tail);
     }
 
     private List<MediaItem> SelectionFromAnchor(MediaItem item, bool extend)
@@ -566,6 +622,17 @@ public sealed partial class LibraryPage : Page
                 rename.Click += async (_, _) => await RenameItemAsync(one);
                 flyout.Items.Add(rename);
             }
+        }
+
+        var missing = selected.Where(item => item.IsMissing && item.IsLinked).ToArray();
+        if (missing.Length > 0)
+        {
+            var locateFolder = new MenuFlyoutItem
+            {
+                Text = missing.Length == 1 ? "Locate in folder" : $"Locate {missing.Length} in a folder"
+            };
+            locateFolder.Click += async (_, _) => await LocateInFolderAsync(selected);
+            flyout.Items.Add(locateFolder);
         }
 
         var add = new MenuFlyoutSubItem { Text = selected.Count == 1 ? "Add to" : $"Add {selected.Count} to" };
@@ -1306,6 +1373,43 @@ public sealed partial class LibraryPage : Page
         await LocateSelectionAsync(item);
     }
 
+    private async void LocateFolder_Click(object sender, RoutedEventArgs e)
+        => await LocateInFolderAsync(SelectedItems());
+
+    private async Task LocateInFolderAsync(IReadOnlyList<MediaItem> selected)
+    {
+        StorageFolder? folder;
+        try
+        {
+            folder = await FilePickerHelper.PickFolderAsync(App.MainAppWindow);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.ShowStatus(string.IsNullOrWhiteSpace(ex.Message) ? "That folder could not be opened." : ex.Message, InfoBarSeverity.Error);
+            return;
+        }
+
+        if (folder is null || string.IsNullOrWhiteSpace(folder.Path))
+        {
+            return;
+        }
+
+        var preview = await ViewModel.PreviewFolderLocateAsync(selected, folder.Path);
+        if (preview is null)
+        {
+            return;
+        }
+
+        var choices = await LocateFolderDialog.ShowAsync(XamlRoot, folder.Path, preview.Matches, preview.Skipped);
+        if (choices is null)
+        {
+            return;
+        }
+
+        await ViewModel.ApplyLocatesAsync(choices, preview.Matches.Count);
+        MediaGrid.SelectedItems.Clear();
+    }
+
     private void OpenSelected()
     {
         var item = SelectedItems().LastOrDefault() ?? ViewModel.DetailsItem;
@@ -1316,7 +1420,7 @@ public sealed partial class LibraryPage : Page
 
         if (item.IsMissing)
         {
-            ViewModel.ShowStatus("This file is missing. Locate it to keep saved words, bookmarks, and the playback position.", InfoBarSeverity.Warning);
+            ViewModel.ShowStatus("This file is missing. Locate it to keep saved words, bookmarks, the playback position, and playlist entries.", InfoBarSeverity.Warning);
             return;
         }
 

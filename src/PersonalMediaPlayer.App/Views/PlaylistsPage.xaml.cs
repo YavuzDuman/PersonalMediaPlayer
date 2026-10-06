@@ -2,12 +2,15 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Models;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage;
+using Windows.Storage.FileProperties;
 using Windows.System;
 
 namespace PersonalMediaPlayer.App.Views;
@@ -27,6 +30,7 @@ public sealed partial class PlaylistsPage : Page
     public PlaylistsPage()
     {
         InitializeComponent();
+        SizeChanged += (_, _) => ApplyPageWidth(ActualWidth);
         StatusBar.Closed += StatusBar_Closed;
         ActualThemeChanged += (_, _) => DispatcherQueue.TryEnqueue(ShowLists);
         PlaylistChanges.Changed += OnPlaylistChangesChanged;
@@ -75,6 +79,50 @@ public sealed partial class PlaylistsPage : Page
 
         e.Handled = true;
         CreatePlaylist();
+    }
+
+    private void ApplyPageWidth(double width)
+    {
+        if (PageRoot is null || PlaylistBody is null)
+        {
+            return;
+        }
+
+        PageRoot.Padding = width > 0 && width < 720
+            ? new Thickness(16, 8, 16, 16)
+            : new Thickness(24, 8, 24, 24);
+        var wide = width <= 0 || width >= 900;
+        if (wide)
+        {
+            ListColumn.Width = new GridLength(280);
+            DetailColumn.Width = new GridLength(1, GridUnitType.Star);
+            ListRow.Height = new GridLength(1, GridUnitType.Star);
+            DetailRow.Height = new GridLength(0);
+            PlaylistBody.ColumnSpacing = 16;
+            PlaylistBody.RowSpacing = 0;
+            PlacePane(ListCard, column: 0, columnSpan: 1, row: 0);
+            PlacePane(DetailHost, column: 1, columnSpan: 1, row: 0);
+            ListCard.ClearValue(FrameworkElement.MaxHeightProperty);
+            return;
+        }
+
+        ListColumn.Width = new GridLength(1, GridUnitType.Star);
+        DetailColumn.Width = new GridLength(0);
+        ListRow.Height = GridLength.Auto;
+        DetailRow.Height = new GridLength(1, GridUnitType.Star);
+        PlaylistBody.ColumnSpacing = 0;
+        PlaylistBody.RowSpacing = 16;
+        PlacePane(ListCard, column: 0, columnSpan: 1, row: 0);
+        PlacePane(DetailHost, column: 0, columnSpan: 1, row: 1);
+        ListCard.MaxHeight = 220;
+    }
+
+    private static void PlacePane(FrameworkElement pane, int column, int columnSpan, int row)
+    {
+        Grid.SetColumn(pane, column);
+        Grid.SetColumnSpan(pane, columnSpan);
+        Grid.SetRow(pane, row);
+        Grid.SetRowSpan(pane, 1);
     }
 
     private void Create_Click(object sender, RoutedEventArgs e) => CreatePlaylist();
@@ -487,12 +535,12 @@ public sealed partial class PlaylistsPage : Page
         body.Children.Add(new TextBlock
         {
             Text = CountLabel(list.Videos.Count),
-            FontSize = 12,
+            FontSize = 14,
             Foreground = SecondaryInk.Foreground
         });
         var row = new Grid
         {
-            Padding = new Thickness(12, 10, 12, 10),
+            Padding = new Thickness(14, 12, 14, 12),
             ColumnSpacing = 10,
             Background = selected ? HoverInk.Background : _clear
         };
@@ -549,6 +597,8 @@ public sealed partial class PlaylistsPage : Page
         {
             Text = title,
             Foreground = playable ? PrimaryInk.Foreground : SecondaryInk.Foreground,
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
         if (note is not null)
@@ -556,8 +606,11 @@ public sealed partial class PlaylistsPage : Page
             text.Children.Add(new TextBlock
             {
                 Text = note,
-                FontSize = 12,
-                Foreground = SecondaryInk.Foreground
+                FontSize = 14,
+                Foreground = SecondaryInk.Foreground,
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 2,
+                TextTrimming = TextTrimming.CharacterEllipsis
             });
         }
 
@@ -599,28 +652,22 @@ public sealed partial class PlaylistsPage : Page
         };
         grip.DropCompleted += (_, _) => _dragFrom = null;
 
+        var thumb = CreateThumbnail(entry, index + 1);
         var row = new Grid
         {
             Padding = new Thickness(4, 8, 12, 8),
-            ColumnSpacing = 8,
+            ColumnSpacing = 10,
             Background = _clear
         };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var number = new TextBlock
-        {
-            Text = $"{index + 1}",
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = SecondaryInk.Foreground,
-            IsHitTestVisible = false
-        };
-        Grid.SetColumn(number, 1);
+        Grid.SetColumn(thumb, 1);
         Grid.SetColumn(text, 2);
         Grid.SetColumn(actions, 3);
         row.Children.Add(grip);
-        row.Children.Add(number);
+        row.Children.Add(thumb);
         row.Children.Add(text);
         row.Children.Add(actions);
         var topLine = new Border
@@ -725,23 +772,134 @@ public sealed partial class PlaylistsPage : Page
         return host;
     }
 
+    private Border CreateThumbnail(PlaylistEntry entry, int number)
+    {
+        var image = new Image
+        {
+            Stretch = Stretch.UniformToFill,
+            IsHitTestVisible = false
+        };
+        image.ImageFailed += (_, _) => image.Source = null;
+        var frame = new Grid
+        {
+            Width = 120,
+            Height = 68,
+            IsHitTestVisible = false,
+            Children =
+            {
+                new FontIcon
+                {
+                    Glyph = "\uE714",
+                    FontSize = 16,
+                    Foreground = SecondaryInk.Foreground,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    IsHitTestVisible = false
+                },
+                image,
+                new Border
+                {
+                    Margin = new Thickness(4),
+                    Padding = new Thickness(6, 1, 6, 1),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    Background = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(204, 0, 0, 0)),
+                    CornerRadius = new CornerRadius(4),
+                    IsHitTestVisible = false,
+                    Child = new TextBlock
+                    {
+                        Text = number.ToString(),
+                        FontSize = 12,
+                        Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                        IsHitTestVisible = false
+                    }
+                }
+            }
+        };
+        if (entry.Resolve)
+        {
+            var picture = entry.Thumbnail ?? StreamThumbnail.ForPage(entry.Location);
+            if (picture is not null)
+            {
+                LoadRemoteThumb(image, picture);
+            }
+        }
+        else if (entry.IsPlayable)
+        {
+            _ = LoadFileThumbAsync(image, entry.Location);
+        }
+
+        return new Border
+        {
+            Width = 120,
+            Height = 68,
+            CornerRadius = new CornerRadius(8),
+            Background = HoverInk.Background,
+            IsHitTestVisible = false,
+            Child = frame
+        };
+    }
+
+    private static void LoadRemoteThumb(Image target, string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var imageUri))
+        {
+            return;
+        }
+
+        try
+        {
+            target.Source = new BitmapImage
+            {
+                DecodePixelWidth = 240,
+                UriSource = imageUri
+            };
+        }
+        catch (Exception)
+        {
+            target.Source = null;
+        }
+    }
+
+    private static async Task LoadFileThumbAsync(Image target, string path)
+    {
+        try
+        {
+            var file = await StorageFile.GetFileFromPathAsync(path);
+            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 240);
+            if (thumb is null || thumb.Size == 0)
+            {
+                return;
+            }
+
+            var bitmap = new BitmapImage();
+            await bitmap.SetSourceAsync(thumb);
+            target.Source = bitmap;
+        }
+        catch (Exception)
+        {
+            target.Source = null;
+        }
+    }
+
     private Button IconButton(string glyph, string tip, bool enabled, Action action)
     {
         var button = new Button
         {
-            Width = 32,
-            Height = 32,
-            Padding = new Thickness(0),
             IsEnabled = enabled,
-            Background = _clear,
-            BorderThickness = new Thickness(0),
             Content = new FontIcon
             {
                 Glyph = glyph,
-                FontSize = 12,
-                Foreground = PrimaryInk.Foreground
+                FontSize = 14,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
             }
         };
+        if (Application.Current.Resources.TryGetValue("IconButtonStyle", out var style) && style is Style icon)
+        {
+            button.Style = icon;
+        }
+
         ToolTipService.SetToolTip(button, tip);
         button.Click += (_, _) => action();
         return button;

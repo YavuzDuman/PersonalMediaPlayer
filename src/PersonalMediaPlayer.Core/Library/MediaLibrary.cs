@@ -111,6 +111,21 @@ public sealed class MediaLibrary : IMediaLibrary
 
     public ConnectedFolderScan RefreshConnectedFolders() => _store.RefreshConnectedFolders();
 
+    public ConnectedFileProbe ProbeConnectedFile(string path, out long length)
+        => _store.ProbeConnectedFile(path, out length);
+
+    public bool LinkConnectedFile(string path) => _store.LinkConnectedFile(path);
+
+    public bool ReleaseUnfinishedConnectedFile(string path) => _store.ReleaseUnfinishedConnectedFile(path);
+
+    public IReadOnlyList<ConnectedLinkMove> FollowConnectedRename(string oldPath, string newPath)
+        => _store.FollowConnectedRename(oldPath, newPath);
+
+    public bool ContainsLinkedPath(string path) => _store.ContainsLinkedPath(path);
+
+    public IReadOnlyList<string> FindUnlinkedConnectedFiles(string directory)
+        => _store.FindUnlinkedConnectedFiles(directory);
+
     public MediaItem RelocateLink(string currentPath, string newPath)
         => ToItem(_store.RelocateLink(currentPath, newPath));
 

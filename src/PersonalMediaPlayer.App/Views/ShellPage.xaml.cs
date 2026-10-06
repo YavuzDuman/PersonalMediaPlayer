@@ -28,6 +28,7 @@ public sealed partial class ShellPage : UserControl
     private StreamOpenRequest? _heldStream;
     private VideoPlayerPage? _playerPage;
     private PlayerSlot _playerSlot = PlayerSlot.Hidden;
+    private bool _restoredWatching;
 
     public ShellPage()
     {
@@ -106,6 +107,19 @@ public sealed partial class ShellPage : UserControl
         }
 
         NameSettingsInEnglish();
+        RestoreWatching();
+    }
+
+    private void RestoreWatching()
+    {
+        if (_restoredWatching || _playerSlot != PlayerSlot.Hidden || WatchingSession.Current is not WatchingVideo video)
+        {
+            return;
+        }
+
+        _restoredWatching = true;
+        Present(PlayerSlot.Mini);
+        PlayerPage.RestoreHeld(video);
     }
 
     private void NameSettingsInEnglish()

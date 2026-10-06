@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace PersonalMediaPlayer.App.Subtitles;
@@ -8,17 +9,34 @@ internal readonly record struct SubtitleCue(long StartMs, long EndMs, string Tex
 
 internal static class SubtitleCues
 {
-    public static IReadOnlyList<SubtitleCue> LoadFor(string mediaPath)
+    internal static string? CacheDirectoryOverride { get; set; }
+
+    public static IReadOnlyList<SubtitleCue> LoadFor(string mediaPath, CancellationToken cancellationToken = default)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return [];
+        }
+
         var beside = FindBeside(mediaPath);
         if (beside is not null)
         {
             return Parse(File.ReadAllText(beside));
         }
 
-        var extracted = Extract(mediaPath);
+        var extracted = Extract(mediaPath, cancellationToken);
         return extracted is null ? [] : Parse(extracted);
     }
+
+    internal static string CacheFile(string mediaPath)
+    {
+        var info = new FileInfo(mediaPath);
+        return Path.Combine(CacheDirectory(), $"{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}.srt");
+    }
+
+    private static string CacheDirectory()
+        => CacheDirectoryOverride
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersonalMediaPlayer", "subtitle-cache");
 
     private static string? FindBeside(string mediaPath)
     {
@@ -32,23 +50,28 @@ internal static class SubtitleCues
         return Directory.EnumerateFiles(directory, stem + "*.srt").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
     }
 
-    private static string? Extract(string mediaPath)
+    private static string? Extract(string mediaPath, CancellationToken cancellationToken)
     {
         var ffmpeg = FindFfmpeg();
-        if (ffmpeg is null || !File.Exists(mediaPath))
+        if (ffmpeg is null || !File.Exists(mediaPath) || cancellationToken.IsCancellationRequested)
         {
             return null;
         }
 
-        var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PersonalMediaPlayer", "subtitle-cache");
-        Directory.CreateDirectory(cache);
-        var info = new FileInfo(mediaPath);
-        var target = Path.Combine(cache, $"{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}.srt");
+        Directory.CreateDirectory(CacheDirectory());
+        var target = CacheFile(mediaPath);
+        var miss = target + ".none";
+        if (File.Exists(miss))
+        {
+            return null;
+        }
+
         if (File.Exists(target) && new FileInfo(target).Length > 0)
         {
             return File.ReadAllText(target);
         }
 
+        var errors = new StringBuilder();
         var start = new ProcessStartInfo
         {
             FileName = ffmpeg,
@@ -68,8 +91,84 @@ internal static class SubtitleCues
             return null;
         }
 
-        process.WaitForExit(15000);
-        return File.Exists(target) && new FileInfo(target).Length > 0 ? File.ReadAllText(target) : null;
+        process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is not null)
+            {
+                errors.AppendLine(args.Data);
+            }
+        };
+        try
+        {
+            process.BeginErrorReadLine();
+        }
+        catch (InvalidOperationException)
+        {
+            // The process can exit before the error reader is attached.
+        }
+
+        var started = Environment.TickCount64;
+        while (!process.WaitForExit(200))
+        {
+            if (!cancellationToken.IsCancellationRequested && Environment.TickCount64 - started < 15_000)
+            {
+                continue;
+            }
+
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception)
+            {
+                // The process can already have exited.
+            }
+
+            process.WaitForExit(2_000);
+            DeleteQuiet(target);
+            return null;
+        }
+
+        process.WaitForExit();
+        if (File.Exists(target) && new FileInfo(target).Length > 0)
+        {
+            return File.ReadAllText(target);
+        }
+
+        DeleteQuiet(target);
+        if (HasNoSubtitle(errors.ToString()))
+        {
+            try
+            {
+                File.WriteAllBytes(miss, []);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasNoSubtitle(string errors)
+        => errors.Contains("matches no streams", StringComparison.OrdinalIgnoreCase)
+            || errors.Contains("does not contain any stream", StringComparison.OrdinalIgnoreCase);
+
+    private static void DeleteQuiet(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     public static IReadOnlyList<SubtitleCue> Parse(string srt)

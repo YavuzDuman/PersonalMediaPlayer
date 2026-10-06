@@ -30,6 +30,18 @@ public interface ILibraryStore
 
     ConnectedFolderScan RefreshConnectedFolders();
 
+    ConnectedFileProbe ProbeConnectedFile(string path, out long length);
+
+    bool LinkConnectedFile(string path);
+
+    bool ReleaseUnfinishedConnectedFile(string path);
+
+    IReadOnlyList<ConnectedLinkMove> FollowConnectedRename(string oldPath, string newPath);
+
+    bool ContainsLinkedPath(string path);
+
+    IReadOnlyList<string> FindUnlinkedConnectedFiles(string directory);
+
     string RelocateLink(string currentPath, string newPath);
 
     bool IsLinked(string filePath);

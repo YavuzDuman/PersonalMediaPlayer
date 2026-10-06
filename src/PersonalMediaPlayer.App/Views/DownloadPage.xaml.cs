@@ -40,16 +40,20 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
     private bool _pausedForOther;
     private bool _hasDuration;
     private bool _transitioning;
+    private bool _fullScreenLayout;
     private long _durationMs;
     private double _lastVolume = 80;
     private LibVLC? _libVlc;
     private VlcMediaPlayer? _player;
     private Media? _media;
     private VideoView? _videoView;
+    private CancellationTokenSource? _captionLoad;
+    private int _captionGeneration;
 
     public DownloadPage()
     {
         InitializeComponent();
+        SizeChanged += (_, _) => ApplyDownloadLayout();
         QueueList.ItemsSource = DownloadQueueHub.Items;
         UpdateEmptyQueue();
         foreach (var entry in DownloadHistory.Load())
@@ -58,6 +62,7 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         }
 
         HistoryList.ItemsSource = _history;
+        HistoryList.Loaded += (_, _) => AttachHistoryDrag();
         EmptyHistory.Visibility = _history.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ApplyHistory();
         _timer.Tick += (_, _) => UpdateClock();
@@ -80,10 +85,43 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         PlaybackFocus.Register(this);
     }
 
+    private void AttachHistoryDrag()
+    {
+        if (SearchScroll.Find(HistoryList) is ScrollViewer scroller)
+        {
+            CardDragScroll.Attach(scroller);
+            return;
+        }
+
+        void Later(object? sender, object e)
+        {
+            if (SearchScroll.Find(HistoryList) is not ScrollViewer found)
+            {
+                return;
+            }
+
+            HistoryList.LayoutUpdated -= Later;
+            HistoryList.Unloaded -= Stop;
+            CardDragScroll.Attach(found);
+        }
+
+        void Stop(object sender, RoutedEventArgs e)
+        {
+            HistoryList.LayoutUpdated -= Later;
+            HistoryList.Unloaded -= Stop;
+        }
+
+        HistoryList.LayoutUpdated -= Later;
+        HistoryList.Unloaded -= Stop;
+        HistoryList.LayoutUpdated += Later;
+        HistoryList.Unloaded += Stop;
+    }
+
     private void HistoryToggle_Click(object sender, RoutedEventArgs e)
     {
         _historyOpen = !_historyOpen;
         ApplyHistory();
+        AttachHistoryDrag();
     }
 
     private void ApplyHistory()
@@ -584,6 +622,7 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         PreviewTitle.Text = title;
         EntryPanel.Visibility = Visibility.Visible;
         PreviewPanel.Visibility = Visibility.Visible;
+        ApplyDownloadLayout();
         AudioMark.Visibility = _audioOnly ? Visibility.Visible : Visibility.Collapsed;
         VideoHost.Visibility = _audioOnly ? Visibility.Collapsed : Visibility.Visible;
         ResetBar();
@@ -691,23 +730,69 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         _media = new Media(_libVlc, path, FromType.FromPath);
         _media.AddOption(":no-sub-autodetect-file");
         _media.AddOption(":sub-track=0");
-        Captions.Load(path);
+        _captionLoad?.Cancel();
+        _captionLoad = new CancellationTokenSource();
+        var generation = ++_captionGeneration;
+        var token = _captionLoad.Token;
+        Captions.Prepare(path);
+        if (!_pausedForOther)
+        {
+            TakePlayback();
+            _player.Play(_media);
+            _player.SetRate(SelectedRate());
+            UpdatePlayIcon();
+        }
+
+        _ = LoadPreviewCaptionsAsync(path, generation, token);
+    }
+
+    private async Task LoadPreviewCaptionsAsync(string path, int generation, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<SubtitleCue> cues;
+        try
+        {
+            cues = await Task.Run(() => SubtitleCues.LoadFor(path, cancellationToken), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (generation != _captionGeneration || cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            ShowPreviewCues(path, generation, cues);
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() => ShowPreviewCues(path, generation, cues));
+    }
+
+    private void ShowPreviewCues(string path, int generation, IReadOnlyList<SubtitleCue> cues)
+    {
+        if (generation != _captionGeneration || _left || !string.Equals(_previewPath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Captions.ApplyLoadedCues(cues);
         if (Captions.HasCues)
         {
             Playback.OfferCaptions();
         }
 
-        _media.Parse(MediaParseOptions.ParseLocal);
-        ApplyDuration(_media.Duration);
-        if (_pausedForOther)
+        if (_player is not null)
         {
-            return;
+            Captions.SetTime(_player.Time);
         }
-
-        TakePlayback();
-        _player.Play(_media);
-        _player.SetRate(SelectedRate());
-        UpdatePlayIcon();
     }
 
     private void Player_LengthChanged(object? sender, MediaPlayerLengthChangedEventArgs args)
@@ -926,12 +1011,14 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         var enter = !window.IsFullScreen;
         if (enter)
         {
+            _fullScreenLayout = true;
             PageGrid.Padding = new Thickness(0);
             PageGrid.RowSpacing = 0;
             HeaderPanel.Visibility = Visibility.Collapsed;
             HistoryPanel.Visibility = Visibility.Collapsed;
             StatusBar.Visibility = Visibility.Collapsed;
             PreviewTitleRow.Visibility = Visibility.Collapsed;
+            ApplyDownloadLayout();
         }
 
         await window.SetFullScreenAsync(enter);
@@ -950,13 +1037,80 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
     private void RestoreWindowedLayout()
     {
         Playback.CloseSettings();
-        PageGrid.Padding = new Thickness(24, 8, 24, 24);
-        PageGrid.RowSpacing = 12;
+        _fullScreenLayout = false;
         HeaderPanel.Visibility = Visibility.Visible;
         HistoryPanel.Visibility = Visibility.Visible;
         StatusBar.Visibility = Visibility.Visible;
         PreviewTitleRow.Visibility = Visibility.Visible;
         Playback.FullScreenIcon.Glyph = "\uE740";
+        ApplyDownloadLayout();
+    }
+
+    private void ApplyDownloadLayout()
+    {
+        if (PageGrid is null || EntryColumn is null)
+        {
+            return;
+        }
+
+        if (_fullScreenLayout)
+        {
+            PlaceDownload(wide: true);
+            return;
+        }
+
+        var width = ActualWidth;
+        PageGrid.Padding = width > 0 && width < 720
+            ? new Thickness(16, 8, 16, 16)
+            : new Thickness(24, 8, 24, 24);
+        PageGrid.RowSpacing = 12;
+        PlaceDownload(wide: width <= 0 || width >= 980);
+    }
+
+    private void PlaceDownload(bool wide)
+    {
+        var previewOpen = PreviewPanel.Visibility == Visibility.Visible;
+        if (wide)
+        {
+            EntryColumn.Width = previewOpen ? new GridLength(360) : new GridLength(1, GridUnitType.Star);
+            PreviewColumn.Width = previewOpen ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+            EntryRow.Height = new GridLength(1, GridUnitType.Star);
+            PreviewRow.Height = new GridLength(0);
+            WorkGrid.ColumnSpacing = previewOpen ? 16 : 0;
+            WorkGrid.RowSpacing = 0;
+            Grid.SetColumn(EntryPanel, 0);
+            Grid.SetColumnSpan(EntryPanel, 1);
+            Grid.SetRow(EntryPanel, 0);
+            Grid.SetColumn(PreviewPanel, 1);
+            Grid.SetColumnSpan(PreviewPanel, 1);
+            Grid.SetRow(PreviewPanel, 0);
+            PreviewPanel.ClearValue(FrameworkElement.MinHeightProperty);
+            return;
+        }
+
+        EntryColumn.Width = new GridLength(1, GridUnitType.Star);
+        PreviewColumn.Width = new GridLength(0);
+        WorkGrid.ColumnSpacing = 0;
+        Grid.SetColumn(EntryPanel, 0);
+        Grid.SetColumnSpan(EntryPanel, 1);
+        Grid.SetRow(EntryPanel, 0);
+        Grid.SetColumn(PreviewPanel, 0);
+        Grid.SetColumnSpan(PreviewPanel, 1);
+        Grid.SetRow(PreviewPanel, 1);
+        if (previewOpen)
+        {
+            EntryRow.Height = new GridLength(1, GridUnitType.Star);
+            PreviewRow.Height = new GridLength(1, GridUnitType.Star);
+            WorkGrid.RowSpacing = 16;
+            PreviewPanel.MinHeight = 280;
+        }
+        else
+        {
+            EntryRow.Height = new GridLength(1, GridUnitType.Star);
+            PreviewRow.Height = new GridLength(0);
+            WorkGrid.RowSpacing = 0;
+            PreviewPanel.ClearValue(FrameworkElement.MinHeightProperty);
+        }
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
@@ -1558,6 +1712,7 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         _timer.Stop();
         PreviewPanel.Visibility = Visibility.Collapsed;
         EntryPanel.Visibility = Visibility.Visible;
+        ApplyDownloadLayout();
         DownloadStatus.Text = string.Empty;
         DownloadButton.IsEnabled = CanDownload();
         UpdateEmptyQueue();
@@ -1653,6 +1808,9 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
 
     private void ReleasePlayer()
     {
+        _captionGeneration++;
+        _captionLoad?.Cancel();
+        _captionLoad = null;
         _timer.Stop();
         if (_player is not null)
         {

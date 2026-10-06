@@ -459,4 +459,16 @@ public class PlaybackSelectionTests
         Assert.Equal(2_500, cues[1].EndMs);
         Assert.Equal("Short clock", cues[1].Text);
     }
+
+    [Fact]
+    public void PlaybackLookupLeavesTranslationsForLater()
+    {
+        var playback = YoutubeDownloader.PlaybackLookupArgs(null, "https://example.com/watch?v=1");
+        var captions = YoutubeDownloader.CaptionLookupArgs("deno:deno.exe", "https://example.com/watch?v=1");
+
+        Assert.Contains("--dump-single-json", playback);
+        Assert.DoesNotContain("--write-auto-subs", playback);
+        Assert.Contains("--write-auto-subs", captions);
+        Assert.Contains("--js-runtimes", captions);
+    }
 }

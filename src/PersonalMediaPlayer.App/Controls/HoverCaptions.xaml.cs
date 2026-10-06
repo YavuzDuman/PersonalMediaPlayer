@@ -54,18 +54,39 @@ public sealed partial class HoverCaptions : UserControl
 
     public void Load(string? mediaPath)
     {
+        Prepare(mediaPath);
+        if (_mediaPath is null)
+        {
+            return;
+        }
+
+        _cues = SubtitleCues.LoadFor(_mediaPath);
+        SetTime(0);
+    }
+
+    public void Prepare(string? mediaPath)
+    {
         _mediaPath = string.IsNullOrWhiteSpace(mediaPath) ? null : mediaPath;
         _pageUrl = null;
         _resolvePage = false;
         _sourceName = null;
         _audioLanguage = null;
         _captionLanguage = null;
-        _cues = _mediaPath is null ? [] : SubtitleCues.LoadFor(_mediaPath);
+        _cues = [];
         _cueIndex = -1;
         Line.Children.Clear();
         HideMeaning();
         CloseCard();
         SetTime(0);
+    }
+
+    internal void ApplyLoadedCues(IReadOnlyList<SubtitleCue> cues)
+    {
+        _cues = cues;
+        _cueIndex = -1;
+        Line.Children.Clear();
+        HideMeaning();
+        SetTime(_shownTime);
     }
 
     internal void SetStreamSource(string? pageUrl, bool resolve, string? sourceName)

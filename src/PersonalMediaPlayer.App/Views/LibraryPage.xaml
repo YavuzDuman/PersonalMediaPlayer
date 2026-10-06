@@ -17,72 +17,74 @@
     <Page.Resources>
         <converters:BoolToVisibilityConverter x:Key="VisibleWhenTrue" />
         <converters:BoolToVisibilityConverter x:Key="VisibleWhenFalse" Invert="True" />
+        <Style x:Key="LibrarySectionTitle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
     </Page.Resources>
 
-    <Grid x:Name="PageRoot" Padding="24,8,24,24" RowSpacing="12">
+    <Grid x:Name="PageRoot" Padding="24,8,24,24" RowSpacing="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel VerticalAlignment="Center" Spacing="8">
+        <StackPanel Spacing="16">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="0" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <StackPanel Spacing="4">
                     <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Library" />
                     <TextBlock
+                        MaxWidth="720"
+                        HorizontalAlignment="Left"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="Select, organize, drop files, and inspect details" />
+                        Text="Select, organize, drop files, and inspect details"
+                        TextWrapping="Wrap" />
                 </StackPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <AutoSuggestBox
-                        Width="280"
-                        PlaceholderText="Search by name, type, folder, or screenshot text"
-                        QueryIcon="Find"
-                        Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                        QuerySubmitted="SearchBox_QuerySubmitted"
-                        TextChanged="SearchBox_TextChanged"
-                        VerticalAlignment="Bottom" />
-                    <ComboBox
-                        MinWidth="120"
-                        Header="Filter"
-                        ItemsSource="{x:Bind ViewModel.TypeFilters}"
-                        SelectedIndex="{x:Bind ViewModel.TypeFilterIndex, Mode=TwoWay}"
-                        VerticalAlignment="Bottom" />
-                    <ComboBox
-                        MinWidth="140"
-                        Header="Sort"
-                        ItemsSource="{x:Bind ViewModel.SortOptions}"
-                        SelectedIndex="{x:Bind ViewModel.SortIndex, Mode=TwoWay}"
-                        VerticalAlignment="Bottom" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                    <ProgressRing Width="20" Height="20" IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+                    <Button Command="{x:Bind ViewModel.ImportCommand}" Style="{StaticResource PrimaryButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="16" Glyph="&#xE8B5;" />
+                            <TextBlock Text="Import" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
-            </StackPanel>
-            <StackPanel
-                Grid.Column="1"
-                Orientation="Horizontal"
-                Spacing="8"
-                VerticalAlignment="Center">
-                <ProgressRing Width="20" Height="20" IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
-                <Button Command="{x:Bind ViewModel.ImportCommand}" Style="{StaticResource AccentButtonStyle}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="16" Glyph="&#xE8B5;" />
-                        <TextBlock Text="Import" />
-                    </StackPanel>
-                </Button>
-                <Button Click="OpenLink_Click" Content="Open link" />
-                <Button Click="NewFolder_Click" Content="New folder" />
-                <Button Click="AddTo_Click" Content="Add to" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" />
-                <Button Click="MoveTo_Click" Content="Move to" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" />
-                <Button Click="Delete_Click" Content="Delete" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" />
-                <Button Click="Open_Click" Content="Open" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" />
-                <Button Click="Slideshow_Click" Content="Slideshow" />
-            </StackPanel>
-        </Grid>
+            </Grid>
+            <controls:WrapBar Spacing="8">
+                <AutoSuggestBox
+                    x:Name="LibrarySearch"
+                    MaxWidth="420"
+                    MinWidth="200"
+                    PlaceholderText="Search by name, type, folder, or screenshot text"
+                    QueryIcon="Find"
+                    QuerySubmitted="SearchBox_QuerySubmitted"
+                    Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    TextChanged="SearchBox_TextChanged" />
+                <ComboBox
+                    MinWidth="140"
+                    Header="Filter"
+                    ItemsSource="{x:Bind ViewModel.TypeFilters}"
+                    SelectedIndex="{x:Bind ViewModel.TypeFilterIndex, Mode=TwoWay}" />
+                <ComboBox
+                    MinWidth="160"
+                    Header="Sort"
+                    ItemsSource="{x:Bind ViewModel.SortOptions}"
+                    SelectedIndex="{x:Bind ViewModel.SortIndex, Mode=TwoWay}" />
+            </controls:WrapBar>
+            <controls:WrapBar Spacing="8">
+                <Button Click="OpenLink_Click" Content="Open link" Style="{StaticResource ActionButtonStyle}" />
+                <Button Click="NewFolder_Click" Content="New folder" Style="{StaticResource ActionButtonStyle}" />
+                <Button Click="AddTo_Click" Content="Add to" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Style="{StaticResource ActionButtonStyle}" />
+                <Button Click="MoveTo_Click" Content="Move to" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Style="{StaticResource ActionButtonStyle}" />
+                <Button Click="Delete_Click" Content="Delete" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Style="{StaticResource DestructiveButtonStyle}" />
+                <Button Click="Open_Click" Content="Open" IsEnabled="{x:Bind ViewModel.HasSelection, Mode=OneWay}" Style="{StaticResource ActionButtonStyle}" />
+                <Button Click="Slideshow_Click" Content="Slideshow" Style="{StaticResource ActionButtonStyle}" />
+            </controls:WrapBar>
+        </StackPanel>
 
         <InfoBar
             Grid.Row="1"
@@ -90,15 +92,20 @@
             Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
             Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
 
-        <Grid Grid.Row="2" ColumnSpacing="16">
+        <Grid x:Name="LibraryBody" Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="260" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="280" />
+                <ColumnDefinition x:Name="FolderColumn" Width="260" />
+                <ColumnDefinition x:Name="MediaColumn" Width="*" />
+                <ColumnDefinition x:Name="DetailsColumn" Width="300" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="MainRow" Height="*" />
+                <RowDefinition x:Name="DetailRow" Height="Auto" />
+            </Grid.RowDefinitions>
 
             <Border
-                Padding="12"
+                x:Name="FolderPane"
+                Padding="16"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
@@ -112,7 +119,7 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Folders" />
+                    <TextBlock Style="{StaticResource LibrarySectionTitle}" Text="Folders" />
                     <ListView
                         x:Name="FolderList"
                         Grid.Row="1"
@@ -135,8 +142,7 @@
                         <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="On this PC" />
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="New photos and videos in a connected folder show up on Refresh and when the app opens."
+                            Text="New photos and videos in a connected folder show up while the app is open. Refresh looks again."
                             TextWrapping="Wrap" />
                         <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{x:Bind ViewModel.ConnectedPcFolders, Mode=OneWay}">
@@ -154,9 +160,9 @@
                                                 ToolTipService.ToolTip="{x:Bind Path}" />
                                             <Button
                                                 Grid.Column="1"
-                                                Padding="8,4"
                                                 Click="DisconnectFolder_Click"
                                                 Content="Disconnect"
+                                                Style="{StaticResource ActionButtonStyle}"
                                                 Tag="{x:Bind Path}" />
                                         </Grid>
                                     </DataTemplate>
@@ -166,16 +172,18 @@
                         <Button
                             HorizontalAlignment="Stretch"
                             Command="{x:Bind ViewModel.ConnectPcFolderCommand}"
-                            Content="Connect folder" />
+                            Content="Connect folder"
+                            Style="{StaticResource ActionButtonStyle}" />
                         <Button
                             HorizontalAlignment="Stretch"
                             Command="{x:Bind ViewModel.RefreshPcFoldersCommand}"
-                            Content="Refresh" />
+                            Content="Refresh"
+                            Style="{StaticResource ActionButtonStyle}" />
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <Grid Grid.Column="1">
+            <Grid x:Name="MediaPane" Grid.Column="1">
                 <StackPanel
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -184,9 +192,12 @@
                     <FontIcon FontSize="48" Foreground="{ThemeResource AccentFillColorDefaultBrush}" Glyph="&#xEB9F;" />
                     <TextBlock HorizontalAlignment="Center" Style="{StaticResource SubtitleTextBlockStyle}" Text="No media in this view" />
                     <TextBlock
+                        MaxWidth="420"
                         HorizontalAlignment="Center"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind ViewModel.EmptyHint, Mode=OneWay}" />
+                        Text="{x:Bind ViewModel.EmptyHint, Mode=OneWay}"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
                 </StackPanel>
 
                 <GridView
@@ -220,43 +231,64 @@
                     </GridView.GroupStyle>
                     <GridView.ItemContainerStyle>
                         <Style TargetType="GridViewItem">
-                            <Setter Property="Margin" Value="0,0,16,16" />
+                            <Setter Property="Margin" Value="0,0,12,12" />
                         </Style>
                     </GridView.ItemContainerStyle>
                 </GridView>
 
                 <Border
-                    Padding="12,8"
-                    Margin="0,0,0,12"
-                    HorizontalAlignment="Center"
+                    x:Name="SelectionBar"
+                    Padding="12,10"
+                    Margin="0,0,0,8"
+                    HorizontalAlignment="Stretch"
                     VerticalAlignment="Bottom"
                     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                    BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
-                    CornerRadius="16"
+                    CornerRadius="12"
                     Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
+                    <controls:WrapBar Spacing="8">
                         <TextBlock
-                            Margin="4,0,4,0"
                             VerticalAlignment="Center"
                             Style="{StaticResource BodyStrongTextBlockStyle}"
                             Text="{x:Bind ViewModel.SelectionCountLabel, Mode=OneWay}" />
-                        <StackPanel
-                            Orientation="Horizontal"
-                            Spacing="8"
-                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
-                            <Button Padding="10,4" Click="PlayNext_Click" Content="Play next" />
-                            <Button Padding="10,4" Click="AddToQueue_Click" Content="Add to queue" />
-                            <Button Padding="10,4" Click="AddToPlaylist_Click" Content="Add to playlist" />
-                            <Button Padding="10,4" Click="AddFavorites_Click" Content="Add to favorites" />
-                            <Button Padding="10,4" Click="RemoveFavorites_Click" Content="Remove from favorites" />
-                        </StackPanel>
-                        <Button Padding="10,4" Click="ClearSelection_Click" Content="Clear" />
-                    </StackPanel>
+                        <Button
+                            Click="PlayNext_Click"
+                            Content="Play next"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                        <Button
+                            Click="AddToQueue_Click"
+                            Content="Add to queue"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                        <Button
+                            Click="AddToPlaylist_Click"
+                            Content="Add to playlist"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                        <Button
+                            Click="AddFavorites_Click"
+                            Content="Add to favorites"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                        <Button
+                            Click="RemoveFavorites_Click"
+                            Content="Remove from favorites"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                        <Button
+                            Click="LocateFolder_Click"
+                            Content="Locate in folder"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="{x:Bind ViewModel.CanLocateFolder, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                        <Button Click="ClearSelection_Click" Content="Clear" Style="{StaticResource ActionButtonStyle}" />
+                    </controls:WrapBar>
                 </Border>
             </Grid>
 
             <Border
+                x:Name="DetailsPane"
                 Grid.Column="2"
                 Padding="16"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -265,7 +297,7 @@
                 CornerRadius="12">
                 <ScrollViewer>
                     <StackPanel Spacing="8">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Details" />
+                        <TextBlock Style="{StaticResource LibrarySectionTitle}" Text="Details" />
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="Select an item to see its details. Ctrl+click, Shift+click, or Ctrl+A selects the files in this view. Drop files to add them. Drag onto a folder to add an item. Move to takes it out of the folder you are viewing. Photos, Videos, and This month fill themselves."
@@ -288,6 +320,7 @@
                                 HorizontalAlignment="Left"
                                 Click="Locate_Click"
                                 Content="Locate"
+                                Style="{StaticResource ActionButtonStyle}"
                                 Visibility="{x:Bind ViewModel.CanLocate, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
                             <TextBlock
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"

@@ -22,12 +22,14 @@
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\YoutubeDownloader.cs" Link="YoutubeDownloader.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\DownloadBatchSave.cs" Link="DownloadBatchSave.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleCues.cs" Link="SubtitleCues.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleSearch.cs" Link="SubtitleSearch.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleEdit.cs" Link="SubtitleEdit.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SavedWords.cs" Link="SavedWords.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\Playlists.cs" Link="Playlists.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaylistChanges.cs" Link="PlaylistChanges.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaylistRun.cs" Link="PlaylistRun.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlayQueue.cs" Link="PlayQueue.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\WatchingSession.cs" Link="WatchingSession.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\VideoChapters.cs" Link="VideoChapters.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackVisit.cs" Link="PlaybackVisit.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackFocus.cs" Link="PlaybackFocus.cs" />

@@ -36,11 +36,27 @@ public sealed partial class HomePage : Page
     public HomePage()
     {
         InitializeComponent();
+        CardDragScroll.Attach(ContinueRow);
+        CardDragScroll.Attach(PlaylistRow);
+        CardDragScroll.Attach(PlaylistPreviewRow);
+        CardDragScroll.Attach(RecentRow);
         LibraryWatch.Changed += OnLibraryWatchChanged;
         Unloaded += (_, _) => LibraryWatch.Changed -= OnLibraryWatchChanged;
         PlaylistPreview.PointerEntered += (_, _) => _previewTicket++;
         PlaylistPreview.PointerExited += PlaylistPreview_Exited;
         ContinueSection.SizeChanged += (_, _) => LayoutContinueGrid();
+        SizeChanged += (_, args) => ApplyPageWidth(args.NewSize.Width);
+    }
+
+    private void ApplyPageWidth(double width)
+    {
+        var narrow = width > 0 && width < 720;
+        PageRoot.Padding = narrow
+            ? new Thickness(16, 8, 16, 16)
+            : new Thickness(24, 8, 24, 24);
+        EmptyActions.Orientation = width > 0 && width < 520
+            ? Orientation.Vertical
+            : Orientation.Horizontal;
     }
 
     protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
@@ -244,7 +260,7 @@ public sealed partial class HomePage : Page
     {
         if (file is { IsMissing: true })
         {
-            Status("This file is missing. Locate it in the library to keep saved words, bookmarks, and the playback position.", InfoBarSeverity.Warning);
+            Status("This file is missing. Locate it in the library to keep saved words, bookmarks, the playback position, and playlist entries.", InfoBarSeverity.Warning);
             return;
         }
 
@@ -422,7 +438,7 @@ public sealed partial class HomePage : Page
         var note = new Border
         {
             Width = 220,
-            Height = 176,
+            Height = 188,
             Style = (Style)Resources["HomeCard"],
             Child = new TextBlock
             {
@@ -430,8 +446,7 @@ public sealed partial class HomePage : Page
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextAlignment = TextAlignment.Center,
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.7
+                Style = PageStyle("HomeSecondaryTextStyle")
             }
         };
         if (playlistId is not null)
@@ -451,7 +466,7 @@ public sealed partial class HomePage : Page
     {
         var board = new Storyboard();
         var index = 0;
-        AddPreviewMotion(board, PlaylistPreviewTitle, index++, scale: false, opacity: 0.7);
+        AddPreviewMotion(board, PlaylistPreviewTitle, index++, scale: false);
         foreach (var child in PlaylistPreviewList.Children.OfType<UIElement>())
         {
             AddPreviewMotion(board, child, index++, scale: true);
@@ -641,10 +656,17 @@ public sealed partial class HomePage : Page
         SearchList.Children.Clear();
         var generation = ++_searchGeneration;
         var hits = HomeSearch.Find(SearchBox.Text, App.MediaLibrary.GetItems(), Playlists.All());
-        SearchEmpty.Visibility = hits.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var hit in hits)
+        var any = hits.Count > 0;
+        SearchEmpty.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
+        SearchCard.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+        for (var index = 0; index < hits.Count; index++)
         {
-            SearchList.Children.Add(SearchRow(hit, generation));
+            if (index > 0)
+            {
+                SearchList.Children.Add(RowDivider());
+            }
+
+            SearchList.Children.Add(SearchRow(hits[index], generation));
         }
     }
 
@@ -659,11 +681,7 @@ public sealed partial class HomePage : Page
         image.ImageFailed += (_, _) => image.Source = null;
         var thumb = new Border
         {
-            Width = 120,
-            Height = 68,
-            CornerRadius = new CornerRadius(6),
-            Background = ThemeBrush("SubtleFillColorSecondaryBrush"),
-            IsHitTestVisible = false,
+            Style = PageStyle("HomeThumbStyle"),
             Child = new Grid
             {
                 IsHitTestVisible = false,
@@ -672,11 +690,7 @@ public sealed partial class HomePage : Page
                     new FontIcon
                     {
                         Glyph = photo ? "\uE91B" : "\uE714",
-                        FontSize = 20,
-                        Foreground = ThemeBrush("TextFillColorSecondaryBrush"),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        IsHitTestVisible = false
+                        Style = PageStyle("HomeSecondaryIconStyle")
                     },
                     image
                 }
@@ -692,14 +706,15 @@ public sealed partial class HomePage : Page
                 new TextBlock
                 {
                     Text = hit.Title,
+                    Style = AppStyle("BodyStrongTextBlockStyle"),
                     TextTrimming = TextTrimming.CharacterEllipsis,
-                    TextWrapping = TextWrapping.NoWrap
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 2
                 },
                 new TextBlock
                 {
                     Text = hit.Source,
-                    Opacity = 0.7,
-                    TextWrapping = TextWrapping.Wrap,
+                    Style = PageStyle("HomeSecondaryTextStyle"),
                     MaxLines = 2
                 }
             }
@@ -712,11 +727,10 @@ public sealed partial class HomePage : Page
         row.Children.Add(text);
         var button = new Button
         {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(8),
+            Style = AppStyle("RowButtonStyle"),
             Content = row
         };
+        ToolTipService.SetToolTip(button, hit.Title + Environment.NewLine + hit.Source);
         button.SizeChanged += (_, args) =>
         {
             var room = args.NewSize.Width - thumb.Width - row.ColumnSpacing - button.Padding.Left - button.Padding.Right;
@@ -730,7 +744,8 @@ public sealed partial class HomePage : Page
 
         var actions = new StackPanel
         {
-            Spacing = 4,
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
             VerticalAlignment = VerticalAlignment.Center
         };
         actions.Children.Add(QueueButton("Play next", "Put this first in the queue", next: true));
@@ -744,11 +759,14 @@ public sealed partial class HomePage : Page
         menu.Items.Add(add);
         button.ContextFlyout = menu;
         var shell = new Grid { ColumnSpacing = 8 };
+        shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         shell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         shell.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(actions, 1);
         shell.Children.Add(button);
         shell.Children.Add(actions);
+        shell.SizeChanged += (_, _) => LayoutSearchActions(shell, button, actions);
+        LayoutSearchActions(shell, button, actions);
         return shell;
 
         Button QueueButton(string label, string tip, bool next)
@@ -756,14 +774,40 @@ public sealed partial class HomePage : Page
             var queue = new Button
             {
                 Content = label,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(10, 4, 10, 4)
+                Style = AppStyle("ActionButtonStyle")
             };
             ToolTipService.SetToolTip(queue, tip);
             queue.Click += (_, _) => QueueHit(hit, next);
             return queue;
         }
     }
+
+    private static void LayoutSearchActions(Grid shell, FrameworkElement open, FrameworkElement actions)
+    {
+        var width = shell.ActualWidth;
+        var known = width > 0;
+        var stacked = known && width < 560;
+        if (actions is StackPanel panel)
+        {
+            panel.Orientation = known && width < 420 ? Orientation.Vertical : Orientation.Horizontal;
+        }
+
+        Grid.SetRow(open, 0);
+        Grid.SetColumn(open, 0);
+        Grid.SetColumnSpan(open, stacked ? 2 : 1);
+        Grid.SetRow(actions, stacked ? 1 : 0);
+        Grid.SetColumn(actions, stacked ? 0 : 1);
+        Grid.SetColumnSpan(actions, stacked ? 2 : 1);
+        actions.Margin = stacked ? new Thickness(12, 0, 12, 10) : new Thickness(0, 0, 12, 0);
+        actions.HorizontalAlignment = HorizontalAlignment.Left;
+        actions.VerticalAlignment = VerticalAlignment.Center;
+    }
+
+    private static Style AppStyle(string key) => (Style)Application.Current.Resources[key];
+
+    private Style PageStyle(string key) => (Style)Resources[key];
+
+    private Border RowDivider() => new() { Style = PageStyle("HomeDividerStyle") };
 
     private void ShowPicture(Image image, HomeHit hit, int generation)
     {
@@ -853,9 +897,6 @@ public sealed partial class HomePage : Page
         }
     }
 
-    private static Brush? ThemeBrush(string key)
-        => Application.Current.Resources.TryGetValue(key, out var value) ? value as Brush : null;
-
     private void QueueHit(HomeHit hit, bool next)
     {
         if (hit.Kind == HomeHitKind.LibraryPhoto)
@@ -916,7 +957,7 @@ public sealed partial class HomePage : Page
         if (item is null || !File.Exists(item.FilePath))
         {
             Status(item is { IsMissing: true }
-                ? "This file is missing. Locate it in the library to keep saved words, bookmarks, and the playback position."
+                ? "This file is missing. Locate it in the library to keep saved words, bookmarks, the playback position, and playlist entries."
                 : "That file is no longer on this PC.", InfoBarSeverity.Warning);
             return;
         }
@@ -935,7 +976,7 @@ public sealed partial class HomePage : Page
         if (!File.Exists(item.FilePath))
         {
             Status(item.IsMissing
-                ? "This file is missing. Locate it in the library to keep saved words, bookmarks, and the playback position."
+                ? "This file is missing. Locate it in the library to keep saved words, bookmarks, the playback position, and playlist entries."
                 : "That file is no longer on this PC.", InfoBarSeverity.Warning);
             Show();
             return;
@@ -970,38 +1011,51 @@ public sealed partial class HomePage : Page
         WordList.Children.Clear();
         var words = SavedWords.All().Where(SavedWords.CanOpen).Take(8).ToArray();
         WordsSection.Visibility = words.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        foreach (var word in words)
+        for (var index = 0; index < words.Length; index++)
         {
-            WordList.Children.Add(WordRow(word));
+            if (index > 0)
+            {
+                WordList.Children.Add(RowDivider());
+            }
+
+            WordList.Children.Add(WordRow(words[index]));
         }
     }
 
     private UIElement WordRow(SavedWord word)
     {
         var title = string.IsNullOrWhiteSpace(word.Turkish) ? word.English : $"{word.English} — {word.Turkish}";
-        var button = new Button
+        var text = new StackPanel
         {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            Content = new StackPanel
+            Spacing = 2,
+            Children =
             {
-                Spacing = 2,
-                Children =
+                new TextBlock
                 {
-                    new TextBlock
-                    {
-                        Text = title,
-                        TextTrimming = TextTrimming.CharacterEllipsis
-                    },
-                    new TextBlock
-                    {
-                        Text = WordPlace(word),
-                        Opacity = 0.7,
-                        TextTrimming = TextTrimming.CharacterEllipsis
-                    }
+                    Text = title,
+                    Style = AppStyle("BodyStrongTextBlockStyle"),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 2
+                },
+                new TextBlock
+                {
+                    Text = WordPlace(word),
+                    Style = PageStyle("HomeSecondaryTextStyle"),
+                    MaxLines = 2
                 }
             }
         };
+        var button = new Button
+        {
+            Style = AppStyle("RowButtonStyle"),
+            Content = text
+        };
+        button.SizeChanged += (_, args) =>
+        {
+            var room = args.NewSize.Width - button.Padding.Left - button.Padding.Right;
+            text.MaxWidth = room > 40 ? room : 40;
+        };
+        ToolTipService.SetToolTip(button, title + Environment.NewLine + WordPlace(word));
         button.Click += (_, _) => OpenWord(word);
         return button;
     }
@@ -1064,8 +1118,14 @@ public sealed partial class HomePage : Page
         DownloadList.Children.Clear();
         var active = DownloadQueueHub.Items.Where(ShownOnHome).Take(6).ToArray();
         DownloadsSection.Visibility = active.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        foreach (var item in active)
+        for (var index = 0; index < active.Length; index++)
         {
+            if (index > 0)
+            {
+                DownloadList.Children.Add(RowDivider());
+            }
+
+            var item = active[index];
             DownloadList.Children.Add(new StackPanel
             {
                 Padding = new Thickness(12, 10, 12, 10),
@@ -1075,13 +1135,15 @@ public sealed partial class HomePage : Page
                     new TextBlock
                     {
                         Text = item.Title,
-                        TextTrimming = TextTrimming.CharacterEllipsis
+                        Style = AppStyle("BodyStrongTextBlockStyle"),
+                        TextWrapping = TextWrapping.Wrap,
+                        MaxLines = 2
                     },
                     new TextBlock
                     {
                         Text = item.Detail,
-                        Opacity = 0.7,
-                        TextTrimming = TextTrimming.CharacterEllipsis
+                        Style = PageStyle("HomeSecondaryTextStyle"),
+                        MaxLines = 2
                     }
                 }
             });
@@ -1090,11 +1152,12 @@ public sealed partial class HomePage : Page
         var more = DownloadQueueHub.Items.Count(ShownOnHome) - active.Length;
         if (more > 0)
         {
+            DownloadList.Children.Add(RowDivider());
             DownloadList.Children.Add(new TextBlock
             {
                 Text = more == 1 ? "1 more on the Download page" : $"{more} more on the Download page",
-                Margin = new Thickness(12, 0, 12, 12),
-                Opacity = 0.7
+                Margin = new Thickness(12, 10, 12, 12),
+                Style = PageStyle("HomeSecondaryTextStyle")
             });
         }
     }

@@ -1,5 +1,7 @@
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage;
 using Windows.Storage.FileProperties;
@@ -8,6 +10,8 @@ namespace PersonalMediaPlayer.App.Controls;
 
 public sealed partial class ContinueWatchCard : UserControl
 {
+    private bool _playClick;
+
     public ContinueWatchCard()
     {
         InitializeComponent();
@@ -19,8 +23,8 @@ public sealed partial class ContinueWatchCard : UserControl
     {
         Title.Text = title;
         Place.Text = place;
-        var play = showPlay ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
-        PlayMark.Visibility = play;
+        var play = showPlay ? Visibility.Visible : Visibility.Collapsed;
+        PlayButton.Visibility = play;
         PlayShade.Visibility = play;
         ToolTipService.SetToolTip(this, title + Environment.NewLine + place);
         if (fraction > 0 && fraction < 1)
@@ -83,7 +87,6 @@ public sealed partial class ContinueWatchCard : UserControl
             var image = new BitmapImage();
             await image.SetSourceAsync(thumb);
             Thumb.Source = image;
-            PlayMark.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
         }
         catch (Exception)
         {
@@ -91,9 +94,34 @@ public sealed partial class ContinueWatchCard : UserControl
         }
     }
 
+    private void Play_Click(object sender, RoutedEventArgs e)
+    {
+        _playClick = true;
+        Chosen?.Invoke(this, EventArgs.Empty);
+    }
+
     private void Card_Tapped(object sender, TappedRoutedEventArgs e)
     {
+        if (_playClick || (e.OriginalSource is DependencyObject source && IsInside(source, PlayButton)))
+        {
+            _playClick = false;
+            return;
+        }
+
         e.Handled = true;
         Chosen?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static bool IsInside(DependencyObject source, DependencyObject ancestor)
+    {
+        for (DependencyObject? node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (ReferenceEquals(node, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

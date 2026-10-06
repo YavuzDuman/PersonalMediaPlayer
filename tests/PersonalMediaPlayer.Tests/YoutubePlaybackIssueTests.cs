@@ -89,28 +89,28 @@ public class YoutubePlaybackIssueTests
     {
         const string page = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
         using var resolveLimit = new CancellationTokenSource(TimeSpan.FromSeconds(50));
-        var choice = await YoutubeDownloader.ResolvePlaybackAsync(page, null, resolveLimit.Token);
-        var automatic = choice.Subtitles.Where(track => track.Automatic).ToList();
+        var choice = await YoutubeDownloader.ResolveCaptionsAsync(page, resolveLimit.Token);
+        var automatic = choice.Where(track => track.Automatic).ToList();
         Assert.True(automatic.Count >= 20, "automatic captions=" + automatic.Count);
-        Assert.DoesNotContain(choice.Subtitles, track => track.Language != null && track.Language.Contains("live_chat", StringComparison.OrdinalIgnoreCase));
-        var banglaCount = choice.Subtitles.Count(track => track.Label.StartsWith("Bangla", StringComparison.Ordinal));
+        Assert.DoesNotContain(choice, track => track.Language != null && track.Language.Contains("live_chat", StringComparison.OrdinalIgnoreCase));
+        var banglaCount = choice.Count(track => track.Label.StartsWith("Bangla", StringComparison.Ordinal));
         Assert.Equal(1, banglaCount);
-        foreach (var track in choice.Subtitles)
+        foreach (var track in choice)
         {
             Assert.False(string.IsNullOrWhiteSpace(track.Label));
             Assert.False(HasNonLatin(track.Label), track.Language + " " + track.Label);
         }
 
-        var bangla = choice.Subtitles.First(track => track.Automatic && track.Label == "Bangla · Automatic");
+        var bangla = choice.First(track => track.Automatic && track.Label == "Bangla · Automatic");
         Assert.True(bangla.Translated);
-        var german = choice.Subtitles.First(track => string.Equals(track.Language, "de", StringComparison.OrdinalIgnoreCase));
+        var german = choice.First(track => string.Equals(track.Language, "de", StringComparison.OrdinalIgnoreCase));
         Assert.False(german.Translated, german.Label);
 
         var germanCues = await FreshCuesAsync(page, german, 40);
         var banglaCues = await FreshCuesAsync(page, bangla, 120);
         Assert.True(germanCues.Count > 0 && germanCues.Any(cue => cue.Text.Length > 0), "german cues=" + germanCues.Count);
         Assert.True(banglaCues.Count > 0 && banglaCues.Any(cue => cue.Text.Length > 0), "bangla cues=" + banglaCues.Count);
-        _output.WriteLine($"captions={choice.Subtitles.Count}; automatic={automatic.Count}; german={german.Language}/{german.Label}/{germanCues.Count}; bangla={bangla.Language}/{bangla.Label}/{banglaCues.Count}");
+        _output.WriteLine($"captions={choice.Count}; automatic={automatic.Count}; german={german.Language}/{german.Label}/{germanCues.Count}; bangla={bangla.Language}/{bangla.Label}/{banglaCues.Count}");
     }
 
     private static async Task<IReadOnlyList<SubtitleCue>> FreshCuesAsync(string page, DownloadSubtitle track, int seconds)

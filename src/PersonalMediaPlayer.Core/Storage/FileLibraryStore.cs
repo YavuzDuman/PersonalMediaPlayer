@@ -1350,6 +1350,28 @@ public sealed class FileLibraryStore : ILibraryStore
             }
         }
 
+        HashSet<string> known;
+        lock (_catalog)
+        {
+            known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var link in Links)
+            {
+                if (!string.IsNullOrWhiteSpace(link.Path))
+                {
+                    known.Add(Path.GetFullPath(link.Path));
+                }
+            }
+        }
+
+        var ready = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in found)
+        {
+            if (!known.Contains(path) && ProbeConnectedFile(path, out _) == ConnectedFileProbe.Ready)
+            {
+                ready.Add(path);
+            }
+        }
+
         var added = 0;
         var already = 0;
         lock (_catalog)
@@ -1360,6 +1382,11 @@ public sealed class FileLibraryStore : ILibraryStore
                 if (IsManagedCopy(path) || FindLink(path) is not null)
                 {
                     already++;
+                    continue;
+                }
+
+                if (!ready.Contains(path))
+                {
                     continue;
                 }
 
@@ -1375,6 +1402,312 @@ public sealed class FileLibraryStore : ILibraryStore
         }
 
         return new ConnectedFolderScan(added, already, missingFolders);
+    }
+
+    public ConnectedFileProbe ProbeConnectedFile(string path, out long length)
+    {
+        length = 0;
+        if (!TryNormalizePath(path, out var full) || ConnectedRootOf(full) is null || !IsSupportedMedia(full))
+        {
+            return ConnectedFileProbe.Ignore;
+        }
+
+        try
+        {
+            var attributes = File.GetAttributes(full);
+            if ((attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+            {
+                return ConnectedFileProbe.Ignore;
+            }
+
+            using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.None);
+            if (stream.Length <= 0)
+            {
+                return ConnectedFileProbe.Wait;
+            }
+
+            length = stream.Length;
+            return ConnectedFileProbe.Ready;
+        }
+        catch (FileNotFoundException)
+        {
+            return ConnectedFileProbe.Wait;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return ConnectedFileProbe.Ignore;
+        }
+        catch (IOException)
+        {
+            return ConnectedFileProbe.Wait;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return ConnectedFileProbe.Wait;
+        }
+    }
+
+    public bool LinkConnectedFile(string path)
+    {
+        if (ProbeConnectedFile(path, out _) != ConnectedFileProbe.Ready || !TryNormalizePath(path, out var full))
+        {
+            return false;
+        }
+
+        lock (_catalog)
+        {
+            if (IsManagedCopy(full) || FindLink(full) is not null)
+            {
+                return false;
+            }
+
+            Links.Add(new LinkRecord { Path = full, AddedUtc = DateTimeOffset.UtcNow });
+            SaveLinks();
+            return true;
+        }
+    }
+
+    public bool ReleaseUnfinishedConnectedFile(string path)
+    {
+        if (!TryNormalizePath(path, out var full) || ConnectedRootOf(full) is null)
+        {
+            return false;
+        }
+
+        lock (_catalog)
+        {
+            if (FindLink(full) is null)
+            {
+                return false;
+            }
+
+            Links.RemoveAll(link => string.Equals(Path.GetFullPath(link.Path), full, StringComparison.OrdinalIgnoreCase));
+            SaveLinks();
+            return true;
+        }
+    }
+
+    public IReadOnlyList<ConnectedLinkMove> FollowConnectedRename(string oldPath, string newPath)
+    {
+        if (!TryNormalizePath(oldPath, out var oldFull) || !TryNormalizePath(newPath, out var newFull))
+        {
+            return [];
+        }
+
+        var oldRoot = ConnectedRootOf(oldFull);
+        var newRoot = ConnectedRootOf(newFull);
+        if (oldRoot is null || newRoot is null || !string.Equals(oldRoot, newRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        if (Directory.Exists(newFull))
+        {
+            return FollowDirectoryRename(oldFull, newFull);
+        }
+
+        return FollowFileRename(oldFull, newFull);
+    }
+
+    public bool ContainsLinkedPath(string path)
+    {
+        if (!TryNormalizePath(path, out var full))
+        {
+            return false;
+        }
+
+        lock (_catalog)
+        {
+            foreach (var link in Links)
+            {
+                if (string.IsNullOrWhiteSpace(link.Path))
+                {
+                    continue;
+                }
+
+                var linkPath = Path.GetFullPath(link.Path);
+                if (string.Equals(linkPath, full, StringComparison.OrdinalIgnoreCase)
+                    || IsInsideDirectory(linkPath, full))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public IReadOnlyList<string> FindUnlinkedConnectedFiles(string directory)
+    {
+        if (!TryNormalizePath(directory, out var full))
+        {
+            return [];
+        }
+
+        full = NormalizeDirectory(full);
+        if (ConnectedRootOf(full) is null || !Directory.Exists(full) || IsSkippedConnectedEntry(full))
+        {
+            return [];
+        }
+
+        var found = EnumerateConnectedFiles(full).ToList();
+        lock (_catalog)
+        {
+            found.RemoveAll(path => IsManagedCopy(path) || FindLink(path) is not null);
+        }
+
+        return found;
+    }
+
+    private IReadOnlyList<ConnectedLinkMove> FollowFileRename(string oldFull, string newFull)
+    {
+        if (string.Equals(oldFull, newFull, StringComparison.Ordinal)
+            || !File.Exists(newFull)
+            || !IsSupportedMedia(newFull)
+            || IsSkippedConnectedEntry(newFull)
+            || !MediaFileTypes.SameKind(oldFull, newFull))
+        {
+            return [];
+        }
+
+        lock (_catalog)
+        {
+            if (FindLink(oldFull) is null)
+            {
+                return [];
+            }
+
+            if (!string.Equals(oldFull, newFull, StringComparison.OrdinalIgnoreCase)
+                && (IsManagedCopy(newFull) || FindLink(newFull) is not null))
+            {
+                return [];
+            }
+        }
+
+        try
+        {
+            RetargetLink(oldFull, newFull, LinkBackupPath(oldFull));
+            ReplaceMemberId(oldFull, newFull);
+        }
+        catch (InvalidOperationException)
+        {
+            return [];
+        }
+
+        return [new ConnectedLinkMove(oldFull, newFull)];
+    }
+
+    private IReadOnlyList<ConnectedLinkMove> FollowDirectoryRename(string oldFull, string newFull)
+    {
+        var oldPrefix = oldFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var newPrefix = newFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        List<(string From, string To)> candidates;
+        lock (_catalog)
+        {
+            candidates = [];
+            foreach (var link in Links)
+            {
+                if (string.IsNullOrWhiteSpace(link.Path))
+                {
+                    continue;
+                }
+
+                var from = Path.GetFullPath(link.Path);
+                if (!from.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var to = Path.GetFullPath(newPrefix + from[oldPrefix.Length..]);
+                candidates.Add((from, to));
+            }
+        }
+
+        var moves = new List<ConnectedLinkMove>();
+        foreach (var group in candidates.GroupBy(pair => pair.To, StringComparer.OrdinalIgnoreCase))
+        {
+            if (group.Count() != 1)
+            {
+                continue;
+            }
+
+            var (from, to) = group.First();
+            if (!to.StartsWith(newPrefix, StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(to)
+                || File.Exists(from)
+                || !IsSupportedMedia(to)
+                || IsSkippedConnectedEntry(to)
+                || !MediaFileTypes.SameKind(from, to)
+                || IsManagedCopy(to)
+                || IsLinked(to))
+            {
+                continue;
+            }
+
+            try
+            {
+                RetargetLink(from, to, LinkBackupPath(from));
+                ReplaceMemberId(from, to);
+                moves.Add(new ConnectedLinkMove(from, to));
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        return moves;
+    }
+
+    private string? ConnectedRootOf(string fullPath)
+    {
+        lock (_catalog)
+        {
+            foreach (var folder in Folders)
+            {
+                if (IsSameOrInside(fullPath, folder.Path))
+                {
+                    return folder.Path;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryNormalizePath(string path, out string full)
+    {
+        full = string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            full = Path.GetFullPath(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsSkippedConnectedEntry(string fullPath)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(fullPath);
+            return (attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint)) != 0;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
     private List<LinkRecord> Links

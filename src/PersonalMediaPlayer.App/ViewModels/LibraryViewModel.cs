@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Storage;
 using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Library;
 using PersonalMediaPlayer.Core.Models;
@@ -63,7 +64,7 @@ public sealed partial class LibraryViewModel : ObservableObject
     public string DetailsPlace => DetailsItem is null
         ? string.Empty
         : DetailsItem.IsMissing
-            ? "This file is missing. Locate it to keep saved words, bookmarks, and the playback position."
+            ? "This file is missing. Locate it to keep saved words, bookmarks, the playback position, and playlist entries."
             : DetailsItem.IsLinked
                 ? "Linked. The library uses this file where it is."
                 : "Library copy.";
@@ -112,7 +113,12 @@ public sealed partial class LibraryViewModel : ObservableObject
     private bool hasSelection;
 
     [ObservableProperty]
+    private bool canLocateFolder;
+
+    [ObservableProperty]
     private int selectionCount;
+
+    private int _missingLinkSelection;
 
     [ObservableProperty]
     private string searchText = string.Empty;
@@ -401,6 +407,8 @@ public sealed partial class LibraryViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectionLabel));
         OnPropertyChanged(nameof(SelectionCountLabel));
         OnPropertyChanged(nameof(CanOrganizeSelection));
+        _missingLinkSelection = selected.Count(item => item.IsMissing && item.IsLinked);
+        UpdateCanLocateFolder();
         _ = LoadDetailsExtraAsync(DetailsItem);
     }
 
@@ -701,6 +709,11 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     public async Task LocateAsync(MediaItem item)
     {
+        if (IsBusy)
+        {
+            return;
+        }
+
         if (!item.IsLinked)
         {
             ShowStatus("Only a linked file can be located.", InfoBarSeverity.Warning);
@@ -723,24 +736,131 @@ public sealed partial class LibraryViewModel : ObservableObject
             return;
         }
 
-        var chosen = file.Path;
-        if (!MediaFileTypes.SameKind(item.FilePath, chosen))
+        await ApplyLocatesAsync([(item.FilePath, file.Path)], 1);
+    }
+
+    public async Task<FolderLocatePreview?> PreviewFolderLocateAsync(IReadOnlyList<MediaItem> selected, string folder)
+    {
+        if (IsBusy)
         {
-            ShowStatus(MediaFileTypes.LocateMismatchWarning(item.FilePath), InfoBarSeverity.Warning);
-            return;
+            return null;
+        }
+
+        var missing = selected
+            .Where(item => item.IsMissing && item.IsLinked && !string.IsNullOrWhiteSpace(item.FilePath))
+            .ToArray();
+        if (missing.Length == 0)
+        {
+            ShowStatus("Select missing files to locate them in a folder.", InfoBarSeverity.Warning);
+            return null;
         }
 
         try
         {
-            var relocated = await Task.Run(() => _library.RelocateLink(item.FilePath, chosen));
-            LibraryPaths.Move(item.FilePath, relocated.FilePath);
-            await LoadAsync();
-            ShowStatus($"Located '{relocated.DisplayName}'. Saved words, bookmarks, and the playback position stay with it.", InfoBarSeverity.Success);
+            if (!Directory.Exists(folder) || IsInsideLibrary(folder))
+            {
+                ShowStatus(Directory.Exists(folder)
+                    ? "Choose a folder outside the library."
+                    : "That folder could not be opened.", InfoBarSeverity.Warning);
+                return null;
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ShowStatus("That folder could not be opened.", InfoBarSeverity.Warning);
+            return null;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var matches = await Task.Run(() =>
+            {
+                var taken = TakenPaths();
+                var files = LinkFolderMatch.FindMedia(folder)
+                    .Where(path => !taken.Contains(path) && !IsInsideLibrary(path))
+                    .ToArray();
+                return LinkFolderMatch.Match(missing.Select(item => item.FilePath).ToArray(), files);
+            });
+            return new FolderLocatePreview(matches, selected.Count - missing.Length);
         }
         catch (Exception ex)
         {
-            ShowStatus(ex.Message, InfoBarSeverity.Error);
+            ShowStatus(string.IsNullOrWhiteSpace(ex.Message) ? "That folder could not be read." : ex.Message, InfoBarSeverity.Error);
+            return null;
         }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    public async Task ApplyLocatesAsync(IReadOnlyList<(string CurrentPath, string NewPath)> moves, int missingTotal)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        if (moves.Count == 0)
+        {
+            ShowStatus("No files were located.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        IsBusy = true;
+        var done = 0;
+        string? name = null;
+        string? problem = null;
+        var warning = false;
+        try
+        {
+            var taken = TakenPaths();
+            foreach (var (current, next) in moves)
+            {
+                var issue = LocateTargetProblem(current, next, taken);
+                if (issue is not null)
+                {
+                    problem = issue;
+                    warning = true;
+                    break;
+                }
+
+                try
+                {
+                    var relocated = await Task.Run(() => _library.RelocateLink(current, next));
+                    LibraryPaths.Move(current, relocated.FilePath);
+                    taken.Add(Path.GetFullPath(relocated.FilePath));
+                    done++;
+                    name = relocated.DisplayName;
+                }
+                catch (Exception ex)
+                {
+                    problem = string.IsNullOrWhiteSpace(ex.Message) ? "Could not locate that file." : ex.Message;
+                    break;
+                }
+            }
+
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            problem ??= string.IsNullOrWhiteSpace(ex.Message) ? "Could not locate those files." : ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        if (done == 0)
+        {
+            ShowStatus(problem ?? "No files were located.", warning ? InfoBarSeverity.Warning : InfoBarSeverity.Error);
+            return;
+        }
+
+        var pending = Math.Max(0, missingTotal - done);
+        var status = LocatedStatus(done, name, pending);
+        ShowStatus(problem is null ? status : $"{status} {problem}", problem is null ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
     }
 
     public async Task RestoreDeletedAsync(IReadOnlyList<MediaItem> selected)
@@ -903,6 +1023,7 @@ public sealed partial class LibraryViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(EmptyHint));
         OnPropertyChanged(nameof(CanOrganizeSelection));
+        UpdateCanLocateFolder();
         if (!_suppressFolderLoad)
         {
             _ = LoadItemsAsync();
@@ -1029,15 +1150,15 @@ public sealed partial class LibraryViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var (folders, scan) = await Task.Run(() =>
+            var (folders, missing) = await Task.Run(() =>
             {
                 var connected = _library.ConnectedFolders();
-                return (connected, _library.RefreshConnectedFolders());
+                var unavailable = connected.Count(folder => !Directory.Exists(folder));
+                return (connected.Count, unavailable);
             });
+            LibraryWatch.Rescan();
             await LoadAsync();
-            ShowStatus(RefreshMessage(folders.Count, scan), scan.Added > 0
-                ? InfoBarSeverity.Success
-                : scan.MissingFolders > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);
+            ShowStatus(RefreshMessage(folders, missing), missing > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);
         }
         catch (Exception ex)
         {
@@ -1060,6 +1181,7 @@ public sealed partial class LibraryViewModel : ObservableObject
         try
         {
             var removed = await Task.Run(() => _library.DisconnectFolder(path));
+            LibraryWatch.FoldersChanged();
             LoadConnectedFolders();
             ShowStatus(
                 removed
@@ -1087,20 +1209,15 @@ public sealed partial class LibraryViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var (result, scan) = await Task.Run(() =>
-            {
-                var connected = _library.ConnectFolder(path);
-                var found = connected is ConnectFolderResult.Connected or ConnectFolderResult.AlreadyConnected
-                    ? _library.RefreshConnectedFolders()
-                    : null;
-                return (connected, found);
-            });
+            var result = await Task.Run(() => _library.ConnectFolder(path));
             if (result is ConnectFolderResult.Connected or ConnectFolderResult.AlreadyConnected)
             {
                 await LoadAsync();
+                LibraryWatch.FoldersChanged();
+                LibraryWatch.Rescan();
             }
 
-            ShowStatus(ConnectMessage(result, path, scan), ConnectSeverity(result, scan));
+            ShowStatus(ConnectMessage(result, path, null), ConnectSeverity(result, null));
         }
         catch (Exception ex)
         {
@@ -1133,7 +1250,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             ConnectFolderResult.AlreadyConnected when scan?.Added > 0 => $"Added {FileCount(scan.Added)} from {name}.",
             ConnectFolderResult.AlreadyConnected => $"{name} is already connected.",
             ConnectFolderResult.Connected when scan?.Added > 0 => $"Connected {name}. Added {FileCount(scan.Added)}.",
-            _ => $"Connected {name}. New photos and videos will show up on Refresh or the next time the app opens."
+            _ => $"Connected {name}. New photos and videos show up while the app is open."
         };
     }
 
@@ -1147,29 +1264,108 @@ public sealed partial class LibraryViewModel : ObservableObject
         return scan?.Added > 0 ? InfoBarSeverity.Success : InfoBarSeverity.Informational;
     }
 
-    private static string RefreshMessage(int folders, ConnectedFolderScan scan)
+    private static string RefreshMessage(int folders, int missing)
     {
         if (folders == 0)
         {
             return "Connect a folder to watch it for new photos and videos.";
         }
 
-        if (scan.Added > 0)
+        if (missing > 0)
         {
-            return $"Added {FileCount(scan.Added)}.";
+            return missing == 1
+                ? "One connected folder could not be opened. Finished files in the others show up on their own."
+                : $"{missing} connected folders could not be opened. Finished files in the others show up on their own.";
         }
 
-        if (scan.MissingFolders > 0)
-        {
-            return scan.MissingFolders == 1
-                ? "No new files. One connected folder could not be opened. Files already in the library stay there."
-                : $"No new files. {scan.MissingFolders} connected folders could not be opened. Files already in the library stay there.";
-        }
-
-        return "No new files.";
+        return "Checking connected folders. A finished file shows up on its own.";
     }
 
     private static string FileCount(int count) => count == 1 ? "1 file" : $"{count} files";
+
+    private void UpdateCanLocateFolder()
+        => CanLocateFolder = _missingLinkSelection > 0 && SelectedFolder?.IsRecentlyDeleted != true;
+
+    private HashSet<string> TakenPaths()
+    {
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in _library.GetItems())
+        {
+            if (string.IsNullOrWhiteSpace(item.FilePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                taken.Add(Path.GetFullPath(item.FilePath));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+            }
+        }
+
+        return taken;
+    }
+
+    private bool IsInsideLibrary(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetFullPath(_library.LibraryRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(full, root, StringComparison.OrdinalIgnoreCase)
+            || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string? LocateTargetProblem(string currentPath, string newPath, IReadOnlySet<string> taken)
+    {
+        if (string.IsNullOrWhiteSpace(newPath) || !File.Exists(newPath))
+        {
+            return "That file could not be opened.";
+        }
+
+        string full;
+        try
+        {
+            full = Path.GetFullPath(newPath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return "That file could not be opened.";
+        }
+
+        if (!MediaFileTypes.SameKind(currentPath, full))
+        {
+            return MediaFileTypes.LocateMismatchWarning(currentPath);
+        }
+
+        if (IsInsideLibrary(full))
+        {
+            return "Choose a file outside the library.";
+        }
+
+        if (taken.Contains(full))
+        {
+            return "That file is already in the library.";
+        }
+
+        return null;
+    }
+
+    private static string LocatedStatus(int count, string? name, int pending)
+    {
+        var kept = count == 1
+            ? "Saved words, bookmarks, the playback position, and playlist entries stay with it."
+            : "Saved words, bookmarks, playback positions, and playlist entries stay with them.";
+        var main = count == 1 ? $"Located '{name}'." : $"Located {count} files.";
+        var rest = pending switch
+        {
+            1 => " 1 still needs a file.",
+            > 1 => $" {pending} still need a file.",
+            _ => string.Empty
+        };
+        return $"{main} {kept}{rest}";
+    }
 
     private async Task<bool?> ChooseLinkAsync(int count)
     {
@@ -1293,6 +1489,19 @@ public sealed partial class LibraryViewModel : ObservableObject
         StatusSeverity = severity;
         HasStatus = true;
     }
+}
+
+public sealed class FolderLocatePreview
+{
+    public FolderLocatePreview(IReadOnlyList<LinkMatch> matches, int skipped)
+    {
+        Matches = matches;
+        Skipped = skipped;
+    }
+
+    public IReadOnlyList<LinkMatch> Matches { get; }
+
+    public int Skipped { get; }
 }
 
 public sealed class ConnectedPcFolder

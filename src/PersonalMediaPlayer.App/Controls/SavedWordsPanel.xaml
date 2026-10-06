@@ -16,7 +16,7 @@
         <Border
             x:Name="Panel"
             Width="320"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="12">
@@ -29,16 +29,14 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <Grid>
-                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Saved words" />
+                    <TextBlock Margin="0,0,44,0" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Saved words" />
                     <Button
-                        Width="32"
-                        Height="32"
-                        Padding="0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
                         Click="Collapse_Click"
+                        Style="{StaticResource IconButtonStyle}"
                         ToolTipService.ToolTip="Hide saved words">
-                        <FontIcon FontSize="12" Glyph="&#xE76C;" />
+                        <FontIcon FontSize="14" Glyph="&#xE76C;" />
                     </Button>
                 </Grid>
                 <TextBlock

@@ -65,7 +65,6 @@ public sealed partial class MainWindow : Window
         _handoffCheck = null;
         App.CancelHandoffListen();
         _hotkeys?.Dispose();
-        PlayQueue.Clear();
     }
 
     internal void ReceiveHandoff(string? argument)

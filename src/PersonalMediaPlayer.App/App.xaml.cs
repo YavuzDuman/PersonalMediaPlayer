@@ -60,6 +60,8 @@ public partial class App : Application
             "PersonalMediaPlayer",
             "Library");
         MediaLibrary = new MediaLibrary(new FileLibraryStore(libraryRoot));
+        PlayQueue.Load();
+        WatchingSession.Load();
 
         var window = new MainWindow();
         _window = window;

@@ -283,6 +283,9 @@ public sealed partial class PlaylistPanel : UserControl
     private PlaylistRun? CurrentRun()
         => _playlistId is null ? null : PlaylistRuns.For(_playlistId);
 
+    private static Style? ButtonStyle(string key)
+        => Application.Current.Resources.TryGetValue(key, out var style) ? style as Style : null;
+
     private void ShowMode()
     {
         var run = CurrentRun();
@@ -295,8 +298,8 @@ public sealed partial class PlaylistPanel : UserControl
             ShuffleLabel.Text = "Shuffle";
             RepeatLabel.Text = "Repeat off";
             RepeatIcon.Glyph = "\uE1CD";
-            ShuffleButton.Style = null;
-            RepeatButton.Style = null;
+            ShuffleButton.Style = ButtonStyle("ActionButtonStyle");
+            RepeatButton.Style = ButtonStyle("ActionButtonStyle");
             ModeLine.Text = "Saved order. Repeat is off.";
             PreviousButton.IsEnabled = false;
             NextButton.IsEnabled = PlayQueue.Count > 0;
@@ -308,9 +311,10 @@ public sealed partial class PlaylistPanel : UserControl
         RepeatLabel.Text = run.RepeatLabel;
         RepeatIcon.Glyph = run.RepeatGlyph;
         ModeLine.Text = run.Summary;
-        Style? accent = Application.Current.Resources.TryGetValue("AccentButtonStyle", out var style) ? style as Style : null;
-        ShuffleButton.Style = run.Shuffle ? accent : null;
-        RepeatButton.Style = run.Repeat == PlaylistRepeat.Off ? null : accent;
+        var accent = ButtonStyle("PrimaryButtonStyle");
+        var plain = ButtonStyle("ActionButtonStyle");
+        ShuffleButton.Style = run.Shuffle ? accent : plain;
+        RepeatButton.Style = run.Repeat == PlaylistRepeat.Off ? plain : accent;
         ToolTipService.SetToolTip(
             ShuffleButton,
             run.Shuffle
@@ -544,7 +548,7 @@ public sealed partial class PlaylistPanel : UserControl
             Background = current ? HoverInk.Background : _clear
         };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(thumb, 1);
@@ -695,8 +699,8 @@ public sealed partial class PlaylistPanel : UserControl
         image.ImageFailed += (_, _) => image.Source = null;
         var frame = new Grid
         {
-            Width = 72,
-            Height = 40,
+            Width = 96,
+            Height = 54,
             IsHitTestVisible = false,
             Children =
             {
@@ -727,9 +731,9 @@ public sealed partial class PlaylistPanel : UserControl
 
         return new Border
         {
-            Width = 72,
-            Height = 40,
-            CornerRadius = new CornerRadius(4),
+            Width = 96,
+            Height = 54,
+            CornerRadius = new CornerRadius(6),
             Background = HoverInk.Background,
             IsHitTestVisible = false,
             Child = frame
@@ -747,7 +751,7 @@ public sealed partial class PlaylistPanel : UserControl
         {
             target.Source = new BitmapImage
             {
-                DecodePixelWidth = 160,
+                DecodePixelWidth = 192,
                 UriSource = imageUri
             };
         }
@@ -762,7 +766,7 @@ public sealed partial class PlaylistPanel : UserControl
         try
         {
             var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 160);
+            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 192);
             if (thumb is null || thumb.Size == 0)
             {
                 return;

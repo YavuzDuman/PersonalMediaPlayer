@@ -54,8 +54,8 @@
                 TextWrapping="NoWrap" />
             <TextBlock
                 x:Name="CountText"
+                FontSize="14"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
                 TextTrimming="CharacterEllipsis"
                 TextWrapping="NoWrap" />
         </StackPanel>

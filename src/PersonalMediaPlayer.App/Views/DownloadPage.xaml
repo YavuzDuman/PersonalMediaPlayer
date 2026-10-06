@@ -34,9 +34,13 @@
 
         <Grid x:Name="WorkGrid" Grid.Row="2" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="360" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="EntryColumn" Width="360" />
+                <ColumnDefinition x:Name="PreviewColumn" Width="*" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="EntryRow" Height="*" />
+                <RowDefinition x:Name="PreviewRow" Height="0" />
+            </Grid.RowDefinitions>
             <ScrollViewer x:Name="EntryPanel" VerticalScrollBarVisibility="Auto">
                 <StackPanel Spacing="16">
                     <TextBox
@@ -50,7 +54,7 @@
                             x:Name="LookupButton"
                             Click="Lookup_Click"
                             Content="Look up"
-                            Style="{StaticResource AccentButtonStyle}" />
+                            Style="{StaticResource PrimaryButtonStyle}" />
                         <ProgressRing x:Name="LookupRing" IsActive="False" />
                     </StackPanel>
 
@@ -75,72 +79,117 @@
                             Click="Download_Click"
                             Content="Add to queue"
                             IsEnabled="False"
-                            Style="{StaticResource AccentButtonStyle}" />
+                            Style="{StaticResource PrimaryButtonStyle}" />
                         <TextBlock x:Name="DownloadStatus" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <StackPanel Spacing="8">
-                        <Grid>
-                            <TextBlock VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Queue" />
-                            <Button
-                                x:Name="SaveSelectedButton"
-                                HorizontalAlignment="Right"
-                                Click="SaveSelected_Click"
-                                Content="Save selected"
-                                IsEnabled="False"
-                                Style="{StaticResource AccentButtonStyle}"
-                                Visibility="Collapsed" />
-                        </Grid>
-                        <TextBlock
-                            x:Name="EmptyQueue"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Nothing is queued."
-                            TextWrapping="Wrap" />
-                        <ListView x:Name="QueueList" SelectionMode="None">
-                            <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="download:DownloadQueueItem">
-                                    <Grid Padding="0,8" ColumnSpacing="8" RowSpacing="4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-                                        <CheckBox
-                                            Grid.RowSpan="3"
-                                            VerticalAlignment="Center"
-                                            IsChecked="{x:Bind Selected, Mode=TwoWay}"
-                                            ToolTipService.ToolTip="Include this finished download"
-                                            Visibility="{x:Bind SelectVisibility, Mode=OneWay}" />
-                                        <TextBlock Grid.Column="1" Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Title}" TextWrapping="Wrap" />
-                                        <TextBlock
-                                            Grid.Row="1"
-                                            Grid.Column="1"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{x:Bind Detail, Mode=OneWay}"
-                                            TextWrapping="Wrap" />
-                                        <ProgressBar
-                                            Grid.Row="2"
-                                            Grid.Column="1"
-                                            Maximum="100"
-                                            Value="{x:Bind Progress, Mode=OneWay}"
-                                            Visibility="{x:Bind ProgressVisibility, Mode=OneWay}" />
-                                        <StackPanel Grid.Column="2" Grid.RowSpan="3" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                            <Button Click="PreviewItem_Click" Content="Preview" Visibility="{x:Bind PreviewVisibility, Mode=OneWay}" />
-                                            <Button Click="RetryItem_Click" Content="Retry" Visibility="{x:Bind RetryVisibility, Mode=OneWay}" />
-                                            <Button Click="PauseItem_Click" Content="Pause" Visibility="{x:Bind PauseVisibility, Mode=OneWay}" />
-                                            <Button Click="ResumeItem_Click" Content="Resume" Visibility="{x:Bind ResumeVisibility, Mode=OneWay}" />
-                                            <Button Click="CancelItem_Click" Content="Cancel" Visibility="{x:Bind CancelVisibility, Mode=OneWay}" />
-                                        </StackPanel>
-                                    </Grid>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                    </StackPanel>
+                    <Border
+                        Padding="12"
+                        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                        <StackPanel Spacing="8">
+                            <controls:WrapBar Spacing="8">
+                                <TextBlock VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" Text="Queue" />
+                                <Button
+                                    x:Name="SaveSelectedButton"
+                                    Click="SaveSelected_Click"
+                                    Content="Save selected"
+                                    IsEnabled="False"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Visibility="Collapsed" />
+                            </controls:WrapBar>
+                            <TextBlock
+                                x:Name="EmptyQueue"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Nothing is queued."
+                                TextWrapping="Wrap" />
+                            <ListView x:Name="QueueList" SelectionMode="None">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="download:DownloadQueueItem">
+                                        <Grid Padding="0,8" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" MinWidth="0" />
+                                            </Grid.ColumnDefinitions>
+                                            <CheckBox
+                                                VerticalAlignment="Center"
+                                                IsChecked="{x:Bind Selected, Mode=TwoWay}"
+                                                ToolTipService.ToolTip="Include this finished download"
+                                                Visibility="{x:Bind SelectVisibility, Mode=OneWay}" />
+                                            <Border
+                                                Grid.Column="1"
+                                                Width="120"
+                                                Height="68"
+                                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                CornerRadius="8">
+                                                <Grid>
+                                                    <FontIcon
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        FontSize="16"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        Glyph="&#xE714;"
+                                                        Visibility="{x:Bind PlaceholderVisibility, Mode=OneWay}" />
+                                                    <Image
+                                                        Stretch="UniformToFill"
+                                                        Source="{x:Bind ThumbnailUrl}"
+                                                        Visibility="{x:Bind ThumbnailVisibility, Mode=OneWay}" />
+                                                </Grid>
+                                            </Border>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="4">
+                                                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Title}" TextWrapping="Wrap" MaxLines="2" />
+                                                <TextBlock
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind Detail, Mode=OneWay}"
+                                                    TextWrapping="Wrap" />
+                                                <ProgressBar
+                                                    Maximum="100"
+                                                    Value="{x:Bind Progress, Mode=OneWay}"
+                                                    Visibility="{x:Bind ProgressVisibility, Mode=OneWay}" />
+                                                <controls:WrapBar Spacing="8">
+                                                    <Button
+                                                        Click="PreviewItem_Click"
+                                                        Content="Preview"
+                                                        Style="{StaticResource ActionButtonStyle}"
+                                                        Visibility="{x:Bind PreviewVisibility, Mode=OneWay}" />
+                                                    <Button
+                                                        Click="RetryItem_Click"
+                                                        Content="Retry"
+                                                        Style="{StaticResource ActionButtonStyle}"
+                                                        Visibility="{x:Bind RetryVisibility, Mode=OneWay}" />
+                                                    <Button
+                                                        Click="PauseItem_Click"
+                                                        Content="Pause"
+                                                        Style="{StaticResource ActionButtonStyle}"
+                                                        Visibility="{x:Bind PauseVisibility, Mode=OneWay}" />
+                                                    <Button
+                                                        Click="ResumeItem_Click"
+                                                        Content="Resume"
+                                                        Style="{StaticResource ActionButtonStyle}"
+                                                        Visibility="{x:Bind ResumeVisibility, Mode=OneWay}" />
+                                                    <Button
+                                                        Click="CancelItem_Click"
+                                                        Content="Cancel"
+                                                        Style="{StaticResource DestructiveButtonStyle}"
+                                                        Visibility="{x:Bind CancelVisibility, Mode=OneWay}" />
+                                                </controls:WrapBar>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
 
                 </StackPanel>
             </ScrollViewer>
@@ -174,8 +223,8 @@
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="Wrap" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                            <Button Click="Save_Click" Content="Save" Style="{StaticResource AccentButtonStyle}" />
-                            <Button Click="Discard_Click" Content="Discard" />
+                            <Button Click="Save_Click" Content="Save" Style="{StaticResource PrimaryButtonStyle}" />
+                            <Button Click="Discard_Click" Content="Discard" Style="{StaticResource DestructiveButtonStyle}" />
                         </StackPanel>
                     </Grid>
                     <Grid Grid.Row="1">
@@ -211,7 +260,7 @@
             x:Name="HistoryPanel"
             Grid.Row="3"
             Padding="16"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="12">
@@ -222,7 +271,8 @@
                         x:Name="HistoryToggle"
                         HorizontalAlignment="Right"
                         Click="HistoryToggle_Click"
-                        Content="Show" />
+                        Content="Show"
+                        Style="{StaticResource ActionButtonStyle}" />
                 </Grid>
                 <StackPanel x:Name="HistoryBody" Spacing="12" Visibility="Collapsed">
                 <TextBlock
@@ -310,11 +360,11 @@
                                         Text="{x:Bind Folder}"
                                         TextTrimming="CharacterEllipsis"
                                         ToolTipService.ToolTip="{x:Bind Location}" />
-                                    <StackPanel Grid.Row="5" Margin="0,6,0,0" Orientation="Horizontal" Spacing="8">
-                                        <Button Click="OpenHistoryFile_Click" Content="Open" />
-                                        <Button Click="OpenHistoryFolder_Click" Content="Folder" />
-                                        <Button Click="RemoveHistory_Click" Content="Remove" />
-                                    </StackPanel>
+                                    <controls:WrapBar Grid.Row="5" Margin="0,6,0,0" Spacing="8">
+                                        <Button Click="OpenHistoryFile_Click" Content="Open" Style="{StaticResource ActionButtonStyle}" />
+                                        <Button Click="OpenHistoryFolder_Click" Content="Folder" Style="{StaticResource ActionButtonStyle}" />
+                                        <Button Click="RemoveHistory_Click" Content="Remove" Style="{StaticResource ActionButtonStyle}" />
+                                    </controls:WrapBar>
                                 </Grid>
                             </Border>
                         </DataTemplate>

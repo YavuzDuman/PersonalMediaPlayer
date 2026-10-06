@@ -31,35 +31,30 @@
                     x:Name="PlayShade"
                     Width="44"
                     Height="44"
-                    Margin="0,0,6,6"
+                    Margin="0,0,4,4"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
-                    Background="#66000000"
+                    Background="#99000000"
                     CornerRadius="22"
                     IsHitTestVisible="False"
                     Visibility="Collapsed" />
                 <Button
                     x:Name="PlayButton"
-                    Width="36"
-                    Height="36"
-                    Margin="0,0,10,10"
-                    Padding="0"
+                    Margin="0,0,8,8"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
-                    Background="{ThemeResource AccentFillColorDefaultBrush}"
-                    BorderThickness="0"
                     Click="Play_Click"
-                    CornerRadius="18"
+                    Style="{StaticResource IconAccentButtonStyle}"
                     ToolTipService.ToolTip="Play"
                     Visibility="Collapsed">
                     <FontIcon
                         FontSize="14"
-                        Foreground="White"
+                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
                         Glyph="&#xE768;"
                         IsHitTestVisible="False" />
                 </Button>
             </Grid>
-            <StackPanel Grid.Row="1" Padding="12,8,12,12" Spacing="2">
+            <StackPanel Grid.Row="1" Padding="12,10,12,12" Spacing="2">
                 <TextBlock
                     x:Name="Title"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
@@ -67,8 +62,8 @@
                     TextWrapping="NoWrap" />
                 <TextBlock
                     x:Name="Count"
+                    FontSize="14"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
                     TextTrimming="CharacterEllipsis"
                     TextWrapping="NoWrap" />
             </StackPanel>

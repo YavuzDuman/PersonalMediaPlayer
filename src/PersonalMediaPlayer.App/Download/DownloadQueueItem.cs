@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
+using PersonalMediaPlayer.App.Playback;
 
 namespace PersonalMediaPlayer.App.Download;
 
@@ -38,6 +39,12 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     public bool SubtitleTranslated { get; }
 
     public string? SubtitleLabel { get; }
+
+    public string? ThumbnailUrl => StreamThumbnail.ForPage(Url);
+
+    public Visibility ThumbnailVisibility => ThumbnailUrl is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public Visibility PlaceholderVisibility => ThumbnailUrl is null ? Visibility.Visible : Visibility.Collapsed;
 
     public string Status
     {

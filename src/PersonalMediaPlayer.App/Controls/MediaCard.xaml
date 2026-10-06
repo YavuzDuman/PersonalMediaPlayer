@@ -24,7 +24,7 @@
             CornerRadius="12">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="148" />
+                    <RowDefinition Height="124" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
@@ -34,14 +34,22 @@
                     <Grid>
                         <Image x:Name="ThumbImage" Stretch="UniformToFill" />
                         <Border
-                            Background="#66000000"
+                            Width="36"
+                            Height="36"
+                            Margin="8"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Bottom"
+                            Background="#99000000"
+                            CornerRadius="18"
+                            IsHitTestVisible="False"
                             Visibility="{x:Bind Item.IsVideo, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}">
                             <FontIcon
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
-                                FontSize="32"
+                                FontSize="14"
                                 Foreground="White"
-                                Glyph="&#xE768;" />
+                                Glyph="&#xE768;"
+                                IsHitTestVisible="False" />
                         </Border>
                         <Border
                             x:Name="DurationBadge"
@@ -50,7 +58,7 @@
                             HorizontalAlignment="Right"
                             VerticalAlignment="Bottom"
                             Background="#CC000000"
-                            CornerRadius="4"
+                            CornerRadius="6"
                             Visibility="Collapsed">
                             <TextBlock
                                 x:Name="DurationText"
@@ -59,21 +67,22 @@
                         </Border>
                         <Button
                             x:Name="FavoriteButton"
-                            Width="32"
-                            Height="32"
+                            Width="36"
+                            Height="36"
                             Margin="8"
                             Padding="0"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top"
                             Background="#CC000000"
                             Click="Favorite_Click"
-                            CornerRadius="16"
+                            CornerRadius="18"
                             Visibility="Collapsed">
                             <FontIcon
                                 x:Name="FavoriteIcon"
                                 FontSize="14"
                                 Foreground="White"
-                                Glyph="&#xEB51;" />
+                                Glyph="&#xEB51;"
+                                IsHitTestVisible="False" />
                         </Button>
                         <Border
                             x:Name="SelectionMark"
@@ -102,9 +111,11 @@
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
                     <TextBlock
+                        FontSize="14"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind ImportedOn, Mode=OneWay}" />
+                        Text="{x:Bind ImportedOn, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
                 </StackPanel>
             </Grid>
         </Border>
