@@ -461,6 +461,141 @@ public class PlaybackSelectionTests
     }
 
     [Fact]
+    public void AClipWithoutCodecFieldsStillPlaysThePictureAndSound()
+    {
+        var choice = YoutubeDownloader.ReadPlayback("""
+            {
+              "title": "Clip",
+              "is_live": false,
+              "formats": [
+                {
+                  "format_id": "1080",
+                  "url": "https://cdn.example/landscape/avc/1080/index.mp4",
+                  "protocol": "https",
+                  "ext": "mp4",
+                  "video_ext": "mp4",
+                  "audio_ext": "none",
+                  "height": 1080,
+                  "tbr": 3000
+                },
+                {
+                  "format_id": "360",
+                  "url": "https://cdn.example/landscape/avc/360/index.mp4",
+                  "protocol": "https",
+                  "ext": "mp4",
+                  "video_ext": "mp4",
+                  "audio_ext": "none",
+                  "height": 360,
+                  "tbr": 800
+                }
+              ]
+            }
+            """);
+
+        Assert.Equal("https://cdn.example/landscape/avc/1080/index.mp4", choice.Media.AbsoluteUri);
+        Assert.Null(choice.Audio);
+        Assert.False(choice.Live);
+    }
+
+    [Fact]
+    public void AHorizontalClipKeepsTheHorizontalPicture()
+    {
+        var choice = YoutubeDownloader.ReadPlayback("""
+            {
+              "title": "Horizontal",
+              "aspect_ratio": 1.7777777777777777,
+              "height": 1080,
+              "formats": [
+                {
+                  "format_id": "portrait-1080",
+                  "url": "https://cdn.example/portrait/1080/index.mp4",
+                  "protocol": "https",
+                  "ext": "mp4",
+                  "video_ext": "mp4",
+                  "height": 1920,
+                  "aspect_ratio": 0.5625,
+                  "tbr": 5000
+                },
+                {
+                  "format_id": "1080",
+                  "url": "https://cdn.example/landscape/1080/index.mp4",
+                  "protocol": "https",
+                  "ext": "mp4",
+                  "video_ext": "mp4",
+                  "height": 1080,
+                  "aspect_ratio": 1.7777777777777777,
+                  "tbr": 3000
+                }
+              ]
+            }
+            """);
+
+        Assert.Equal("https://cdn.example/landscape/1080/index.mp4", choice.Media.AbsoluteUri);
+    }
+
+    [Fact]
+    public void AVerticalClipKeepsTheVerticalPicture()
+    {
+        var choice = YoutubeDownloader.ReadPlayback("""
+            {
+              "title": "Vertical",
+              "aspect_ratio": 0.5625,
+              "formats": [
+                {
+                  "format_id": "portrait-1080",
+                  "url": "https://cdn.example/portrait/1080/index.mp4",
+                  "protocol": "https",
+                  "ext": "mp4",
+                  "video_ext": "mp4",
+                  "height": 1920,
+                  "aspect_ratio": 0.5625,
+                  "tbr": 4000
+                },
+                {
+                  "format_id": "720",
+                  "url": "https://cdn.example/landscape/720/index.mp4",
+                  "protocol": "https",
+                  "ext": "mp4",
+                  "video_ext": "mp4",
+                  "height": 720,
+                  "aspect_ratio": 1.777,
+                  "tbr": 2000
+                }
+              ]
+            }
+            """);
+
+        Assert.Equal("https://cdn.example/portrait/1080/index.mp4", choice.Media.AbsoluteUri);
+    }
+
+    [Fact]
+    public void ALiveLookupDoesNotBecomeAShortVideo()
+    {
+        var choice = YoutubeDownloader.ReadPlayback("""
+            {
+              "title": "Channel",
+              "live_status": "is_live",
+              "is_live": true,
+              "formats": [
+                {
+                  "format_id": "hls",
+                  "manifest_url": "https://cdn.example/live.m3u8",
+                  "url": "https://cdn.example/live.m3u8",
+                  "protocol": "m3u8_native",
+                  "ext": "mp4",
+                  "vcodec": "avc1.4d401f",
+                  "acodec": "mp4a.40.2",
+                  "height": 720
+                }
+              ]
+            }
+            """);
+
+        Assert.True(choice.Live);
+        Assert.Equal("https://cdn.example/live.m3u8", choice.Media.AbsoluteUri);
+    }
+
+    [Fact]
     public void PlaybackLookupLeavesTranslationsForLater()
     {
         var playback = YoutubeDownloader.PlaybackLookupArgs(null, "https://example.com/watch?v=1");

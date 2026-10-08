@@ -83,6 +83,11 @@
                             Header="System audio"
                             OffContent="Off"
                             OnContent="Speakers" />
+                        <ToggleSwitch
+                            x:Name="MicrophoneSwitch"
+                            Header="Microphone"
+                            OffContent="Off"
+                            OnContent="In recording" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Spacing="2">
                         <TextBlock

@@ -17,23 +17,55 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock
-                    x:Name="PositionText"
-                    x:FieldModifier="public"
-                    MinWidth="48"
-                    VerticalAlignment="Center"
-                    Foreground="White"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="00:00" />
+                <StackPanel>
+                    <TextBlock
+                        x:Name="PositionText"
+                        x:FieldModifier="public"
+                        Height="28"
+                        MinWidth="48"
+                        VerticalAlignment="Center"
+                        Foreground="White"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="00:00" />
+                    <TextBlock
+                        x:Name="CaptionLaneLabel"
+                        Height="18"
+                        Margin="0,4,0,0"
+                        VerticalAlignment="Center"
+                        Foreground="#CCFFFFFF"
+                        FontSize="12"
+                        Text="Captions"
+                        ToolTipService.ToolTip="Click a line to move the playhead there"
+                        Visibility="Collapsed" />
+                    <TextBlock
+                        x:Name="AudioLaneLabel"
+                        Height="22"
+                        Margin="0,6,0,0"
+                        VerticalAlignment="Center"
+                        Foreground="#CCFFFFFF"
+                        FontSize="12"
+                        Text="Audio"
+                        Visibility="Collapsed" />
+                </StackPanel>
                 <ScrollViewer
                     x:Name="TimelineScroll"
                     Grid.Column="1"
                     HorizontalScrollBarVisibility="Auto"
                     HorizontalScrollMode="Enabled"
                     SizeChanged="TimelineScroll_SizeChanged"
+                    ViewChanged="TimelineScroll_ViewChanged"
                     VerticalScrollBarVisibility="Disabled"
                     VerticalScrollMode="Disabled">
+                    <ScrollViewer.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Left" Invoked="TimelinePan_Invoked" />
+                        <KeyboardAccelerator Key="Right" Invoked="TimelinePan_Invoked" />
+                    </ScrollViewer.KeyboardAccelerators>
                     <Grid x:Name="TimelineHost" MinHeight="28" Background="Transparent">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="28" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Canvas x:Name="CutsCanvas" IsHitTestVisible="False" />
                         <Slider
                             x:Name="SeekSlider"
@@ -81,6 +113,7 @@
                             IsHitTestVisible="False"
                             Visibility="Collapsed"
                             PointerCanceled="Trim_Released"
+                            PointerCaptureLost="Trim_Released"
                             PointerMoved="Trim_Moved"
                             PointerPressed="Trim_Pressed"
                             PointerReleased="Trim_Released"
@@ -107,6 +140,38 @@
                                 CornerRadius="3"
                                 IsHitTestVisible="False" />
                         </Canvas>
+                        <Border
+                            x:Name="CaptionLane"
+                            Grid.Row="1"
+                            Height="18"
+                            Margin="0,4,0,0"
+                            Background="#FF242424"
+                            BorderBrush="#33FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Visibility="Collapsed"
+                            PointerExited="Caption_Exited"
+                            PointerMoved="Caption_Moved"
+                            PointerPressed="Caption_Pressed">
+                            <Canvas x:Name="CaptionCanvas" IsHitTestVisible="False" />
+                        </Border>
+                        <Border
+                            x:Name="AudioLane"
+                            Grid.Row="2"
+                            Height="22"
+                            Margin="0,6,0,0"
+                            Background="#FF242424"
+                            BorderBrush="#33FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Visibility="Collapsed"
+                            PointerCanceled="Audio_Released"
+                            PointerCaptureLost="Audio_Released"
+                            PointerMoved="Audio_Moved"
+                            PointerPressed="Audio_Pressed"
+                            PointerReleased="Audio_Released">
+                            <Canvas x:Name="AudioCanvas" IsHitTestVisible="False" />
+                        </Border>
                     </Grid>
                 </ScrollViewer>
                 <TextBlock
@@ -127,6 +192,13 @@
                 Spacing="6"
                 Visibility="Collapsed">
                 <Button
+                    x:Name="ScrollEarlierButton"
+                    MinWidth="32"
+                    Padding="8,2"
+                    Click="ScrollEarlier_Click"
+                    Content="←"
+                    ToolTipService.ToolTip="Scroll earlier" />
+                <Button
                     x:Name="ZoomOutButton"
                     MinWidth="32"
                     Padding="8,2"
@@ -135,7 +207,7 @@
                     ToolTipService.ToolTip="Zoom out" />
                 <TextBlock
                     x:Name="ZoomLabel"
-                    MinWidth="36"
+                    MinWidth="48"
                     VerticalAlignment="Center"
                     Foreground="White"
                     Text="1×"
@@ -147,6 +219,73 @@
                     Click="ZoomIn_Click"
                     Content="+"
                     ToolTipService.ToolTip="Zoom in" />
+                <Button
+                    x:Name="ScrollLaterButton"
+                    MinWidth="32"
+                    Padding="8,2"
+                    Click="ScrollLater_Click"
+                    Content="→"
+                    ToolTipService.ToolTip="Scroll later" />
+            </StackPanel>
+            <TextBlock
+                x:Name="AudioHint"
+                Foreground="#CCFFFFFF"
+                FontSize="12"
+                Text="Drag the audio track. Part volume is how loud that stretch is. 0% silences it, and 100% puts the original sound back. The picture stays. Click a marked part to put the sound back. Click empty audio to leave the last part as it is. Parts lists each stretch."
+                TextWrapping="Wrap"
+                Visibility="Collapsed" />
+            <StackPanel
+                x:Name="PartVolumeBar"
+                Spacing="6"
+                Visibility="Collapsed">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="#CCFFFFFF"
+                        Text="Part volume" />
+                    <Slider
+                        x:Name="PartVolumeSlider"
+                        Grid.Column="1"
+                        Maximum="200"
+                        Minimum="0"
+                        StepFrequency="1"
+                        Value="0"
+                        ValueChanged="PartVolumeSlider_ValueChanged" />
+                    <TextBlock
+                        x:Name="PartVolumeReadout"
+                        Grid.Column="2"
+                        MinWidth="44"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="White"
+                        Text="0%" />
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button
+                        MinWidth="72"
+                        Padding="8,2"
+                        Click="PartVolumePreset_Click"
+                        Content="Silence"
+                        Tag="0" />
+                    <Button
+                        MinWidth="56"
+                        Padding="8,2"
+                        Click="PartVolumePreset_Click"
+                        Content="30%"
+                        Tag="30" />
+                    <Button
+                        MinWidth="56"
+                        Padding="8,2"
+                        Click="PartVolumePreset_Click"
+                        Content="150%"
+                        Tag="150" />
+                </StackPanel>
             </StackPanel>
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -366,6 +505,15 @@
                                 <TextBlock x:Name="SubtitleText" VerticalAlignment="Center" Text="CC" />
                             </StackPanel>
                         </Button>
+                        <Button
+                            x:Name="ExportCaptionsButton"
+                            Height="36"
+                            Padding="12,0"
+                            HorizontalAlignment="Left"
+                            Click="ExportCaptions_Click"
+                            Content="Export"
+                            ToolTipService.ToolTip="Save these captions as an SRT file"
+                            Visibility="Collapsed" />
                     </StackPanel>
                     <StackPanel x:Name="SpeedRow" Spacing="8">
                         <TextBlock

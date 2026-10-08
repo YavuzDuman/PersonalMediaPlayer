@@ -3,8 +3,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PersonalMediaPlayer.Core.Models;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace PersonalMediaPlayer.App.Controls;
 
@@ -103,24 +101,6 @@ public sealed partial class FolderRow : UserControl
         Placeholder.Visibility = Visibility.Collapsed;
     }
 
-    private static async Task<BitmapImage?> TryLoadVideoThumbnailAsync(string path)
-    {
-        try
-        {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 160);
-            if (thumb is null || thumb.Size == 0)
-            {
-                return null;
-            }
-
-            var image = new BitmapImage { CreateOptions = BitmapCreateOptions.IgnoreImageCache };
-            await image.SetSourceAsync(thumb);
-            return image;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private static Task<BitmapImage?> TryLoadVideoThumbnailAsync(string path)
+        => VideoThumbnail.LoadAsync(path, 160);
 }

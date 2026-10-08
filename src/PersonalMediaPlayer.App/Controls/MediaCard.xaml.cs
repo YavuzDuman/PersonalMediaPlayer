@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
+using PersonalMediaPlayer.App.Download;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core.Models;
 using Windows.Storage;
@@ -20,6 +21,41 @@ public sealed partial class MediaCard : UserControl
     public MediaCard()
     {
         InitializeComponent();
+        Loaded += (_, _) =>
+        {
+            DownloadPoster.Saved -= PosterSaved;
+            DownloadPoster.Saved += PosterSaved;
+        };
+        Unloaded += (_, _) => DownloadPoster.Saved -= PosterSaved;
+    }
+
+    private void PosterSaved(string path)
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => PosterSaved(path));
+            return;
+        }
+
+        if (Item is null || string.IsNullOrWhiteSpace(Item.FilePath))
+        {
+            return;
+        }
+
+        string full;
+        try
+        {
+            full = Path.GetFullPath(Item.FilePath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return;
+        }
+
+        if (string.Equals(full, path, StringComparison.OrdinalIgnoreCase))
+        {
+            _ = RefreshThumbnailAsync();
+        }
     }
 
     public MediaItem? Item
@@ -112,7 +148,7 @@ public sealed partial class MediaCard : UserControl
         }
 
         var path = Item.FilePath;
-        var thumbnailTask = TryLoadVideoThumbnailAsync(path);
+        var thumbnailTask = VideoThumbnail.LoadAsync(path, 440);
         var durationTask = TryGetVideoDurationAsync(path);
         ThumbImage.Source = await thumbnailTask;
         if (!string.Equals(Item?.FilePath, path, StringComparison.OrdinalIgnoreCase))
@@ -146,24 +182,4 @@ public sealed partial class MediaCard : UserControl
         }
     }
 
-    private static async Task<BitmapImage?> TryLoadVideoThumbnailAsync(string path)
-    {
-        try
-        {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 440);
-            if (thumb is null || thumb.Size == 0)
-            {
-                return null;
-            }
-
-            var image = new BitmapImage { CreateOptions = BitmapCreateOptions.IgnoreImageCache };
-            await image.SetSourceAsync(thumb);
-            return image;
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

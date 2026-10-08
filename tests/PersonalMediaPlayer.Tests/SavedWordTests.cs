@@ -84,4 +84,55 @@ public class SavedWordTests : IDisposable
             Directory.Delete(folder, recursive: true);
         }
     }
+
+    [Fact]
+    public void ASubtitleLineKeepsItsMomentAndLanguages()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "pmp-saved-line-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "clip.mp4");
+        File.WriteAllText(path, "video");
+        try
+        {
+            SavedWords.Add("Hello there.", string.Empty, "Hello there.", path, 8_000, audioLanguage: "en", captionLanguage: "tr");
+            var word = Assert.Single(SavedWords.All());
+            Assert.Equal(string.Empty, word.Turkish);
+            Assert.Equal("Hello there.", word.Sentence);
+            Assert.Equal(8_000, word.TimeMs);
+            Assert.Equal("en", word.AudioLanguage);
+            Assert.Equal("tr", word.CaptionLanguage);
+            Assert.True(word.SentenceIsWord());
+            Assert.True(SavedWords.Contains("Hello there.", "Hello there.", path, 8_000));
+            SavedWords.Add("Hello there.", string.Empty, "Hello there.", path, 8_000, audioLanguage: "es", captionLanguage: "tr");
+            var updated = Assert.Single(SavedWords.All());
+            Assert.Equal("es", updated.AudioLanguage);
+            Assert.Equal("tr", updated.CaptionLanguage);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RemovingALineTellsListeners()
+    {
+        var calls = 0;
+        void OnChanged() => calls++;
+        SavedWords.Changed += OnChanged;
+        try
+        {
+            SavedWords.Add("Hello there.", string.Empty, "Hello there.", null, 8_000, "https://www.youtube.com/watch?v=line");
+            Assert.Equal(1, calls);
+            var word = Assert.Single(SavedWords.All());
+            SavedWords.Remove(word);
+            Assert.Equal(2, calls);
+            SavedWords.Remove(word);
+            Assert.Equal(2, calls);
+        }
+        finally
+        {
+            SavedWords.Changed -= OnChanged;
+        }
+    }
 }

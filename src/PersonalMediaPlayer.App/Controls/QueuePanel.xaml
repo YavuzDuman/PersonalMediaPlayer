@@ -50,6 +50,12 @@
                             Content="Clear"
                             ToolTipService.ToolTip="Remove every waiting video. The current video keeps playing." />
                     </StackPanel>
+                    <Button
+                        x:Name="SavePlaylistButton"
+                        HorizontalAlignment="Left"
+                        Click="SavePlaylist_Click"
+                        Content="Save as playlist"
+                        ToolTipService.ToolTip="Copy these waiting videos into a new playlist. The queue stays." />
                     <InfoBar
                         x:Name="Status"
                         IsClosable="True"

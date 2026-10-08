@@ -30,6 +30,7 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
     private string? _lookedUpUrl;
     private string? _previewPath;
     private bool _audioOnly;
+    private bool _exportingCaptions;
     private bool _left;
     private bool _savingBatch;
     private static bool _historyOpen;
@@ -83,6 +84,7 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         Playback.SpeedCombo.SelectionChanged += (_, _) => _player?.SetRate(SelectedRate());
         Playback.FullScreenButton.Click += (_, _) => _ = ToggleFullScreenAsync();
         PlaybackFocus.Register(this);
+        Playback.CaptionExportRequested += (_, _) => _ = ExportCaptionsAsync();
     }
 
     private void AttachHistoryDrag()
@@ -735,6 +737,7 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
         var generation = ++_captionGeneration;
         var token = _captionLoad.Token;
         Captions.Prepare(path);
+        Playback.ShowCaptionExport(false);
         if (!_pausedForOther)
         {
             TakePlayback();
@@ -789,9 +792,53 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
             Playback.OfferCaptions();
         }
 
+        Playback.ShowCaptionExport(Captions.HasCues);
+
         if (_player is not null)
         {
             Captions.SetTime(_player.Time);
+        }
+    }
+
+    private async Task ExportCaptionsAsync()
+    {
+        if (_exportingCaptions)
+        {
+            return;
+        }
+
+        var text = SubtitleEdit.ToSrt(Captions.CopyCues());
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            StatusBar.Severity = InfoBarSeverity.Informational;
+            StatusBar.Message = "These captions have no lines to save.";
+            StatusBar.IsOpen = true;
+            return;
+        }
+
+        _exportingCaptions = true;
+        try
+        {
+            var file = await FilePickerHelper.PickSaveSrtAsync(App.MainAppWindow, SubtitleEdit.SuggestedName(PreviewTitle.Text));
+            if (file is null)
+            {
+                return;
+            }
+
+            await File.WriteAllTextAsync(file.Path, text, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            StatusBar.Severity = InfoBarSeverity.Success;
+            StatusBar.Message = "Saved the captions to " + file.Name;
+            StatusBar.IsOpen = true;
+        }
+        catch (Exception ex)
+        {
+            StatusBar.Severity = InfoBarSeverity.Error;
+            StatusBar.Message = ex.Message;
+            StatusBar.IsOpen = true;
+        }
+        finally
+        {
+            _exportingCaptions = false;
         }
     }
 
@@ -1294,6 +1341,7 @@ public sealed partial class DownloadPage : Page, IPlaybackSource
             Location = savedPath
         });
         DownloadHistory.Save(_history);
+        _ = DownloadPoster.EnsureAsync(savedPath, item?.Url);
         EmptyHistory.Visibility = Visibility.Collapsed;
     }
 

@@ -66,7 +66,7 @@
                 MaxWidth="560"
                 Margin="0,12,0,0"
                 HorizontalAlignment="Stretch"
-                PlaceholderText="Search library and playlists"
+                PlaceholderText="Search library, playlists, and captions"
                 QueryIcon="Find"
                 TextChanged="Search_TextChanged" />
         </StackPanel>
@@ -96,6 +96,30 @@
                         CornerRadius="12"
                         Visibility="Collapsed">
                         <StackPanel x:Name="SearchList" />
+                    </Border>
+                    <TextBlock
+                        x:Name="CaptionHeading"
+                        Style="{StaticResource HomeSectionTitle}"
+                        Text="Captions"
+                        Visibility="Collapsed" />
+                    <Border
+                        x:Name="CaptionCard"
+                        MaxWidth="720"
+                        HorizontalAlignment="Stretch"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Visibility="Collapsed">
+                        <StackPanel>
+                            <StackPanel x:Name="CaptionList" />
+                            <TextBlock
+                                x:Name="CaptionMore"
+                                Margin="12,4,12,12"
+                                Style="{StaticResource HomeSecondaryTextStyle}"
+                                Text="More caption matches are not listed."
+                                Visibility="Collapsed" />
+                        </StackPanel>
                     </Border>
                 </StackPanel>
 

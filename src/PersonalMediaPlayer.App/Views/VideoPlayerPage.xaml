@@ -127,11 +127,9 @@
             </Grid.ColumnDefinitions>
             <Grid>
             <Border x:Name="VideoHost" Background="Black" CornerRadius="16">
-                <Grid>
-                    <lvs:VideoView x:Name="VideoView" Initialized="VideoView_Initialized" />
-                    <controls:HoverCaptions x:Name="Captions" />
-                </Grid>
+                <lvs:VideoView x:Name="VideoView" Initialized="VideoView_Initialized" />
             </Border>
+            <controls:HoverCaptions x:Name="Captions" />
             <controls:VideoPlaybackBar
                 x:Name="Playback"
                 Margin="16"
@@ -207,6 +205,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <TextBlock
                 x:Name="MiniTitle"
@@ -244,13 +243,20 @@
                     FontSize="12"
                     Text="--:--" />
             </Grid>
-            <Grid Grid.Row="2" ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+                <Button
+                    x:Name="MiniBack"
+                    Height="36"
+                    MinWidth="52"
+                    Padding="8,0"
+                    AutomationProperties.Name="Back 10 seconds"
+                    Click="RewindButton_Click"
+                    ToolTipService.ToolTip="Back 10 seconds">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <FontIcon FontSize="12" Glyph="&#xE100;" />
+                        <TextBlock FontSize="12" VerticalAlignment="Center" Text="10" />
+                    </StackPanel>
+                </Button>
                 <Button
                     x:Name="MiniPlay"
                     Width="36"
@@ -261,15 +267,44 @@
                     ToolTipService.ToolTip="Play or pause">
                     <FontIcon x:Name="MiniPlayIcon" FontSize="14" Glyph="&#xE768;" />
                 </Button>
+                <Button
+                    x:Name="MiniForward"
+                    Height="36"
+                    MinWidth="52"
+                    Padding="8,0"
+                    AutomationProperties.Name="Forward 10 seconds"
+                    Click="ForwardButton_Click"
+                    ToolTipService.ToolTip="Forward 10 seconds">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock FontSize="12" VerticalAlignment="Center" Text="10" />
+                        <FontIcon FontSize="12" Glyph="&#xE101;" />
+                    </StackPanel>
+                </Button>
+                <Button
+                    x:Name="MiniNext"
+                    Height="36"
+                    MinWidth="64"
+                    Padding="12,0"
+                    AutomationProperties.Name="Next"
+                    Click="MiniNext_Click"
+                    Content="Next"
+                    IsEnabled="False"
+                    ToolTipService.ToolTip="Play the next waiting video, then the next playlist video" />
+            </StackPanel>
+            <Grid Grid.Row="3" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <Slider
                     x:Name="MiniVolume"
-                    Grid.Column="1"
                     Maximum="100"
                     Minimum="0"
                     AutomationProperties.Name="Volume"
                     VerticalAlignment="Center" />
                 <Button
-                    Grid.Column="2"
+                    Grid.Column="1"
                     Width="36"
                     Height="36"
                     Padding="0"
@@ -279,7 +314,7 @@
                     <FontIcon FontSize="14" Glyph="&#xE740;" />
                 </Button>
                 <Button
-                    Grid.Column="3"
+                    Grid.Column="2"
                     Width="36"
                     Height="36"
                     Padding="0"

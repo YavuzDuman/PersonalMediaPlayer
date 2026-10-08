@@ -11,6 +11,8 @@ using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Editing;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Subtitles;
+using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Models;
 using Windows.UI;
 using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
@@ -64,10 +66,17 @@ public sealed partial class MergePage : Page, IPlaybackSource
     private int _color;
     private string? _busyMessage;
     private bool _showingFades;
+    private MergeClipReturn? _pendingReturn;
+    private MergeClip? _pendingClip;
+    private bool _replacing;
+    private bool _ignoreClipClick;
+    private int _generation;
 
     public MergePage()
     {
         InitializeComponent();
+        // WinUI honors Required only from the constructor. Setting it later is ignored, and Disabled later drops the page.
+        NavigationCacheMode = NavigationCacheMode.Required;
         ClipList.ItemsSource = _clips;
         Playback.SpeedCombo.Visibility = Visibility.Collapsed;
         Playback.FullScreenButton.Visibility = Visibility.Collapsed;
@@ -120,9 +129,66 @@ public sealed partial class MergePage : Page, IPlaybackSource
         }
     }
 
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        _allowLeave = false;
+        if (_replacing)
+        {
+            return;
+        }
+
+        var generation = _generation;
+        if (_pendingReturn is null || _pendingClip is null)
+        {
+            _pendingReturn = null;
+            _pendingClip = null;
+            return;
+        }
+
+        var handoff = _pendingReturn;
+        var clip = _pendingClip;
+        _pendingReturn = null;
+        _pendingClip = null;
+        if (handoff.SavedPath is string path)
+        {
+            _replacing = true;
+            if (!DispatcherQueue.TryEnqueue(() => _ = ReplaceSavedClipAsync(clip, path, generation)))
+            {
+                _replacing = false;
+                Show(InfoBarSeverity.Error, "The saved video could not be put back in the merge.");
+            }
+
+            return;
+        }
+
+        var index = _clips.IndexOf(clip);
+        if (index >= 0)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (generation == _generation)
+                {
+                    OpenClip(index, 0);
+                }
+            });
+        }
+    }
+
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _generation++;
+        // The editor trip sets _pendingReturn before Navigate, so those clips stay for Back.
+        // Any other leave clears them. The page stays cached, and the next visit starts empty.
+        var keep = _pendingReturn is not null;
         ReleasePlayer();
+        if (!keep)
+        {
+            _handleClip = null;
+            _dirty = false;
+            _clips.Clear();
+            Refresh();
+        }
+
         base.OnNavigatedFrom(e);
     }
 
@@ -196,7 +262,219 @@ public sealed partial class MergePage : Page, IPlaybackSource
         }
     }
 
-    private async void Merge_Click(object sender, RoutedEventArgs e) => await SaveMergedAsync();
+    private async void Merge_Click(object sender, RoutedEventArgs e)
+    {
+        await SaveMergedAsync();
+    }
+
+    private void Edit_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not MergeClip clip)
+        {
+            return;
+        }
+
+        _ignoreClipClick = true;
+        OpenInEditor(clip);
+        DispatcherQueue.TryEnqueue(() => _ignoreClipClick = false);
+    }
+
+    private void OpenInEditor(MergeClip clip)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        if (!File.Exists(clip.Source.Path))
+        {
+            Show(InfoBarSeverity.Error, "That video is no longer there.");
+            return;
+        }
+
+        var seed = MergeHandoff.Seed(
+            clip.Source.DurationSeconds,
+            clip.StartSeconds,
+            clip.EndSeconds,
+            clip.VideoFadeIn,
+            clip.VideoFadeInSeconds,
+            clip.VideoFadeOut,
+            clip.VideoFadeOutSeconds,
+            clip.AudioFadeIn,
+            clip.AudioFadeInSeconds,
+            clip.AudioFadeOut,
+            clip.AudioFadeOutSeconds);
+        var handoff = new MergeClipReturn();
+        var launch = new EditorLaunch(ItemFor(clip.Source.Path), Array.Empty<SubtitleCue>(), seed, handoff);
+        // Set before Navigate. OnNavigatedFrom keeps this list only while the ticket is set.
+        _pendingReturn = handoff;
+        _pendingClip = clip;
+        ReleasePlayer();
+        _allowLeave = true;
+        if (Frame?.Navigate(typeof(VideoEditorPage), launch) == true)
+        {
+            return;
+        }
+
+        _allowLeave = false;
+        _pendingReturn = null;
+        _pendingClip = null;
+        Show(InfoBarSeverity.Error, "The editor could not be opened.");
+        var index = _clips.IndexOf(clip);
+        if (index >= 0)
+        {
+            OpenClip(index, 0);
+        }
+    }
+
+    private async Task ReplaceSavedClipAsync(MergeClip clip, string path, int generation)
+    {
+        var replaced = false;
+        var sharedFile = false;
+        string? failure = null;
+        try
+        {
+            SetBusy(true, "Reading the saved video…");
+            MergeSource source;
+            try
+            {
+                source = await VideoMerger.ProbeAsync(path);
+            }
+            catch (Exception ex)
+            {
+                failure = ex.Message;
+                return;
+            }
+
+            if (generation != _generation)
+            {
+                return;
+            }
+
+            var index = _clips.IndexOf(clip);
+            var placed = MergeHandoff.PutBack(_clips.Select(SlotFor).ToArray(), index, path, source.DurationSeconds);
+            if (placed is null)
+            {
+                failure = "That clip is no longer in the list.";
+                return;
+            }
+
+            var slot = placed[index];
+            _clips[index] = new MergeClip(
+                new MergeSource(slot.Path, slot.EndSeconds, source.HasAudio, source.Width, source.Height),
+                clip.Swatch,
+                index + 1);
+            for (var other = 0; other < _clips.Count; other++)
+            {
+                if (other == index)
+                {
+                    continue;
+                }
+
+                var neighbor = _clips[other];
+                if (!SameFile(neighbor.Source.Path, path))
+                {
+                    continue;
+                }
+
+                neighbor.UseFile(source);
+                sharedFile = true;
+            }
+
+            _dirty = true;
+            replaced = true;
+            Refresh();
+            OpenClip(index, 0);
+        }
+        finally
+        {
+            _replacing = false;
+            if (generation == _generation)
+            {
+                SetBusy(false, null);
+                if (failure is not null)
+                {
+                    Show(InfoBarSeverity.Error, failure);
+                    Reopen(clip);
+                }
+                else if (replaced)
+                {
+                    Show(InfoBarSeverity.Success, sharedFile
+                        ? "This clip is now the saved video. Any other clip of that same file plays the new video too."
+                        : "This clip is now the saved video. The other clips stay as they are.");
+                }
+            }
+        }
+    }
+
+    private void Reopen(MergeClip clip)
+    {
+        var index = _clips.IndexOf(clip);
+        if (index >= 0)
+        {
+            OpenClip(index, 0);
+        }
+    }
+
+    private static bool SameFile(string left, string right)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (IOException)
+        {
+            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (NotSupportedException)
+        {
+            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static MergeSlot SlotFor(MergeClip clip) => new(
+        clip.Source.Path,
+        clip.StartSeconds,
+        clip.EndSeconds,
+        clip.VideoFadeIn,
+        clip.VideoFadeOut,
+        clip.AudioFadeIn,
+        clip.AudioFadeOut);
+
+    private static MediaItem ItemFor(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var known = App.MediaLibrary.GetById(full);
+        if (known is not null)
+        {
+            return known;
+        }
+
+        foreach (var item in App.MediaLibrary.GetItems())
+        {
+            if (string.Equals(Path.GetFullPath(item.FilePath), full, StringComparison.OrdinalIgnoreCase))
+            {
+                return item;
+            }
+        }
+
+        var info = new FileInfo(full);
+        return new MediaItem
+        {
+            Id = full,
+            Kind = MediaFileTypes.GetKind(full),
+            DisplayName = info.Name,
+            FilePath = full,
+            ImportedAt = new DateTimeOffset(DateTime.SpecifyKind(info.CreationTimeUtc, DateTimeKind.Utc)),
+            FileSizeBytes = info.Length,
+            FolderName = string.Empty,
+            IsLinked = false
+        };
+    }
 
     private async Task<bool> SaveMergedAsync()
     {
@@ -313,7 +591,14 @@ public sealed partial class MergePage : Page, IPlaybackSource
     {
         LeavePrompt.Visibility = Visibility.Collapsed;
         _merge?.Cancel();
+        _generation++;
+        _pendingReturn = null;
+        _pendingClip = null;
         _dirty = false;
+        _clips.Clear();
+        SetBusy(false, null);
+        ReleasePlayer();
+        Refresh();
         FinishLeave();
     }
 
@@ -519,6 +804,12 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
     private void Clip_Click(object sender, ItemClickEventArgs e)
     {
+        if (_ignoreClipClick)
+        {
+            _ignoreClipClick = false;
+            return;
+        }
+
         if (e.ClickedItem is MergeClip clip)
         {
             var index = _clips.IndexOf(clip);
@@ -566,18 +857,13 @@ public sealed partial class MergePage : Page, IPlaybackSource
             _clips[index].Order = (index + 1).ToString();
         }
 
-        SummaryText.Text = _clips.Count switch
-        {
-            0 => "No videos yet",
-            1 => "1 video · " + Format(total) + " · add one more",
-            _ => $"{_clips.Count} videos · {Format(total)}"
-        };
+        SummaryText.Text = DescribeList(_clips.Count, total);
         PreviewHint.Visibility = _clips.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ClipList.Visibility = _clips.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         var totalMs = TotalMs();
         Playback.DurationText.Text = totalMs > 0 ? FormatMs(totalMs) : "--:--";
         Playback.SeekSlider.IsEnabled = totalMs > 0;
-        MergeButton.IsEnabled = _clips.Count >= 2 && !_busy;
+        ShowMergeAction();
         DrawTimeline(total);
         ShowTrim();
     }
@@ -832,7 +1118,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
     {
         _busy = busy;
         BusyRing.IsActive = busy;
-        MergeButton.IsEnabled = !busy && _clips.Count >= 2;
+        ShowMergeAction();
         if (busy && message is not null)
         {
             _busyMessage = message;
@@ -850,13 +1136,15 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
     private void OpenClip(int index, long offsetMs)
     {
-        if (index < 0 || index >= _clips.Count)
+        if (index < 0 || index >= _clips.Count || !ReferenceEquals(Frame?.Content, this))
         {
             return;
         }
 
         _ended = false;
         _advance = false;
+        // The editor claims focus while this cached page is still registered, and that flag blocks the file from ever being started.
+        _pausedForOther = false;
         _playGeneration++;
         _clipIndex = index;
         _current = _clips[index];
@@ -876,6 +1164,11 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
     private void AttachVideo()
     {
+        if (!ReferenceEquals(Frame?.Content, this))
+        {
+            return;
+        }
+
         if (_videoView is null)
         {
             _videoView = new VideoView
@@ -891,6 +1184,25 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
     private void VideoView_Initialized(object? sender, InitializedEventArgs e)
     {
+        if (sender is VideoView raised && !ReferenceEquals(raised, _videoView))
+        {
+            raised.Initialized -= VideoView_Initialized;
+            raised.MediaPlayer = null;
+            return;
+        }
+
+        if (!ReferenceEquals(Frame?.Content, this))
+        {
+            if (_videoView is not null)
+            {
+                _videoView.Initialized -= VideoView_Initialized;
+                _videoView.MediaPlayer = null;
+                _videoView = null;
+            }
+
+            return;
+        }
+
         _libVlc = new LibVLC(false, PlaybackAudio.Options(e.SwapChainOptions));
         _player = new VlcMediaPlayer(_libVlc);
         _player.LengthChanged += (_, args) => DispatcherQueue.TryEnqueue(() => ApplyPendingSeek(args.Length));
@@ -1019,13 +1331,26 @@ public sealed partial class MergePage : Page, IPlaybackSource
         if (_ended || _clipIndex < 0 || _player is null)
         {
             _pausedForOther = false;
-            OpenClip(0, 0);
+            var index = !_ended && _clipIndex >= 0 && _clipIndex < _clips.Count ? _clipIndex : 0;
+            OpenClip(index, 0);
             return;
         }
 
         if (_player.IsPlaying)
         {
             _player.SetPause(true);
+        }
+        else if (_player.Media is null)
+        {
+            _pausedForOther = false;
+            if (_queuedPath is not null)
+            {
+                PlayPath(_queuedPath);
+            }
+            else
+            {
+                OpenClip(_clipIndex, 0);
+            }
         }
         else
         {
@@ -1483,9 +1808,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
             }
 
             var kept = _clips.Sum(item => item.KeptSeconds);
-            SummaryText.Text = _clips.Count == 1
-                ? "1 video · " + Format(kept) + " · add one more"
-                : $"{_clips.Count} videos · {Format(kept)}";
+            SummaryText.Text = DescribeList(_clips.Count, kept);
             Playback.DurationText.Text = FormatMs(TotalMs());
             ShowTrim();
         }
@@ -1590,6 +1913,13 @@ public sealed partial class MergePage : Page, IPlaybackSource
         _clipIndex = -1;
         _queuedPath = null;
         _queuedSeek = -1;
+        if (_videoView is not null)
+        {
+            _videoView.Initialized -= VideoView_Initialized;
+            _videoView.MediaPlayer = null;
+            _videoView = null;
+        }
+
         if (_player is not null)
         {
             try
@@ -1598,11 +1928,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
             }
             catch (Exception)
             {
-            }
-
-            if (_videoView is not null)
-            {
-                _videoView.MediaPlayer = null;
             }
 
             _player.Dispose();
@@ -1640,6 +1965,23 @@ public sealed partial class MergePage : Page, IPlaybackSource
         var color = Palette[_color % Palette.Length];
         _color++;
         return new SolidColorBrush(color);
+    }
+
+    private void ShowMergeAction()
+    {
+        MergeButton.Content = "Merge";
+        MergeButton.IsEnabled = !_busy && _clips.Count >= 2;
+    }
+
+    private static string DescribeList(int count, double total)
+    {
+        var length = Format(total);
+        return count switch
+        {
+            0 => "No videos yet",
+            1 => "1 video · " + length,
+            _ => $"{count} videos · {length}"
+        };
     }
 
     private static string Format(double seconds)
@@ -1691,7 +2033,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        public MergeSource Source { get; }
+        public MergeSource Source { get; private set; }
 
         public string Name { get; }
 
@@ -1739,6 +2081,13 @@ public sealed partial class MergePage : Page, IPlaybackSource
             copy.SetSpan(_start, _end);
             copy.SetFades(VideoFadeIn, VideoFadeInSeconds, VideoFadeOut, VideoFadeOutSeconds, AudioFadeIn, AudioFadeInSeconds, AudioFadeOut, AudioFadeOutSeconds);
             return copy;
+        }
+
+        public void UseFile(MergeSource source)
+        {
+            Source = source;
+            var span = MergeHandoff.FitSpan(_start, _end, source.DurationSeconds);
+            SetSpan(span.Start, span.End);
         }
 
         public void SetFades(bool videoIn, double videoInSeconds, bool videoOut, double videoOutSeconds, bool audioIn, double audioInSeconds, bool audioOut, double audioOutSeconds)

@@ -8,6 +8,13 @@ using Windows.Foundation;
 
 namespace PersonalMediaPlayer.App.Controls;
 
+internal enum CaptionLineSaveState
+{
+    Unavailable,
+    Ready,
+    Saved
+}
+
 public sealed partial class HoverCaptions : UserControl
 {
     private const string MissingMeaning = "This word is not in the word list yet.";
@@ -36,6 +43,7 @@ public sealed partial class HoverCaptions : UserControl
     private string? _savedEnglish;
     private string? _savedSentence;
     private long? _savedTimeMs;
+    private IReadOnlyList<SavedWord>? _savedCache;
     private readonly SolidColorBrush _captionBrush = new(Microsoft.UI.Colors.White);
     private readonly SolidColorBrush _clearBrush = new(Microsoft.UI.Colors.Transparent);
     private readonly SolidColorBrush _markBrush = new(Windows.UI.Color.FromArgb(255, 255, 214, 10));
@@ -47,10 +55,35 @@ public sealed partial class HoverCaptions : UserControl
     {
         InitializeComponent();
         _rootPressed = RootPressed;
-        Unloaded += (_, _) => CloseCard();
+        Unloaded += HoverCaptions_Unloaded;
+        SavedWords.Changed += SavedWordsChanged;
+    }
+
+    private void HoverCaptions_Unloaded(object sender, RoutedEventArgs e)
+    {
+        SavedWords.Changed -= SavedWordsChanged;
+        CloseCard();
+    }
+
+    private void SavedWordsChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(SavedWordsChanged);
+            return;
+        }
+
+        _savedCache = null;
+        RefreshLineButton();
+        if (WordCard.Visibility == Visibility.Visible)
+        {
+            ShowCardSave();
+        }
     }
 
     public bool HasCues => _cues.Count > 0;
+
+    internal IReadOnlyList<SubtitleCue> CopyCues() => _cues.Count == 0 ? [] : _cues.ToArray();
 
     public void Load(string? mediaPath)
     {
@@ -74,6 +107,7 @@ public sealed partial class HoverCaptions : UserControl
         _captionLanguage = null;
         _cues = [];
         _cueIndex = -1;
+        _savedCache = null;
         Line.Children.Clear();
         HideMeaning();
         CloseCard();
@@ -98,17 +132,69 @@ public sealed partial class HoverCaptions : UserControl
         {
             _sourceName = _sourceName[..120].Trim();
         }
+
+        _savedCache = null;
+        RefreshLineButton();
     }
 
     internal void RememberChoice(string? audioLanguage, string? captionLanguage)
     {
         _audioLanguage = string.IsNullOrWhiteSpace(audioLanguage) ? null : audioLanguage.Trim();
         _captionLanguage = string.IsNullOrWhiteSpace(captionLanguage) ? null : captionLanguage.Trim();
+        RefreshLineButton();
+    }
+
+    internal CaptionLineSaveState CueSaveState(string text, long startMs)
+    {
+        var line = text.Trim();
+        if (line.Length == 0 || (_mediaPath is null && _pageUrl is null))
+        {
+            return CaptionLineSaveState.Unavailable;
+        }
+
+        var path = _mediaPath;
+        var page = path is null ? _pageUrl : null;
+        return Stored(line, line, path, page, startMs, _audioLanguage, _captionLanguage)
+            ? CaptionLineSaveState.Saved
+            : CaptionLineSaveState.Ready;
+    }
+
+    internal bool TrySaveCue(string text, long startMs)
+    {
+        var line = text.Trim();
+        if (line.Length == 0 || (_mediaPath is null && _pageUrl is null))
+        {
+            return false;
+        }
+
+        var path = _mediaPath;
+        var page = path is null ? _pageUrl : null;
+        try
+        {
+            // The whole line is the saved word. Turkish stays empty; the sentence is the line.
+            SavedWords.Add(line, string.Empty, line, path, startMs, page, page is not null && _resolvePage, page is null ? null : _sourceName, _audioLanguage, _captionLanguage);
+        }
+        catch (IOException)
+        {
+            ToolTipService.SetToolTip(SaveLineButton, "Could not save this line");
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ToolTipService.SetToolTip(SaveLineButton, "Could not save this line");
+            return false;
+        }
+
+        _savedCache = null;
+        RefreshLineButton();
+        WordSaved?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     internal void LoadCues(IReadOnlyList<SubtitleCue> cues)
     {
         _mediaPath = null;
+        _savedCache = null;
         _cues = cues;
         _cueIndex = -1;
         Line.Children.Clear();
@@ -120,9 +206,10 @@ public sealed partial class HoverCaptions : UserControl
     public void SetShown(bool shown)
     {
         _shown = shown;
-        Line.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         if (!shown)
         {
+            CaptionPlate.Visibility = Visibility.Collapsed;
+            SaveLineButton.Visibility = Visibility.Collapsed;
             HideMeaning();
             CloseCard();
             return;
@@ -169,6 +256,12 @@ public sealed partial class HoverCaptions : UserControl
             }
         }
 
+        if (index < 0)
+        {
+            HideCurrentLine();
+            return;
+        }
+
         if (index == _cueIndex)
         {
             return;
@@ -179,10 +272,6 @@ public sealed partial class HoverCaptions : UserControl
         ProtectedCursor = null;
         Line.Children.Clear();
         _line = [];
-        if (index < 0)
-        {
-            return;
-        }
 
         _line = _cues[index].Text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var marked = HighlightedIndexes(index);
@@ -214,7 +303,69 @@ public sealed partial class HoverCaptions : UserControl
             Line.Children.Add(host);
         }
 
+        CaptionPlate.Visibility = Line.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         Line.IsHitTestVisible = Line.Children.Count > 0;
+        if (Line.Children.Count > 0)
+        {
+            ShowLineSave(CueSaveState(_cues[index].Text, _cues[index].StartMs));
+        }
+        else
+        {
+            SaveLineButton.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void SaveLine_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cueIndex < 0 || _cueIndex >= _cues.Count || !SaveLineButton.IsEnabled)
+        {
+            return;
+        }
+
+        var cue = _cues[_cueIndex];
+        TrySaveCue(cue.Text, cue.StartMs);
+    }
+
+    private void RefreshLineButton()
+    {
+        if (CaptionPlate.Visibility != Visibility.Visible || _cueIndex < 0 || _cueIndex >= _cues.Count)
+        {
+            return;
+        }
+
+        ShowLineSave(CueSaveState(_cues[_cueIndex].Text, _cues[_cueIndex].StartMs));
+    }
+
+    private void HideCurrentLine()
+    {
+        if (_cueIndex < 0 && CaptionPlate.Visibility != Visibility.Visible && SaveLineButton.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _cueIndex = -1;
+        HideMeaning();
+        ProtectedCursor = null;
+        Line.Children.Clear();
+        _line = [];
+        CaptionPlate.Visibility = Visibility.Collapsed;
+        SaveLineButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowLineSave(CaptionLineSaveState state)
+    {
+        var realLine = state is CaptionLineSaveState.Ready or CaptionLineSaveState.Saved;
+        SaveLineButton.Visibility = realLine ? Visibility.Visible : Visibility.Collapsed;
+        SaveLineButton.IsEnabled = state == CaptionLineSaveState.Ready;
+        SaveLineButton.Content = state == CaptionLineSaveState.Saved ? "Saved" : "Save";
+        ToolTipService.SetToolTip(
+            SaveLineButton,
+            state switch
+            {
+                CaptionLineSaveState.Saved => "Saved on this computer",
+                CaptionLineSaveState.Ready => "Save this line on this computer",
+                _ => "This caption is not attached to a video."
+            });
     }
 
     private void Word_Entered(object sender, PointerRoutedEventArgs e)
@@ -278,22 +429,26 @@ public sealed partial class HoverCaptions : UserControl
         CardWord.Text = english;
         CardMeaning.Text = TurkishDictionary.Lookup(_line[wordIndex], _line, wordIndex) ?? MissingMeaning;
         CardSentence.Text = sentence;
-        if (!canSave)
+        ShowCardSave();
+        Dismiss.Visibility = Visibility.Visible;
+        WordCard.Visibility = Visibility.Visible;
+        HookRoot();
+    }
+
+    private void ShowCardSave()
+    {
+        if (string.IsNullOrWhiteSpace(_cardVideoPath) && string.IsNullOrWhiteSpace(_cardPageUrl))
         {
             SaveWordButton.IsEnabled = false;
             SaveWordButton.Content = "Save";
             ToolTipService.SetToolTip(SaveWordButton, "This caption is not attached to a video.");
+            return;
         }
-        else
-        {
-            var saved = SavedChoice(english, sentence);
-            SaveWordButton.IsEnabled = !saved;
-            SaveWordButton.Content = saved ? "Saved" : "Save";
-            ToolTipService.SetToolTip(SaveWordButton, saved ? "Saved on this computer" : "Save this word on this computer");
-        }
-        Dismiss.Visibility = Visibility.Visible;
-        WordCard.Visibility = Visibility.Visible;
-        HookRoot();
+
+        var saved = SavedChoice(CardWord.Text, CardSentence.Text);
+        SaveWordButton.IsEnabled = !saved;
+        SaveWordButton.Content = saved ? "Saved" : "Save";
+        ToolTipService.SetToolTip(SaveWordButton, saved ? "Saved on this computer" : "Save this word on this computer");
     }
 
     private void CloseCard_Click(object sender, RoutedEventArgs e) => CloseCard();
@@ -329,20 +484,27 @@ public sealed partial class HoverCaptions : UserControl
         SaveWordButton.IsEnabled = false;
         SaveWordButton.Content = "Saved";
         ToolTipService.SetToolTip(SaveWordButton, "Saved on this computer");
+        _savedCache = null;
+        RefreshLineButton();
         WordSaved?.Invoke(this, EventArgs.Empty);
     }
 
     private bool SavedChoice(string english, string sentence)
+        => Stored(english, sentence, _cardVideoPath, _cardPageUrl, _cardTimeMs, _cardAudioLanguage, _cardCaptionLanguage);
+
+    private bool Stored(string english, string sentence, string? videoPath, string? pageUrl, long? timeMs, string? audioLanguage, string? captionLanguage)
     {
-        return SavedWords.All().Any(word =>
+        return SavedSnapshot().Any(word =>
             string.Equals(word.English, english.Trim(), StringComparison.OrdinalIgnoreCase)
             && string.Equals(word.Sentence, sentence.Trim(), StringComparison.Ordinal)
-            && string.Equals(Clean(word.VideoPath), Clean(_cardVideoPath), StringComparison.OrdinalIgnoreCase)
-            && string.Equals(Clean(word.PageUrl), Clean(_cardPageUrl), StringComparison.OrdinalIgnoreCase)
-            && word.TimeMs == _cardTimeMs
-            && string.Equals(Clean(word.AudioLanguage), Clean(_cardAudioLanguage), StringComparison.OrdinalIgnoreCase)
-            && string.Equals(Clean(word.CaptionLanguage), Clean(_cardCaptionLanguage), StringComparison.OrdinalIgnoreCase));
+            && string.Equals(Clean(word.VideoPath), Clean(videoPath), StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Clean(word.PageUrl), Clean(pageUrl), StringComparison.OrdinalIgnoreCase)
+            && word.TimeMs == timeMs
+            && string.Equals(Clean(word.AudioLanguage), Clean(audioLanguage), StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Clean(word.CaptionLanguage), Clean(captionLanguage), StringComparison.OrdinalIgnoreCase));
     }
+
+    private IReadOnlyList<SavedWord> SavedSnapshot() => _savedCache ??= SavedWords.All();
 
     private static string? Clean(string? value)
     {
@@ -358,7 +520,7 @@ public sealed partial class HoverCaptions : UserControl
             return;
         }
 
-        if (IsInside(source, WordCard) || IsInside(source, Line))
+        if (IsInside(source, WordCard) || IsInside(source, Line) || IsInside(source, SaveLineButton))
         {
             return;
         }

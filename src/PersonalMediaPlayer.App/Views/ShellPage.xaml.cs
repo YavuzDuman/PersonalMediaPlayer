@@ -293,9 +293,15 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
+        var ease = NavFrame.Content is not null;
         if (NavFrame.Navigate(pageType))
         {
             NavFrame.BackStack.Clear();
+            if (ease)
+            {
+                SectionArrival.Play(NavFrame.Content as UIElement);
+            }
+
             RefreshBack();
             return;
         }
@@ -492,9 +498,15 @@ public sealed partial class ShellPage : UserControl
             return;
         }
 
+        var ease = NavFrame.Content is not null;
         if (NavFrame.Navigate(pageType, parameter))
         {
             NavFrame.BackStack.Clear();
+            if (ease)
+            {
+                SectionArrival.Play(NavFrame.Content as UIElement);
+            }
+
             SyncNavSelection();
         }
 

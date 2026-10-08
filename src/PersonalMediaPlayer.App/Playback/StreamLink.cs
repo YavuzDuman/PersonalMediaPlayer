@@ -25,7 +25,8 @@ internal sealed record StreamOpenRequest(
     DownloadQuality? Quality = null,
     SavedWord? Focus = null,
     Uri? Thumbnail = null,
-    IReadOnlyList<VideoChapter>? Chapters = null);
+    IReadOnlyList<VideoChapter>? Chapters = null,
+    bool Live = false);
 
 internal static class StreamLink
 {

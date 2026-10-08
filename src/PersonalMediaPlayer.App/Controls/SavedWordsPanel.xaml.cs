@@ -390,7 +390,7 @@ public sealed partial class SavedWordsPanel : UserControl
                 : $"{word.English} — {word.Turkish}");
         }
 
-        if (!string.IsNullOrWhiteSpace(word.Sentence))
+        if (!string.IsNullOrWhiteSpace(word.Sentence) && !word.SentenceIsWord())
         {
             lines.Add(word.Sentence);
         }

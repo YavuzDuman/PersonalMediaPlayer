@@ -20,9 +20,11 @@
 
   <ItemGroup>
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\YoutubeDownloader.cs" Link="YoutubeDownloader.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\DownloadPoster.cs" Link="DownloadPoster.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\DownloadBatchSave.cs" Link="DownloadBatchSave.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleCues.cs" Link="SubtitleCues.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleSearch.cs" Link="SubtitleSearch.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\LibraryCaptionSearch.cs" Link="LibraryCaptionSearch.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleEdit.cs" Link="SubtitleEdit.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SavedWords.cs" Link="SavedWords.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\Playlists.cs" Link="Playlists.cs" />
@@ -46,5 +48,10 @@
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\LanguageLabels.cs" Link="LanguageLabels.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamLanguageSettings.cs" Link="StreamLanguageSettings.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Storage\AppDataBackup.cs" Link="AppDataBackup.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\AudioSilence.cs" Link="AudioSilence.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\TimelineGesture.cs" Link="TimelineGesture.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Capture\PcmMix.cs" Link="PcmMix.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Capture\MixedAudioClock.cs" Link="MixedAudioClock.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\MergeHandoff.cs" Link="MergeHandoff.cs" />
   </ItemGroup>
 </Project>

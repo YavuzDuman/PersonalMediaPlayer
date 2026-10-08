@@ -126,7 +126,11 @@ public sealed partial class PhotoEditorPage : Page
 
         if (pageType is not null)
         {
-            NavigationHelper.Follow(Frame, pageType, parameter, clearBackStack: false);
+            if (NavigationHelper.Follow(Frame, pageType, parameter, clearBackStack: false)
+                && pageType != typeof(VideoPlayerPage))
+            {
+                SectionArrival.Play(Frame.Content as UIElement);
+            }
         }
         else if (Frame.CanGoBack)
         {

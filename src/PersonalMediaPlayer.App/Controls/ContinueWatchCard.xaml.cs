@@ -3,8 +3,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace PersonalMediaPlayer.App.Controls;
 
@@ -77,16 +75,11 @@ public sealed partial class ContinueWatchCard : UserControl
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 440);
-            if (thumb is null || thumb.Size == 0)
+            var image = await VideoThumbnail.LoadAsync(path, 440);
+            if (image is not null)
             {
-                return;
+                Thumb.Source = image;
             }
-
-            var image = new BitmapImage();
-            await image.SetSourceAsync(thumb);
-            Thumb.Source = image;
         }
         catch (Exception)
         {

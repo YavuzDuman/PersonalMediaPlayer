@@ -116,6 +116,29 @@ internal sealed class PlaylistRun
         return step.Kind == PlaylistStepKind.Open;
     }
 
+    /// <summary>
+    /// True when Next has a waiting video, or another playlist video to open.
+    /// A playlist that would only replay the current video waits for the end of that video.
+    /// </summary>
+    public static bool CanAdvance(int queueCount, Playlist? list, PlaylistRun? run, int index, bool unwatchedOnly)
+    {
+        if (queueCount > 0)
+        {
+            return true;
+        }
+
+        if (list is null || run is null || list.Videos.Count == 0)
+        {
+            return false;
+        }
+
+        return run.HasMove(
+            Keys(list),
+            item => Include(list, item, index, unwatchedOnly),
+            index,
+            forward: true);
+    }
+
     public PlaylistStep Move(
         IReadOnlyList<string> keys,
         Func<int, bool> include,

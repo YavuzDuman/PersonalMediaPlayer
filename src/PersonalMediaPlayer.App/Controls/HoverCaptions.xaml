@@ -11,12 +11,32 @@
             Background="Transparent"
             PointerPressed="Dismiss_Pressed"
             Visibility="Collapsed" />
-        <StackPanel
-            x:Name="Line"
+        <Border
+            x:Name="CaptionPlate"
             Margin="24,0,24,176"
+            Padding="12,6"
             HorizontalAlignment="Center"
             VerticalAlignment="Bottom"
-            Orientation="Horizontal" />
+            Background="#CC000000"
+            CornerRadius="8"
+            Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <StackPanel x:Name="Line" Orientation="Horizontal" VerticalAlignment="Center" />
+                <Button
+                    x:Name="SaveLineButton"
+                    Height="32"
+                    MinWidth="72"
+                    Padding="10,0"
+                    VerticalAlignment="Center"
+                    Click="SaveLine_Click"
+                    Content="Save"
+                    CornerRadius="8"
+                    FontSize="13"
+                    RequestedTheme="Dark"
+                    ToolTipService.ToolTip="Save this line on this computer"
+                    Visibility="Collapsed" />
+            </StackPanel>
+        </Border>
         <Canvas x:Name="MeaningLayer" IsHitTestVisible="False">
             <Border
                 x:Name="MeaningCard"

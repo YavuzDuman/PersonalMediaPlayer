@@ -12,6 +12,8 @@ public sealed partial class QueuePanel : UserControl
     private readonly Button _undoButton;
     private int? _dragFrom;
     private bool _showingUndo;
+    private bool _saveMessage;
+    private bool _savingPlaylist;
     private int _closeSuppress;
 
     public QueuePanel()
@@ -32,6 +34,7 @@ public sealed partial class QueuePanel : UserControl
         CountText.Text = items.Count == 1 ? "1 video" : $"{items.Count} videos";
         NextButton.IsEnabled = items.Count > 0;
         ClearButton.IsEnabled = items.Count > 0;
+        SavePlaylistButton.IsEnabled = items.Count > 0;
         Rows.Children.Clear();
         for (var i = 0; i < items.Count; i++)
         {
@@ -50,6 +53,130 @@ public sealed partial class QueuePanel : UserControl
 
     private void Clear_Click(object sender, RoutedEventArgs e) => PlayQueue.ClearWaiting();
 
+    private async void SavePlaylist_Click(object sender, RoutedEventArgs e)
+    {
+        if (_savingPlaylist || XamlRoot is null || PlayQueue.Count == 0)
+        {
+            return;
+        }
+
+        var box = new TextBox
+        {
+            Text = Playlists.NextQueueName(),
+            PlaceholderText = "Playlist name",
+            MaxLength = 80
+        };
+        box.Loaded += (_, _) =>
+        {
+            box.SelectAll();
+            box.Focus(FocusState.Programmatic);
+        };
+        var error = new TextBlock
+        {
+            Foreground = SecondaryInk.Foreground,
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Save as playlist",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Width = 320,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Name the new playlist. The videos in the queue are copied when you save, and the queue stays.",
+                        TextWrapping = TextWrapping.Wrap,
+                        Foreground = SecondaryInk.Foreground
+                    },
+                    box,
+                    error
+                }
+            },
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        dialog.PrimaryButtonClick += (sender, args) =>
+        {
+            var problem = Playlists.ReadQueueName(box.Text, out _);
+            if (problem == QueuePlaylistProblem.None)
+            {
+                error.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            args.Cancel = true;
+            error.Text = ProblemText(problem);
+            error.Visibility = Visibility.Visible;
+        };
+
+        _savingPlaylist = true;
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            QueuePlaylistResult result;
+            try
+            {
+                result = Playlists.SaveFromQueue(box.Text, PlayQueue.Snapshot());
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                ShowSaveStatus("Could not save the playlist.", InfoBarSeverity.Error);
+                return;
+            }
+
+            ShowSaveStatus(
+                result.Problem == QueuePlaylistProblem.None ? SavedText(result) : ProblemText(result.Problem),
+                result.Problem == QueuePlaylistProblem.None ? InfoBarSeverity.Success : InfoBarSeverity.Informational);
+        }
+        finally
+        {
+            _savingPlaylist = false;
+        }
+    }
+
+    private static string ProblemText(QueuePlaylistProblem problem) => problem switch
+    {
+        QueuePlaylistProblem.BlankName => "Enter a name for the playlist.",
+        QueuePlaylistProblem.LongName => "Use a name of 80 characters or fewer.",
+        QueuePlaylistProblem.NameTaken => "You already have a playlist with that name.",
+        QueuePlaylistProblem.NothingToSave => "The queue has no videos to save.",
+        _ => "Could not save the playlist."
+    };
+
+    private static string SavedText(QueuePlaylistResult result)
+    {
+        var name = result.Playlist?.Name ?? "the playlist";
+        var count = result.Saved == 1 ? "Saved 1 video" : $"Saved {result.Saved} videos";
+        var text = $"{count} as \"{name}\". The waiting queue is still here.";
+        if (result.Repeated > 0)
+        {
+            text += " A video that was queued more than once is listed once.";
+        }
+
+        return text;
+    }
+
+    private void ShowSaveStatus(string message, InfoBarSeverity severity)
+    {
+        _saveMessage = true;
+        _showingUndo = false;
+        Status.Severity = severity;
+        Status.Message = message;
+        Status.ActionButton = null;
+        Status.Visibility = Visibility.Visible;
+        Status.IsOpen = true;
+    }
+
     private void ShowUndo()
     {
         if (!PlayQueue.IsPending(out var message))
@@ -63,6 +190,7 @@ public sealed partial class QueuePanel : UserControl
             return;
         }
 
+        _saveMessage = false;
         _showingUndo = true;
         Status.Severity = InfoBarSeverity.Informational;
         Status.Message = message;
@@ -77,6 +205,18 @@ public sealed partial class QueuePanel : UserControl
         if (_closeSuppress > 0)
         {
             _closeSuppress--;
+            return;
+        }
+
+        if (_saveMessage)
+        {
+            _saveMessage = false;
+            Status.ActionButton = null;
+            if (PlayQueue.IsPending(out _))
+            {
+                ShowUndo();
+            }
+
             return;
         }
 

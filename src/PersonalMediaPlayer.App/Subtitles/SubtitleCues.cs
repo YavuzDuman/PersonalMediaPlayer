@@ -7,9 +7,77 @@ namespace PersonalMediaPlayer.App.Subtitles;
 
 internal readonly record struct SubtitleCue(long StartMs, long EndMs, string Text);
 
+internal readonly record struct ReadyStamp(int Source, long VideoLength, long VideoTicks, long SourceLength, long SourceTicks)
+{
+    internal const int None = 0;
+
+    internal const int Sibling = 1;
+
+    internal const int Cache = 2;
+}
+
+internal readonly record struct ReadyCaption(ReadyStamp Stamp, string? Text);
+
 internal static class SubtitleCues
 {
     internal static string? CacheDirectoryOverride { get; set; }
+
+    // Search reads a subtitle that is already beside the video or already cached.
+    // Playback still extracts a missing track. This leaves that scan alone.
+    internal static bool TryReady(string mediaPath, bool read, out ReadyCaption ready)
+    {
+        ready = default;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(mediaPath) || !File.Exists(mediaPath))
+            {
+                return false;
+            }
+
+            var video = new FileInfo(mediaPath);
+            var beside = FindBeside(mediaPath);
+            if (beside is not null)
+            {
+                var info = new FileInfo(beside);
+                ready = new ReadyCaption(
+                    new ReadyStamp(ReadyStamp.Sibling, video.Length, video.LastWriteTimeUtc.Ticks, info.Length, info.LastWriteTimeUtc.Ticks),
+                    read ? File.ReadAllText(beside) : null);
+                return true;
+            }
+
+            var target = CacheFile(mediaPath);
+            if (File.Exists(target))
+            {
+                var info = new FileInfo(target);
+                if (info.Length > 0)
+                {
+                    ready = new ReadyCaption(
+                        new ReadyStamp(ReadyStamp.Cache, video.Length, video.LastWriteTimeUtc.Ticks, info.Length, info.LastWriteTimeUtc.Ticks),
+                        read ? File.ReadAllText(target) : null);
+                    return true;
+                }
+            }
+
+            long missLength = 0;
+            long missTicks = 0;
+            var miss = target + ".none";
+            if (File.Exists(miss))
+            {
+                var info = new FileInfo(miss);
+                missLength = info.Length;
+                missTicks = info.LastWriteTimeUtc.Ticks;
+            }
+
+            ready = new ReadyCaption(
+                new ReadyStamp(ReadyStamp.None, video.Length, video.LastWriteTimeUtc.Ticks, missLength, missTicks),
+                null);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     public static IReadOnlyList<SubtitleCue> LoadFor(string mediaPath, CancellationToken cancellationToken = default)
     {

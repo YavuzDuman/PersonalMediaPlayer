@@ -4,13 +4,12 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
+using PersonalMediaPlayer.App.Controls;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core;
 using PersonalMediaPlayer.Core.Models;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 using Windows.System;
 
 namespace PersonalMediaPlayer.App.Views;
@@ -34,7 +33,12 @@ public sealed partial class PlaylistsPage : Page
         StatusBar.Closed += StatusBar_Closed;
         ActualThemeChanged += (_, _) => DispatcherQueue.TryEnqueue(ShowLists);
         PlaylistChanges.Changed += OnPlaylistChangesChanged;
-        Unloaded += (_, _) => PlaylistChanges.Changed -= OnPlaylistChangesChanged;
+        Playlists.QueueCopied += OnQueueCopied;
+        Unloaded += (_, _) =>
+        {
+            PlaylistChanges.Changed -= OnPlaylistChangesChanged;
+            Playlists.QueueCopied -= OnQueueCopied;
+        };
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -865,16 +869,11 @@ public sealed partial class PlaylistsPage : Page
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 240);
-            if (thumb is null || thumb.Size == 0)
+            var bitmap = await VideoThumbnail.LoadAsync(path, 240);
+            if (bitmap is not null)
             {
-                return;
+                target.Source = bitmap;
             }
-
-            var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(thumb);
-            target.Source = bitmap;
         }
         catch (Exception)
         {
@@ -1156,6 +1155,14 @@ public sealed partial class PlaylistsPage : Page
         if (!DispatcherQueue.TryEnqueue(UpdateUndoMessage))
         {
             UpdateUndoMessage();
+        }
+    }
+
+    private void OnQueueCopied()
+    {
+        if (!DispatcherQueue.TryEnqueue(ShowLists))
+        {
+            ShowLists();
         }
     }
 

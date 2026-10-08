@@ -65,6 +65,141 @@ internal static class Playlists
         return created;
     }
 
+    /// <summary>
+    /// Raised after <see cref="SaveFromQueue"/> writes a new playlist.
+    /// The waiting queue is not part of that write.
+    /// </summary>
+    internal static event Action? QueueCopied;
+
+    /// <summary>
+    /// Raised after playlists.json is written. The waiting queue is left as it is.
+    /// </summary>
+    internal static event Action? Saved;
+
+    /// <summary>
+    /// The first free name "Queue", then "Queue 2", and so on.
+    /// </summary>
+    public static string NextQueueName()
+    {
+        if (!NameTaken("Queue"))
+        {
+            return "Queue";
+        }
+
+        for (var number = 2; number <= 99; number++)
+        {
+            var candidate = "Queue " + number.ToString(CultureInfo.InvariantCulture);
+            if (!NameTaken(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    public static QueuePlaylistProblem ReadQueueName(string? name, out string clean)
+    {
+        clean = string.Empty;
+        var trimmed = name?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+        {
+            return QueuePlaylistProblem.BlankName;
+        }
+
+        if (trimmed.Length > 80)
+        {
+            return QueuePlaylistProblem.LongName;
+        }
+
+        if (NameTaken(trimmed))
+        {
+            return QueuePlaylistProblem.NameTaken;
+        }
+
+        clean = trimmed;
+        return QueuePlaylistProblem.None;
+    }
+
+    /// <summary>
+    /// Copies waiting videos into a new playlist, in that order.
+    /// A repeated path is kept once, at its first place. A missing file is kept.
+    /// An online video keeps the page address. This does not read or write play-queue.json.
+    /// </summary>
+    public static QueuePlaylistResult SaveFromQueue(string? name, IReadOnlyList<PlayQueueItem>? waiting)
+    {
+        var problem = ReadQueueName(name, out var clean);
+        if (problem != QueuePlaylistProblem.None)
+        {
+            return QueuePlaylistResult.Fail(problem);
+        }
+
+        var videos = new List<PlaylistEntry>();
+        var repeated = 0;
+        var stamp = DateTimeOffset.UtcNow;
+        foreach (var item in waiting ?? [])
+        {
+            var entry = EntryFromQueue(item, stamp);
+            if (entry is null)
+            {
+                continue;
+            }
+
+            if (videos.Any(existing => existing.Resolve == entry.Resolve && SamePath(existing.Location, entry.Location)))
+            {
+                repeated++;
+                continue;
+            }
+
+            videos.Add(entry);
+            stamp = stamp.AddTicks(1);
+        }
+
+        if (videos.Count == 0)
+        {
+            return QueuePlaylistResult.Fail(QueuePlaylistProblem.NothingToSave);
+        }
+
+        var lists = Read();
+        var created = new Playlist
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = clean,
+            CreatedAt = DateTimeOffset.Now.ToString("O"),
+            Videos = videos
+        };
+        lists.Add(created);
+        Write(lists);
+        QueueCopied?.Invoke();
+        return new QueuePlaylistResult(QueuePlaylistProblem.None, created, videos.Count, repeated);
+    }
+
+    private static PlaylistEntry? EntryFromQueue(PlayQueueItem item, DateTimeOffset stamp)
+    {
+        if (item.Kind == PlayQueueKind.Page)
+        {
+            if (!StreamLink.TryNormalize(item.Location, out var url))
+            {
+                return null;
+            }
+
+            var entry = PlaylistEntry.Page(url.AbsoluteUri, item.Title);
+            entry.AddedUtc = stamp;
+            entry.Thumbnail = PlaylistEntry.CleanThumbnail(item.Thumbnail);
+            return entry;
+        }
+
+        var path = item.Location?.Trim();
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        var file = PlaylistEntry.ForFile(path);
+        file.AddedUtc = stamp;
+        return file;
+    }
+
     public static bool Rename(string id, string name)
     {
         var clean = CleanName(name);
@@ -457,7 +592,27 @@ internal static class Playlists
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(lists, JsonOptions));
         PlaylistChanges.NoteSaved();
+        Saved?.Invoke();
     }
+}
+
+internal enum QueuePlaylistProblem
+{
+    None,
+    BlankName,
+    LongName,
+    NameTaken,
+    NothingToSave
+}
+
+internal readonly record struct QueuePlaylistResult(
+    QueuePlaylistProblem Problem,
+    Playlist? Playlist,
+    int Saved,
+    int Repeated)
+{
+    public static QueuePlaylistResult Fail(QueuePlaylistProblem problem)
+        => new(problem, null, 0, 0);
 }
 
 internal sealed class Playlist

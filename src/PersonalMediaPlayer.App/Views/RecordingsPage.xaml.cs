@@ -117,6 +117,8 @@ public sealed partial class RecordingsPage : Page, IPlaybackSource
         CursorSwitch.Toggled += (_, _) => CaptureSettings.SaveIncludeCursor(CursorSwitch.IsOn);
         SystemAudioSwitch.IsOn = CaptureSettings.LoadIncludeSystemAudio();
         SystemAudioSwitch.Toggled += (_, _) => CaptureSettings.SaveIncludeSystemAudio(SystemAudioSwitch.IsOn);
+        MicrophoneSwitch.IsOn = CaptureSettings.LoadIncludeMicrophone();
+        MicrophoneSwitch.Toggled += (_, _) => CaptureSettings.SaveIncludeMicrophone(MicrophoneSwitch.IsOn);
         Loaded += (_, _) =>
         {
             LoadMonitors();
@@ -646,7 +648,8 @@ public sealed partial class RecordingsPage : Page, IPlaybackSource
                 _activePath,
                 CursorSwitch.IsOn,
                 new FrameCrop(_cropX, _cropY, _cropWidth, _cropHeight),
-                SystemAudioSwitch.IsOn);
+                SystemAudioSwitch.IsOn,
+                MicrophoneSwitch.IsOn);
             if (token != _areaToken)
             {
                 try
@@ -693,7 +696,7 @@ public sealed partial class RecordingsPage : Page, IPlaybackSource
             _bar?.SetPaused(false);
             _elapsedTimer?.Dispose();
             _elapsedTimer = new System.Threading.Timer(_ => PublishElapsed(), null, 0, 200);
-            StatusText.Text = SystemAudioSwitch.IsOn ? "Recording speakers." : "Recording.";
+            StatusText.Text = ActiveRecordingStatus();
         }
         catch (Exception ex)
         {
@@ -733,7 +736,12 @@ public sealed partial class RecordingsPage : Page, IPlaybackSource
             Directory.CreateDirectory(PendingDirectory);
             _activePath = Path.Combine(PendingDirectory, $"Recording {DateTime.Now:yyyy-MM-dd HH-mm-ss}.mp4");
             StatusText.Text = "Starting…";
-            _recorder = await ScreenRecorder.StartAsync(item, _activePath, CursorSwitch.IsOn, includeSystemAudio: SystemAudioSwitch.IsOn);
+            _recorder = await ScreenRecorder.StartAsync(
+                item,
+                _activePath,
+                CursorSwitch.IsOn,
+                includeSystemAudio: SystemAudioSwitch.IsOn,
+                includeMicrophone: MicrophoneSwitch.IsOn);
             SetRecordingState(active: true);
             TimerText.Text = "00:00";
             _elapsedTimer?.Dispose();
@@ -744,7 +752,7 @@ public sealed partial class RecordingsPage : Page, IPlaybackSource
                 ScreenshotSession.HideWindow(App.MainAppWindow);
             }
 
-            StatusText.Text = SystemAudioSwitch.IsOn ? "Recording speakers." : "Recording.";
+            StatusText.Text = ActiveRecordingStatus();
         }
         catch (Exception ex)
         {
@@ -1047,6 +1055,29 @@ public sealed partial class RecordingsPage : Page, IPlaybackSource
         RefreshWindowsButton.IsEnabled = !active;
         CursorSwitch.IsEnabled = !active;
         SystemAudioSwitch.IsEnabled = !active;
+        MicrophoneSwitch.IsEnabled = !active;
+    }
+
+    private string ActiveRecordingStatus()
+    {
+        var speakers = SystemAudioSwitch.IsOn;
+        var microphone = MicrophoneSwitch.IsOn;
+        if (speakers && microphone)
+        {
+            return "Recording speakers and microphone.";
+        }
+
+        if (speakers)
+        {
+            return "Recording speakers.";
+        }
+
+        if (microphone)
+        {
+            return "Recording microphone.";
+        }
+
+        return "Recording.";
     }
 
     private void ShowPreview(string path, bool saved)

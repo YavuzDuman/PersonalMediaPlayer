@@ -160,7 +160,7 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            HandoffBar.IsOpen = false;
+            CloseHandoff();
             var directName = focus?.SourceName is string source && !string.IsNullOrWhiteSpace(source)
                 ? source.Trim()
                 : StreamLink.DisplayName(result.Url);
@@ -210,7 +210,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        HandoffBar.IsOpen = false;
+        CloseHandoff();
         Shell.OpenStream(new StreamOpenRequest(
             choice.Media,
             choice.Title,
@@ -222,14 +222,28 @@ public sealed partial class MainWindow : Window
             choice.Quality,
             focus,
             choice.Thumbnail,
-            choice.Chapters));
+            choice.Chapters,
+            choice.Live));
     }
 
     private void ShowHandoff(string message, InfoBarSeverity severity)
     {
         HandoffBar.Severity = severity;
         HandoffBar.Message = message;
+        // The closed bar keeps no vertical margin, so the page title stays put until a message is showing.
+        HandoffBar.Margin = new Thickness(16, 8, 16, 8);
         HandoffBar.IsOpen = true;
+    }
+
+    private void CloseHandoff()
+    {
+        HandoffBar.IsOpen = false;
+        HandoffBar.Margin = new Thickness(16, 0, 16, 0);
+    }
+
+    private void HandoffBar_Closed(InfoBar sender, InfoBarClosedEventArgs args)
+    {
+        HandoffBar.Margin = new Thickness(16, 0, 16, 0);
     }
 
     private void BringToFront()

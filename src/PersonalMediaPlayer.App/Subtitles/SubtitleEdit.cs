@@ -78,6 +78,35 @@ internal static class SubtitleEdit
         return output;
     }
 
+    public static string SuggestedName(string? title)
+    {
+        var source = string.IsNullOrWhiteSpace(title) ? "Captions" : title.Trim();
+        var slash = Math.Max(source.LastIndexOf('\\'), source.LastIndexOf('/'));
+        if (slash >= 0 && slash < source.Length - 1)
+        {
+            source = source[(slash + 1)..];
+        }
+
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string(source.Select(character => invalid.Contains(character) ? ' ' : character).ToArray());
+        cleaned = string.Join(' ', cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        foreach (var extension in new[] { ".mp4", ".mkv", ".mov", ".webm", ".m4v", ".avi", ".wmv", ".m4a", ".srt" })
+        {
+            if (cleaned.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned[..^extension.Length].Trim();
+                break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(cleaned))
+        {
+            cleaned = "Captions";
+        }
+
+        return cleaned.Length > 120 ? cleaned[..120].Trim() : cleaned;
+    }
+
     public static string ToSrt(IReadOnlyList<SubtitleCue> cues)
     {
         var text = new StringBuilder();

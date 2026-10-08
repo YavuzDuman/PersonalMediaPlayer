@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Personal Media Player",
-  "version": "0.3.0",
-  "description": "Open a video from the current page in Personal Media Player.",
+  "version": "0.4.3",
+  "description": "Open the video or live stream on the current page in Personal Media Player.",
   "permissions": ["tabs"],
   "background": {
     "service_worker": "background.js"
@@ -13,7 +13,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["content.js"],
+      "js": ["stream-page.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

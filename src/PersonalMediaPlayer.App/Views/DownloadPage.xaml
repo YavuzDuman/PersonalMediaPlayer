@@ -234,7 +234,6 @@
                                     x:Name="VideoHost"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch" />
-                                <controls:HoverCaptions x:Name="Captions" />
                                 <StackPanel
                                     x:Name="AudioMark"
                                     HorizontalAlignment="Center"
@@ -246,6 +245,7 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
+                        <controls:HoverCaptions x:Name="Captions" />
                         <controls:VideoPlaybackBar
                             x:Name="Playback"
                             Margin="16"

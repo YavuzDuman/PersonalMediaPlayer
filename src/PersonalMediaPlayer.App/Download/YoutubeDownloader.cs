@@ -27,6 +27,8 @@ public sealed record PlaylistListing(string Title, IReadOnlyList<PlaylistVideo> 
 internal sealed record PlaybackSource(string Title, Uri Media, Uri? Audio, DownloadQuality Quality, IReadOnlyList<DownloadSubtitle> Subtitles, Uri? Thumbnail = null)
 {
     public IReadOnlyList<VideoChapter> Chapters { get; init; } = [];
+
+    public bool Live { get; init; }
 }
 
 internal static class YoutubeDownloader
@@ -258,6 +260,12 @@ internal static class YoutubeDownloader
 
     internal static async Task<PlaybackSource> ResolvePlaybackAsync(string url, IProgress<string>? status, CancellationToken cancellationToken)
     {
+        if (await TryResolveListedKickVideoAsync(url, cancellationToken) is PlaybackSource kickVideo)
+        {
+            return kickVideo;
+        }
+
+        url = await NormalizePlaybackPageAsync(url, cancellationToken);
         var ytdlp = await EnsureYtDlpAsync(status, cancellationToken);
         var runtime = await EnsureJsRuntimeAsync(status, cancellationToken);
         string json;
@@ -282,6 +290,12 @@ internal static class YoutubeDownloader
 
     internal static async Task<IReadOnlyList<DownloadSubtitle>> ResolveCaptionsAsync(string url, CancellationToken cancellationToken)
     {
+        if (TryKickVideoPage(url, out _, out _))
+        {
+            return [];
+        }
+
+        url = await NormalizePlaybackPageAsync(url, cancellationToken);
         var ytdlp = await EnsureYtDlpAsync(null, cancellationToken);
         var runtime = await EnsureJsRuntimeAsync(null, cancellationToken);
         var json = await RunAsync(ytdlp, CaptionLookupArgs(runtime, url), null, cancellationToken);
@@ -295,6 +309,497 @@ internal static class YoutubeDownloader
             return [];
         }
     }
+
+    internal const string KickVideoUnavailableMessage = "This Kick video could not be opened.";
+
+    internal static bool TryKickVideoSlug(string url, out string channel, out string slug)
+    {
+        channel = "";
+        slug = "";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        {
+            return false;
+        }
+
+        var host = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host;
+        if (!host.Equals("kick.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || !parts[1].Equals("videos", StringComparison.OrdinalIgnoreCase) || IsKickUuid(parts[2]))
+        {
+            return false;
+        }
+
+        channel = parts[0];
+        slug = parts[2];
+        return channel.Length > 0 && slug.Length > 0;
+    }
+
+    internal static bool TryKickVideoPage(string url, out string channel, out string token)
+    {
+        channel = "";
+        token = "";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        {
+            return false;
+        }
+
+        var host = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host;
+        if (!host.Equals("kick.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || !parts[1].Equals("videos", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        channel = parts[0];
+        token = parts[2];
+        return channel.Length > 0 && token.Length > 0;
+    }
+
+    internal sealed record KickListedVideo(string Title, Uri Source, Uri? Thumbnail, bool Live);
+
+    internal static async Task<PlaybackSource?> TryResolveListedKickVideoAsync(string url, CancellationToken cancellationToken)
+    {
+        if (!TryKickVideoPage(url, out var channel, out var token))
+        {
+            return null;
+        }
+
+        var listed = await FindKickListedVideoAsync(channel, token, cancellationToken);
+        if (listed is null)
+        {
+            throw new InvalidOperationException(KickVideoUnavailableMessage);
+        }
+
+        return new PlaybackSource(
+            listed.Title,
+            listed.Source,
+            null,
+            new DownloadQuality("Best available", "best", false),
+            [],
+            listed.Thumbnail)
+        {
+            Live = listed.Live
+        };
+    }
+
+    internal static KickListedVideo? ReadKickListedVideo(string json, string token)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data))
+        {
+            root = data;
+        }
+
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                if (ReadKickVideoItem(item, token) is KickListedVideo listed)
+                {
+                    return listed;
+                }
+            }
+
+            return null;
+        }
+
+        return ReadKickVideoItem(root, token);
+    }
+
+    private static async Task<KickListedVideo?> FindKickListedVideoAsync(string channel, string token, CancellationToken cancellationToken)
+    {
+        string? firstOnPreviousPage = null;
+        for (var page = 1; page <= 5; page++)
+        {
+            var address = "https://kick.com/api/v2/channels/" + Uri.EscapeDataString(channel) + "/videos?page=" + page.ToString(CultureInfo.InvariantCulture);
+            var body = await GetKickJsonAsync(address, cancellationToken);
+            if (body is null)
+            {
+                break;
+            }
+
+            try
+            {
+                if (ReadKickListedVideo(body, token) is KickListedVideo listed)
+                {
+                    return listed;
+                }
+            }
+            catch (JsonException)
+            {
+                break;
+            }
+
+            List<string> slugs;
+            try
+            {
+                slugs = KickPageSlugs(body);
+            }
+            catch (JsonException)
+            {
+                break;
+            }
+            if (slugs.Count == 0 || slugs[0] == firstOnPreviousPage)
+            {
+                break;
+            }
+
+            firstOnPreviousPage = slugs[0];
+        }
+
+        if (IsKickUuid(token))
+        {
+            var single = await GetKickJsonAsync("https://kick.com/api/v1/video/" + Uri.EscapeDataString(token), cancellationToken);
+            if (single is not null)
+            {
+                try
+                {
+                    if (ReadKickListedVideo(single, token) is KickListedVideo fromId)
+                    {
+                        return fromId;
+                    }
+                }
+                catch (JsonException)
+                {
+                }
+            }
+        }
+
+        // The videos page addresses a saved video by its own id. That id is not the
+        // stream slug, and it is not in the short channel list above.
+        return await FindKickRecordingAsync(channel, token, cancellationToken);
+    }
+
+    private static async Task<KickListedVideo?> FindKickRecordingAsync(string channel, string token, CancellationToken cancellationToken)
+    {
+        var channelBody = await GetKickJsonAsync("https://kick.com/api/v1/channels/" + Uri.EscapeDataString(channel), cancellationToken);
+        if (channelBody is null)
+        {
+            return null;
+        }
+
+        long? channelId;
+        try
+        {
+            channelId = ReadKickChannelId(channelBody);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        if (channelId is null)
+        {
+            return null;
+        }
+
+        var detail = await GetKickJsonAsync(
+            "https://web.kick.com/api/v1/channels/" + channelId.Value.ToString(CultureInfo.InvariantCulture) + "/videos/" + Uri.EscapeDataString(token),
+            cancellationToken);
+        if (detail is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return ReadKickWebVideo(detail, token);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    internal static long? ReadKickChannelId(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+        {
+            root = data;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("id", out var id))
+        {
+            return null;
+        }
+
+        if (id.ValueKind == JsonValueKind.Number && id.TryGetInt64(out var number) && number > 0)
+        {
+            return number;
+        }
+
+        if (id.ValueKind == JsonValueKind.String && long.TryParse(id.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0)
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    internal static KickListedVideo? ReadKickWebVideo(string json, string token)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+        {
+            root = data;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var id = Text(root, "id");
+        if (!string.IsNullOrWhiteSpace(id) && !string.Equals(id, token, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var source = Text(root, "recording_url");
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = Text(root, "source");
+        }
+
+        if (!Uri.TryCreate(source, UriKind.Absolute, out var media) || media.Scheme is not ("http" or "https"))
+        {
+            return null;
+        }
+
+        var title = Text(root, "title");
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = Text(root, "session_title");
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = "Video";
+        }
+
+        var live = root.TryGetProperty("is_live", out var liveFlag) && liveFlag.ValueKind == JsonValueKind.True;
+        return new KickListedVideo(title, media, ReadKickThumbnail(root), live);
+    }
+
+    private static async Task<string?> GetKickJsonAsync(string address, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, address);
+        request.Headers.UserAgent.ParseAdd("Mozilla/5.0");
+        request.Headers.Accept.ParseAdd("application/json");
+        using var response = await Http.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadAsStringAsync(cancellationToken);
+    }
+
+    private static KickListedVideo? ReadKickVideoItem(JsonElement item, string token)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var slug = Text(item, "slug");
+        var uuid = item.TryGetProperty("video", out var video) && video.ValueKind == JsonValueKind.Object
+            ? Text(video, "uuid")
+            : Text(item, "uuid");
+        var matches = string.Equals(slug, token, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uuid, token, StringComparison.OrdinalIgnoreCase);
+        if (!matches)
+        {
+            return null;
+        }
+
+        var source = Text(item, "source");
+        if (!Uri.TryCreate(source, UriKind.Absolute, out var media) || media.Scheme is not ("http" or "https"))
+        {
+            return null;
+        }
+
+        var title = Text(item, "session_title");
+        if (string.IsNullOrWhiteSpace(title) && item.TryGetProperty("livestream", out var livestream))
+        {
+            title = Text(livestream, "session_title");
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = "Video";
+        }
+
+        var live = item.TryGetProperty("is_live", out var liveFlag) && liveFlag.ValueKind == JsonValueKind.True;
+        if (!live && item.TryGetProperty("livestream", out var stream) && stream.ValueKind == JsonValueKind.Object
+            && stream.TryGetProperty("is_live", out var nestedLive))
+        {
+            live = nestedLive.ValueKind == JsonValueKind.True;
+        }
+
+        return new KickListedVideo(title, media, ReadKickThumbnail(item), live);
+    }
+
+    private static List<string> KickPageSlugs(string json)
+    {
+        var slugs = new List<string>();
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data))
+        {
+            root = data;
+        }
+
+        if (root.ValueKind != JsonValueKind.Array)
+        {
+            return slugs;
+        }
+
+        foreach (var item in root.EnumerateArray())
+        {
+            var slug = Text(item, "slug");
+            if (!string.IsNullOrWhiteSpace(slug))
+            {
+                slugs.Add(slug);
+            }
+        }
+
+        return slugs;
+    }
+
+    private static Uri? ReadKickThumbnail(JsonElement item)
+    {
+        if (!item.TryGetProperty("thumbnail", out var thumbnail))
+        {
+            return null;
+        }
+
+        var value = thumbnail.ValueKind switch
+        {
+            JsonValueKind.String => thumbnail.GetString(),
+            JsonValueKind.Object => Text(thumbnail, "src") ?? Text(thumbnail, "url"),
+            _ => null
+        };
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" ? uri : null;
+    }
+
+    internal static async Task<string> NormalizePlaybackPageAsync(string url, CancellationToken cancellationToken)
+    {
+        if (!TryKickVideoSlug(url, out var channel, out var slug))
+        {
+            return url;
+        }
+
+        var uuid = await FindKickVideoUuidAsync(channel, slug, cancellationToken);
+        if (uuid is null)
+        {
+            throw new InvalidOperationException(KickVideoUnavailableMessage);
+        }
+
+        return "https://kick.com/" + channel + "/videos/" + uuid;
+    }
+
+    private static async Task<string?> FindKickVideoUuidAsync(string channel, string slug, CancellationToken cancellationToken)
+    {
+        string? firstOnPreviousPage = null;
+        for (var page = 1; page <= 5; page++)
+        {
+            var address = "https://kick.com/api/v2/channels/" + Uri.EscapeDataString(channel) + "/videos?page=" + page.ToString(CultureInfo.InvariantCulture);
+            using var request = new HttpRequestMessage(HttpMethod.Get, address);
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0");
+            request.Headers.Accept.ParseAdd("application/json");
+            using var response = await Http.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            List<string> slugs;
+            try
+            {
+                slugs = ReadKickVideoPage(body, slug, out var uuid);
+                if (uuid is not null)
+                {
+                    return uuid;
+                }
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            if (slugs.Count == 0 || slugs[0] == firstOnPreviousPage)
+            {
+                return null;
+            }
+
+            firstOnPreviousPage = slugs[0];
+        }
+
+        return null;
+    }
+
+    private static List<string> ReadKickVideoPage(string json, string slug, out string? uuid)
+    {
+        uuid = null;
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data))
+        {
+            root = data;
+        }
+
+        var slugs = new List<string>();
+        if (root.ValueKind != JsonValueKind.Array)
+        {
+            return slugs;
+        }
+
+        foreach (var item in root.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var itemSlug = Text(item, "slug");
+            if (string.IsNullOrWhiteSpace(itemSlug))
+            {
+                continue;
+            }
+
+            slugs.Add(itemSlug);
+            if (!itemSlug.Equals(slug, StringComparison.Ordinal) || !item.TryGetProperty("video", out var video) || video.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var id = Text(video, "uuid");
+            if (IsKickUuid(id))
+            {
+                uuid = id;
+            }
+        }
+
+        return slugs;
+    }
+
+    private static bool IsKickUuid(string? value)
+        => !string.IsNullOrWhiteSpace(value) && Guid.TryParse(value, out _);
 
     internal static List<string> PlaybackLookupArgs(string? runtime, string url)
         => CommonArgs(runtime, "--dump-single-json", url);
@@ -323,10 +828,7 @@ internal static class YoutubeDownloader
                     continue;
                 }
 
-                var videoCodec = Text(format, "vcodec");
-                var audioCodec = Text(format, "acodec");
-                var hasVideo = HasCodec(videoCodec) && !videoCodec!.Equals("images", StringComparison.OrdinalIgnoreCase);
-                var hasAudio = HasCodec(audioCodec);
+                ReadPictureAndSound(format, out var hasVideo, out var hasAudio);
                 if (!hasVideo && !hasAudio)
                 {
                     continue;
@@ -358,9 +860,9 @@ internal static class YoutubeDownloader
                 var extension = Text(format, "ext");
                 var score = format.TryGetProperty("tbr", out var rate) && rate.ValueKind == JsonValueKind.Number ? rate.GetDouble() : 0;
                 var rank = hasVideo
-                    ? FormatRank(protocol, extension, videoCodec, hasAudio)
-                    : FormatRank(protocol, extension, audioCodec, true);
-                candidates.Add(new PlayCandidate(height, rank, score, address, hasVideo, hasAudio, IsFragmented(format)));
+                    ? FormatRank(protocol, extension, Text(format, "vcodec"), hasAudio)
+                    : FormatRank(protocol, extension, Text(format, "acodec"), true);
+                candidates.Add(new PlayCandidate(height, rank, score, address, hasVideo, hasAudio, IsFragmented(format), ShapeOf(format, address)));
             }
         }
 
@@ -368,6 +870,12 @@ internal static class YoutubeDownloader
         var playable = candidates.Any(item => item.Video && !item.Fragmented)
             ? candidates.Where(item => !item.Fragmented)
             : candidates;
+        var sourceShape = ShapeOf(root, null);
+        if (sourceShape != PictureShape.Unknown && playable.Any(item => item.Video && item.Shape == sourceShape))
+        {
+            var opposite = sourceShape == PictureShape.Landscape ? PictureShape.Portrait : PictureShape.Landscape;
+            playable = playable.Where(item => !item.Video || item.Shape != opposite);
+        }
         var combined = Best(playable.Where(item => item.Video && item.Audio));
         var picture = Best(playable.Where(item => item.Video && !item.Audio));
         var sound = Best(playable.Where(item => !item.Video && item.Audio));
@@ -397,17 +905,23 @@ internal static class YoutubeDownloader
             ?? new DownloadQuality("Best available", "bestvideo+bestaudio/best", false);
         return new PlaybackSource(title, chosen.Address, audio, quality, ReadSubtitles(root), ReadThumbnail(root))
         {
-            Chapters = VideoChapters.FromLookup(root)
+            Chapters = VideoChapters.FromLookup(root),
+            Live = IsLiveLookup(root)
         };
     }
 
+    private static bool IsLiveLookup(JsonElement root)
+        => root.TryGetProperty("is_live", out var live) && live.ValueKind == JsonValueKind.True
+            || string.Equals(Text(root, "live_status"), "is_live", StringComparison.OrdinalIgnoreCase);
+
     internal static async Task<string?> FetchSubtitleAsync(string pageUrl, DownloadSubtitle subtitle, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(subtitle.Language))
+        if (string.IsNullOrWhiteSpace(subtitle.Language) || TryKickVideoPage(pageUrl, out _, out _))
         {
             return null;
         }
 
+        pageUrl = await NormalizePlaybackPageAsync(pageUrl, cancellationToken);
         var cache = PageSubtitlePath(pageUrl, subtitle.Language);
         if (File.Exists(cache) && new FileInfo(cache).Length > 0)
         {
@@ -1094,7 +1608,14 @@ internal static class YoutubeDownloader
     private static string? Text(JsonElement element, string name)
         => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    private readonly record struct PlayCandidate(int Height, int Rank, double Score, Uri Address, bool Video, bool Audio, bool Fragmented);
+    private readonly record struct PlayCandidate(int Height, int Rank, double Score, Uri Address, bool Video, bool Audio, bool Fragmented, PictureShape Shape);
+
+    private enum PictureShape
+    {
+        Unknown,
+        Landscape,
+        Portrait
+    }
 
     private static bool IsFragmented(JsonElement format)
     {
@@ -1107,6 +1628,57 @@ internal static class YoutubeDownloader
         }
 
         return format.TryGetProperty("init_range", out var range) && range.ValueKind == JsonValueKind.Object;
+    }
+
+    private static PictureShape ShapeOf(JsonElement element, Uri? address)
+    {
+        if (element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty("aspect_ratio", out var aspect)
+            && aspect.ValueKind == JsonValueKind.Number
+            && aspect.TryGetDouble(out var ratio))
+        {
+            if (ratio > 1.05)
+            {
+                return PictureShape.Landscape;
+            }
+
+            if (ratio > 0 && ratio < 0.95)
+            {
+                return PictureShape.Portrait;
+            }
+        }
+
+        var width = element.ValueKind == JsonValueKind.Object && element.TryGetProperty("width", out var widthElement) && widthElement.ValueKind == JsonValueKind.Number
+            ? widthElement.GetInt32()
+            : 0;
+        var height = element.ValueKind == JsonValueKind.Object && element.TryGetProperty("height", out var heightElement) && heightElement.ValueKind == JsonValueKind.Number
+            ? heightElement.GetInt32()
+            : 0;
+        if (width > 0 && height > 0)
+        {
+            if (width > height)
+            {
+                return PictureShape.Landscape;
+            }
+
+            if (height > width)
+            {
+                return PictureShape.Portrait;
+            }
+        }
+
+        var label = (Text(element, "format_id") ?? "") + " " + (address?.AbsolutePath ?? "");
+        if (label.Contains("portrait", StringComparison.OrdinalIgnoreCase))
+        {
+            return PictureShape.Portrait;
+        }
+
+        if (label.Contains("landscape", StringComparison.OrdinalIgnoreCase))
+        {
+            return PictureShape.Landscape;
+        }
+
+        return PictureShape.Unknown;
     }
 
     private static PlayCandidate? Best(IEnumerable<PlayCandidate> items)
@@ -1137,7 +1709,45 @@ internal static class YoutubeDownloader
     }
 
     private static bool HasCodec(string? codec)
-        => !string.IsNullOrEmpty(codec) && !codec.Equals("none", StringComparison.OrdinalIgnoreCase);
+        => !string.IsNullOrEmpty(codec) && !codec.Equals("none", StringComparison.OrdinalIgnoreCase) && !codec.Equals("images", StringComparison.OrdinalIgnoreCase);
+
+    private static void ReadPictureAndSound(JsonElement format, out bool hasVideo, out bool hasAudio)
+    {
+        var videoCodec = Text(format, "vcodec");
+        var audioCodec = Text(format, "acodec");
+        hasVideo = HasCodec(videoCodec);
+        hasAudio = HasCodec(audioCodec);
+        if (hasVideo || hasAudio)
+        {
+            return;
+        }
+
+        if (string.Equals(videoCodec, "none", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(audioCodec, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var extension = Text(format, "ext");
+        var videoExtension = Text(format, "video_ext");
+        var protocol = Text(format, "protocol");
+        var height = format.TryGetProperty("height", out var heightElement) && heightElement.ValueKind == JsonValueKind.Number
+            ? heightElement.GetInt32()
+            : 0;
+        var container = IsVideoContainer(videoExtension) || IsVideoContainer(extension);
+        var playlist = protocol?.Contains("m3u8", StringComparison.OrdinalIgnoreCase) == true;
+        if (height <= 0 && !container && !playlist)
+        {
+            return;
+        }
+
+        // Twitch clips and Kick clips leave the codec fields empty. The file still has picture and sound.
+        hasVideo = true;
+        hasAudio = true;
+    }
+
+    private static bool IsVideoContainer(string? extension)
+        => extension is "mp4" or "webm" or "mkv" or "mov" or "m4v";
 
     private static bool IsDrm(JsonElement format)
     {

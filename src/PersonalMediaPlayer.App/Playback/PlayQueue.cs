@@ -67,6 +67,7 @@ internal sealed class PlayQueueItem
 /// Each change is written to <c>play-queue.json</c>, separate from playlists and the download queue.
 /// <see cref="Load"/> restores that order and does not start playback. A missing local file stays in the list.
 /// Add appends. Play next inserts at the front. <see cref="Move"/> reorders this list only.
+/// Saving these videos as a playlist is <see cref="Playlists.SaveFromQueue"/>, which writes playlists.json and leaves this file as it is.
 /// <see cref="Remove"/> and <see cref="ClearWaiting"/> each keep one previous list for <see cref="Undo"/>.
 /// That undo lasts until the app closes. <see cref="Clear"/> drops the in-memory list for tests and does not erase the file.
 /// An A–B section is restarted by the player before <see cref="Advance"/> is asked, so a section loop is not skipped for the queue.

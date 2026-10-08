@@ -32,9 +32,7 @@
             <ListView
                 x:Name="Results"
                 Grid.Row="3"
-                IsItemClickEnabled="True"
-                SelectionMode="None"
-                ItemClick="Results_ItemClick">
+                SelectionMode="None">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -43,21 +41,47 @@
                 </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate>
-                        <Grid ColumnSpacing="8" Padding="4,6">
+                        <Grid ColumnSpacing="8" Padding="0,2">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="72" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock
-                                VerticalAlignment="Top"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="{Binding Time}" />
-                            <TextBlock
+                            <Button
+                                Padding="4,4"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                Click="Hit_Click"
+                                Style="{StaticResource RowButtonStyle}">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        VerticalAlignment="Top"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        IsHitTestVisible="False"
+                                        Text="{Binding Time}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        MaxLines="4"
+                                        IsHitTestVisible="False"
+                                        Text="{Binding Line}"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="Wrap" />
+                                </Grid>
+                            </Button>
+                            <Button
                                 Grid.Column="1"
-                                MaxLines="4"
-                                Text="{Binding Line}"
-                                TextTrimming="CharacterEllipsis"
-                                TextWrapping="Wrap" />
+                                MinWidth="72"
+                                MinHeight="32"
+                                Padding="10,0"
+                                VerticalAlignment="Center"
+                                Click="SaveHit_Click"
+                                Content="{Binding SaveLabel}"
+                                IsEnabled="{Binding CanSave}"
+                                Style="{StaticResource ActionButtonStyle}"
+                                ToolTipService.ToolTip="{Binding SaveTip}" />
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>

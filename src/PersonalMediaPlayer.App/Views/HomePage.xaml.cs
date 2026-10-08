@@ -14,8 +14,6 @@ using PersonalMediaPlayer.App.Storage;
 using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Models;
 using Windows.Foundation;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace PersonalMediaPlayer.App.Views;
 
@@ -32,6 +30,8 @@ public sealed partial class HomePage : Page
     private bool _left;
     private bool _continueAll;
     private int _searchGeneration;
+    private double _pendingSearchOffset;
+    private bool _restoreSearchOffset;
 
     public HomePage()
     {
@@ -41,7 +41,12 @@ public sealed partial class HomePage : Page
         CardDragScroll.Attach(PlaylistPreviewRow);
         CardDragScroll.Attach(RecentRow);
         LibraryWatch.Changed += OnLibraryWatchChanged;
-        Unloaded += (_, _) => LibraryWatch.Changed -= OnLibraryWatchChanged;
+        Playlists.QueueCopied += OnQueueCopied;
+        Unloaded += (_, _) =>
+        {
+            LibraryWatch.Changed -= OnLibraryWatchChanged;
+            Playlists.QueueCopied -= OnQueueCopied;
+        };
         PlaylistPreview.PointerEntered += (_, _) => _previewTicket++;
         PlaylistPreview.PointerExited += PlaylistPreview_Exited;
         ContinueSection.SizeChanged += (_, _) => LayoutContinueGrid();
@@ -67,6 +72,8 @@ public sealed partial class HomePage : Page
         if (!_continueAll)
         {
             saved = SearchSession.Recall(SearchSession.Home);
+            _restoreSearchOffset = !string.IsNullOrWhiteSpace(saved.Text);
+            _pendingSearchOffset = saved.Offset;
             if (!string.Equals(SearchBox.Text, saved.Text, StringComparison.Ordinal))
             {
                 SearchBox.Text = saved.Text;
@@ -98,6 +105,7 @@ public sealed partial class HomePage : Page
         }
 
         _left = true;
+        _searchGeneration++;
         _previewTicket++;
         _linkGeneration++;
         _linkCheck?.Cancel();
@@ -121,6 +129,19 @@ public sealed partial class HomePage : Page
         Show();
     }
 
+    private void OnQueueCopied()
+    {
+        if (_left || _continueAll || HasSearch())
+        {
+            return;
+        }
+
+        if (!DispatcherQueue.TryEnqueue(ShowPlaylists))
+        {
+            ShowPlaylists();
+        }
+    }
+
     private void Show()
     {
         if (_left)
@@ -128,6 +149,7 @@ public sealed partial class HomePage : Page
             return;
         }
 
+        var generation = ++_searchGeneration;
         if (_continueAll)
         {
             PageTitle.Text = "Continue watching";
@@ -155,11 +177,13 @@ public sealed partial class HomePage : Page
         if (HasSearch())
         {
             ClosePreview();
-            ShowSearch();
+            ShowSearch(generation);
             return;
         }
 
+        _restoreSearchOffset = false;
         SearchSection.Visibility = Visibility.Collapsed;
+        HideCaptionHits();
         ShowContinue();
         ShowPlaylists();
         ShowRecent();
@@ -644,7 +668,7 @@ public sealed partial class HomePage : Page
     private bool HasSearch()
         => !_continueAll && !string.IsNullOrWhiteSpace(SearchBox.Text);
 
-    private void ShowSearch()
+    private void ShowSearch(int generation)
     {
         ContinueSection.Visibility = Visibility.Collapsed;
         PlaylistsSection.Visibility = Visibility.Collapsed;
@@ -654,9 +678,14 @@ public sealed partial class HomePage : Page
         EmptyState.Visibility = Visibility.Collapsed;
         SearchSection.Visibility = Visibility.Visible;
         SearchList.Children.Clear();
-        var generation = ++_searchGeneration;
-        var hits = HomeSearch.Find(SearchBox.Text, App.MediaLibrary.GetItems(), Playlists.All());
+        HideCaptionHits();
+        var restoreOffset = _restoreSearchOffset;
+        _restoreSearchOffset = false;
+        var query = SearchBox.Text;
+        var library = App.MediaLibrary.GetItems();
+        var hits = HomeSearch.Find(query, library, Playlists.All());
         var any = hits.Count > 0;
+        SearchEmpty.Text = any ? "Nothing matches." : "Looking through saved captions…";
         SearchEmpty.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
         SearchCard.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
         for (var index = 0; index < hits.Count; index++)
@@ -668,6 +697,148 @@ public sealed partial class HomePage : Page
 
             SearchList.Children.Add(SearchRow(hits[index], generation));
         }
+
+        _ = FindCaptionsAsync(query, library, generation, any, restoreOffset);
+    }
+
+    private async Task FindCaptionsAsync(
+        string query,
+        IReadOnlyList<MediaItem> library,
+        int generation,
+        bool anyNames,
+        bool restoreOffset)
+    {
+        LibraryCaptionMatch match;
+        try
+        {
+            match = await Task.Run(() => LibraryCaptionSearch.Search(query, library));
+        }
+        catch (Exception)
+        {
+            match = new LibraryCaptionMatch([], false);
+        }
+
+        if (generation != _searchGeneration)
+        {
+            return;
+        }
+
+        void Apply()
+        {
+            if (generation != _searchGeneration || _left)
+            {
+                return;
+            }
+
+            ShowCaptionHits(match, anyNames);
+            if (restoreOffset)
+            {
+                SearchScroll.Restore(PageScroll, _pendingSearchOffset);
+            }
+        }
+
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            Apply();
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(Apply);
+    }
+
+    private void HideCaptionHits()
+    {
+        CaptionList.Children.Clear();
+        CaptionHeading.Visibility = Visibility.Collapsed;
+        CaptionCard.Visibility = Visibility.Collapsed;
+        CaptionMore.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowCaptionHits(LibraryCaptionMatch match, bool anyNames)
+    {
+        CaptionList.Children.Clear();
+        var any = match.Hits.Count > 0;
+        CaptionHeading.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+        CaptionCard.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+        CaptionMore.Visibility = any && match.Truncated ? Visibility.Visible : Visibility.Collapsed;
+        if (!any)
+        {
+            if (!anyNames)
+            {
+                SearchEmpty.Text = "Nothing matches.";
+                SearchEmpty.Visibility = Visibility.Visible;
+            }
+
+            return;
+        }
+
+        SearchEmpty.Visibility = Visibility.Collapsed;
+        for (var index = 0; index < match.Hits.Count; index++)
+        {
+            if (index > 0)
+            {
+                CaptionList.Children.Add(RowDivider());
+            }
+
+            CaptionList.Children.Add(CaptionRow(match.Hits[index]));
+        }
+    }
+
+    private UIElement CaptionRow(LibraryCaptionHit hit)
+    {
+        var clock = VideoChapters.Format(hit.StartMs);
+        var detail = clock + " · " + hit.Line;
+        var text = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = 2,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = hit.Title,
+                    Style = AppStyle("BodyStrongTextBlockStyle"),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 2
+                },
+                new TextBlock
+                {
+                    Text = detail,
+                    Style = PageStyle("HomeSecondaryTextStyle"),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 2
+                }
+            }
+        };
+        var button = new Button
+        {
+            Style = AppStyle("RowButtonStyle"),
+            Content = text
+        };
+        button.SizeChanged += (_, args) =>
+        {
+            var room = args.NewSize.Width - button.Padding.Left - button.Padding.Right;
+            text.MaxWidth = room > 40 ? room : 40;
+        };
+        ToolTipService.SetToolTip(button, hit.Title + Environment.NewLine + detail);
+        button.Click += (_, _) => OpenCaption(hit);
+        return button;
+    }
+
+    private void OpenCaption(LibraryCaptionHit hit)
+    {
+        var item = App.MediaLibrary.GetItems().FirstOrDefault(media =>
+            string.Equals(media.FilePath, hit.FilePath, StringComparison.OrdinalIgnoreCase));
+        if (item is null || !File.Exists(item.FilePath))
+        {
+            Status(item is { IsMissing: true }
+                ? "This file is missing. Locate it in the library to keep saved words, bookmarks, the playback position, and playlist entries."
+                : "That file is no longer on this PC.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        NavigationHelper.OpenPlayer(new VideoOpenRequest(item, hit.StartMs));
     }
 
     private UIElement SearchRow(HomeHit hit, int generation)
@@ -872,16 +1043,8 @@ public sealed partial class HomePage : Page
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 240);
-            if (generation != _searchGeneration || _left || thumb is null || thumb.Size == 0)
-            {
-                return;
-            }
-
-            var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(thumb);
-            if (generation != _searchGeneration || _left)
+            var bitmap = await VideoThumbnail.LoadAsync(path, 240);
+            if (generation != _searchGeneration || _left || bitmap is null)
             {
                 return;
             }
@@ -1178,12 +1341,18 @@ public sealed partial class HomePage : Page
 
     private void OpenSection(Type page, object? parameter = null)
     {
+        var ease = Frame.Content is not null;
         if (!Frame.Navigate(page, parameter))
         {
             return;
         }
 
         Frame.BackStack.Clear();
+        if (ease)
+        {
+            SectionArrival.Play(Frame.Content as UIElement);
+        }
+
         if (App.MainAppWindow is MainWindow window)
         {
             window.SyncNavigationSelection();

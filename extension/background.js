@@ -1,3 +1,5 @@
+importScripts("stream-page.js");
+
 const ACTION_TITLE = "Open in Personal Media Player";
 const NO_VIDEO_TITLE = "This page has no direct video file yet.";
 
@@ -118,8 +120,20 @@ function refreshTab(tabId, url, settled) {
         return;
       }
 
-      // Chrome does not run the content script on a video file, so the tab address is the media.
-      return settled ? showDirect(tabId, key) : showPending(tabId, key);
+      const stream = canonicalStream(url);
+      if (stream && stream.specific) {
+        return showList(tabId, key, [{
+          kind: "page",
+          src: stream.url,
+          label: "This page",
+          currentTime: 0,
+          id: 0
+        }]);
+      }
+
+      // Chrome does not run the content script on a video file, so that tab address is the media.
+      // An HTML watch page is not a video file. Sending it without a lookup says it is not a video.
+      return directMedia(url) && settled ? showDirect(tabId, key) : (settled ? showPlain(tabId) : showPending(tabId, key));
     }
 
     return showList(tabId, key, videos);
@@ -262,7 +276,15 @@ chrome.action.onClicked.addListener((tab) => {
   const pageUrl = tab.url;
   chrome.tabs.sendMessage(tabId, { type: "list" }, (response) => {
     if (chrome.runtime.lastError || !response || !Array.isArray(response.videos)) {
-      openTarget(tabId, protocolUrl(pageUrl));
+      const stream = canonicalStream(pageUrl);
+      if (stream) {
+        openTarget(tabId, protocolUrl(stream.url, null, 0, true));
+        return;
+      }
+
+      if (directMedia(pageUrl)) {
+        openTarget(tabId, protocolUrl(pageUrl));
+      }
       return;
     }
 

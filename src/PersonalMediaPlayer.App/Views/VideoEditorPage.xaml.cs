@@ -10,11 +10,14 @@ using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Controls;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Editing;
+using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Models;
 using PlaybackStore = PersonalMediaPlayer.App.Playback;
 using VlcMediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 
 namespace PersonalMediaPlayer.App.Views;
+
+internal sealed record EditorLaunch(MediaItem Item, IReadOnlyList<SubtitleCue> Cues, MergeEditorSeed? Seed = null, MergeClipReturn? MergeReturn = null);
 
 public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSource
 {
@@ -40,11 +43,21 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
     private string _timelineMode = "seek";
     private string _tool = "speed";
     private bool _trimReady;
+    private MergeEditorSeed? _seed;
+    private MergeClipReturn? _mergeReturn;
+    private IReadOnlyList<SubtitleCue> _captionCues = [];
+    private bool _exportingCaptions;
     private long _trimStartMs;
     private long _trimEndMs;
     private long? _markStartMs;
     private long? _markEndMs;
+    private long? _partsStartMs;
+    private long? _partsEndMs;
     private readonly List<(long StartMs, long EndMs)> _cuts = [];
+    private readonly List<AudioSilence.Span> _silences = [];
+    private volatile AudioSilence.Span[] _previewSpans = [];
+    private (long StartMs, long EndMs)? _linkedPart;
+    private int _previewGain = -1;
     private bool _cropPreview;
     private int _quarterTurns;
     private bool _flipHorizontal;
@@ -52,6 +65,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
     private int _videoWidth;
     private int _videoHeight;
     private bool _hasAudio;
+    private int _captionLoad;
     private int _audioRate = 48000;
     private bool _extracting;
     private Media? _openMedia;
@@ -68,6 +82,10 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         Playback.SpeedCombo.Visibility = Visibility.Collapsed;
         Playback.FullScreenButton.Visibility = Visibility.Collapsed;
         Playback.UseTimelineZoom(true);
+        Playback.ShowAudioLane(true);
+        Playback.AudioRangeSelected += Audio_Selected;
+        Playback.AudioSilenceClicked += Audio_Clicked;
+        Playback.PartVolumeChanged += (_, volume) => PartLevel_Changed(volume);
         var remembered = PlaybackStore.PlaybackVolume.Load();
         _listenVolume = remembered.Audible;
         Playback.VolumeSlider.Value = remembered.Level;
@@ -83,6 +101,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         Playback.SeekSlider.ValueChanged += Seek_Changed;
         Playback.CutSelected += Cut_Selected;
         Playback.TimelineClicked += Timeline_Clicked;
+        Playback.CaptionLineChosen += (_, start) => Caption_Chosen(start);
         Playback.TrimRangeChanged += (_, _) => ApplyTrimFromBar();
         Playback.TrimSeekRequested += (_, fraction) => SeekToFraction(fraction);
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
@@ -96,13 +115,18 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         _history.Add(Capture());
         _historyReady = true;
         SelectTool("speed");
+        UpdatePartsMark();
         PlaybackStore.PlaybackFocus.Register(this);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+        IReadOnlyList<SubtitleCue> ready = [];
+        _mergeReturn = e.Parameter is EditorLaunch returning ? returning.MergeReturn : null;
+        _seed = e.Parameter is EditorLaunch seeded ? seeded.Seed : null;
         _item = e.Parameter switch
         {
+            EditorLaunch launch => ReadyLaunch(launch, out ready),
             MediaItem media => App.MediaLibrary.GetById(media.Id) ?? media,
             string id => App.MediaLibrary.GetById(id),
             _ => null
@@ -114,6 +138,8 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
         _path = _item.FilePath;
         FileNameText.Text = _item.DisplayName;
+        ApplySeedFades();
+        LoadEditorCaptions(_path, ready);
         Playback.SetHoverSource(_path);
         _pendingPath = _path;
         _timer.Start();
@@ -145,6 +171,8 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         _timer.Stop();
+        _captionLoad++;
+        Playback.SetCaptionCues([]);
         Playback.SetHoverSource(null);
         ReleasePlayer();
     }
@@ -221,6 +249,8 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
     private bool HasCuts => _cuts.Count > 0;
 
+    private bool HasSilence => _silences.Count > 0;
+
     private bool HasTrim => _durationMs > 0 && (_trimStartMs > 50 || _durationMs - _trimEndMs > 50);
 
     private bool HasCrop => CropSurface is not null && CropSurface.HasCrop;
@@ -231,7 +261,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
     private bool HasAudioFade => AudioFadeInBox?.IsChecked == true || AudioFadeOutBox?.IsChecked == true;
 
-    private bool HasEdits => HasSpeedChange || HasVolumeChange || HasCuts || HasTrim || HasCrop || HasOrientation || HasVideoFade || HasAudioFade;
+    private bool HasEdits => HasSpeedChange || HasVolumeChange || HasSilence || HasCuts || HasTrim || HasCrop || HasOrientation || HasVideoFade || HasAudioFade;
 
     private Editing.VideoOrientation CurrentOrientation() => new(_quarterTurns, _flipHorizontal, _flipVertical);
 
@@ -241,6 +271,22 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         _libVlc = new LibVLC(enableDebugLogs: false, PlaybackStore.PlaybackAudio.Options(e.SwapChainOptions));
         _player = new VlcMediaPlayer(_libVlc);
         _player.LengthChanged += (_, args) => DispatcherQueue.TryEnqueue(() => SetDuration(args.Length));
+        _player.TimeChanged += (_, args) =>
+        {
+            var spans = _previewSpans;
+            if (spans.Length == 0)
+            {
+                return;
+            }
+
+            var gain = AudioSilence.GainPercent(spans, args.Time);
+            if (Interlocked.Exchange(ref _previewGain, gain) == gain)
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(ApplyPlaybackFades);
+        };
         _player.Playing += (_, _) => DispatcherQueue.TryEnqueue(OnEditorPlaying);
         _player.EndReached += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -407,7 +453,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
         var next = Math.Clamp(_player.Time + delta, 0, Math.Max(0, _durationMs));
         _player.Time = next;
-        UpdateClock();
+        UpdateClock(reveal: true);
     }
 
     private void ApplyVolume() => ApplyPlaybackFades();
@@ -436,7 +482,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         ApplyPlaybackFades();
     }
 
-    private void UpdateClock()
+    private void UpdateClock(bool reveal = false)
     {
         if (_player is null || _durationMs <= 0 || _dragging)
         {
@@ -455,18 +501,25 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         Playback.PositionText.Text = Format(time);
         ApplyPlaybackFades();
         UpdatePlayIcon();
+        if (reveal || _player.IsPlaying)
+        {
+            Playback.RevealFraction(time / (double)_durationMs);
+        }
     }
 
     private void ApplyPlaybackFades()
     {
         var video = 1d;
         var audio = 1d;
+        var gain = AudioSilence.OriginalVolume;
         if (_player is not null && _durationMs > 0)
         {
             var output = OutputTimeMs(PlayableTime(_player.Time));
             var total = OutputDurationMs();
             video = FadeLevel(VideoFadeInBox?.IsChecked == true, VideoFadeInSeconds?.Value ?? 0, VideoFadeOutBox?.IsChecked == true, VideoFadeOutSeconds?.Value ?? 0, output, total);
             audio = FadeLevel(AudioFadeInBox?.IsChecked == true, AudioFadeInSeconds?.Value ?? 0, AudioFadeOutBox?.IsChecked == true, AudioFadeOutSeconds?.Value ?? 0, output, total);
+            gain = AudioSilence.GainPercent(_previewSpans, _player.Time);
+            _previewGain = gain;
         }
 
         if (PictureHost is not null)
@@ -477,9 +530,9 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         var listen = Playback.VolumeSlider?.Value ?? 0;
         if (_player is not null)
         {
-            var faded = listen * audio;
-            _player.Mute = faded <= 0.5;
-            _player.Volume = (int)Math.Round(faded);
+            var faded = AudioSilence.PlayerVolume(listen, audio, gain);
+            _player.Mute = faded <= 0;
+            _player.Volume = faded;
         }
 
         if (Playback.MuteIcon is not null)
@@ -584,6 +637,54 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         Playback.PlayIcon.Glyph = _player?.IsPlaying == true ? "\uE769" : "\uE768";
     }
 
+    private void ApplySeedFades()
+    {
+        if (_seed is not { } seed)
+        {
+            return;
+        }
+
+        _restoring = true;
+        try
+        {
+            VideoFadeInBox.IsChecked = seed.VideoFadeIn;
+            VideoFadeInSeconds.Value = seed.VideoFadeInSeconds;
+            VideoFadeOutBox.IsChecked = seed.VideoFadeOut;
+            VideoFadeOutSeconds.Value = seed.VideoFadeOutSeconds;
+            AudioFadeInBox.IsChecked = seed.AudioFadeIn;
+            AudioFadeInSeconds.Value = seed.AudioFadeInSeconds;
+            AudioFadeOutBox.IsChecked = seed.AudioFadeOut;
+            AudioFadeOutSeconds.Value = seed.AudioFadeOutSeconds;
+            VideoFadeInSeconds.IsEnabled = seed.VideoFadeIn;
+            VideoFadeOutSeconds.IsEnabled = seed.VideoFadeOut;
+            AudioFadeInSeconds.IsEnabled = seed.AudioFadeIn;
+            AudioFadeOutSeconds.IsEnabled = seed.AudioFadeOut;
+        }
+        finally
+        {
+            _restoring = false;
+        }
+    }
+
+    private void AdoptSeed()
+    {
+        _seed = null;
+        if (_history.Count == 0)
+        {
+            return;
+        }
+
+        _history[0] = Capture();
+        _history.RemoveRange(1, _history.Count - 1);
+        _historyIndex = 0;
+        UpdateHistoryButtons();
+        UpdateToolMarks();
+        if (SaveButton is not null)
+        {
+            SaveButton.IsEnabled = HasEdits && !_saving;
+        }
+    }
+
     private void SetDuration(long durationMs)
     {
         if (durationMs <= 0)
@@ -599,10 +700,26 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         {
             _trimStartMs = 0;
             _trimEndMs = durationMs;
+            if (_seed is { } seed)
+            {
+                var start = Math.Clamp((long)Math.Round(seed.TrimStartSeconds * 1000), 0, durationMs);
+                var end = Math.Clamp((long)Math.Round(seed.TrimEndSeconds * 1000), 0, durationMs);
+                if (end > start)
+                {
+                    _trimStartMs = start;
+                    _trimEndMs = end;
+                }
+            }
+
             Playback.BeginTrim(passThrough: true);
+            Playback.SetTrimFractions(_trimStartMs / (double)durationMs, _trimEndMs / (double)durationMs);
             _trimReady = true;
             ApplyTimelineMode();
             UpdateTrimSummary();
+            if (_seed is not null)
+            {
+                AdoptSeed();
+            }
         }
         else if (!HasTrim)
         {
@@ -611,6 +728,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         }
 
         UpdateSpeedText();
+        RefreshSilence();
     }
 
     private void SpeedSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -671,6 +789,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         ShowPanel(CropPanel, tool == "crop");
         ShowPanel(TrimPanel, tool == "trim");
         ShowPanel(CutPanel, tool == "cut");
+        ShowPanel(PartsPanel, tool == "parts");
         MarkTool(ToolSpeedButton, ToolSpeedMark, tool == "speed");
         MarkTool(ToolSoundButton, ToolSoundMark, tool == "sound");
         MarkTool(ToolRotateButton, ToolRotateMark, tool == "rotate");
@@ -678,6 +797,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         MarkTool(ToolCropButton, ToolCropMark, tool == "crop");
         MarkTool(ToolTrimButton, ToolTrimMark, tool == "trim");
         MarkTool(ToolCutButton, ToolCutMark, tool == "cut");
+        MarkTool(ToolPartsButton, ToolPartsMark, tool == "parts");
         _timelineMode = tool switch
         {
             "trim" => "trim",
@@ -726,6 +846,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         SetMark(ToolCropMark, HasCrop);
         SetMark(ToolTrimMark, HasTrim);
         SetMark(ToolCutMark, HasCuts);
+        SetMark(ToolPartsMark, HasSilence);
     }
 
     private static void SetMark(UIElement? mark, bool active)
@@ -801,7 +922,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         if (seek && _player is not null && _markStartMs is long start)
         {
             _player.Time = PlayableTime(start);
-            UpdateClock();
+            UpdateClock(reveal: true);
         }
     }
 
@@ -824,7 +945,516 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         }
 
         _player.Time = PlayableTime((long)(fraction * _durationMs));
-        UpdateClock();
+        UpdateClock(reveal: true);
+    }
+
+    private void Caption_Chosen(long startMs)
+    {
+        if (_player is null || _durationMs <= 0)
+        {
+            return;
+        }
+
+        _player.Time = PlayableTime(startMs);
+        UpdateClock(reveal: true);
+    }
+
+    private static MediaItem ReadyLaunch(EditorLaunch launch, out IReadOnlyList<SubtitleCue> ready)
+    {
+        ready = launch.Cues;
+        return App.MediaLibrary.GetById(launch.Item.Id) ?? launch.Item;
+    }
+
+    private void LoadEditorCaptions(string path, IReadOnlyList<SubtitleCue> ready)
+    {
+        var generation = ++_captionLoad;
+        var keepReady = ready.Count > 0;
+        if (keepReady)
+        {
+            ShowEditorCues(ready);
+        }
+        else
+        {
+            ShowEditorCues([]);
+        }
+
+        _ = LoadEditorCaptionsAsync(path, generation, keepReady);
+    }
+
+    private async Task LoadEditorCaptionsAsync(string path, int generation, bool keepReady)
+    {
+        var queue = DispatcherQueue;
+        IReadOnlyList<SubtitleCue> cues;
+        try
+        {
+            cues = await Task.Run(() => SubtitleCues.LoadFor(path));
+        }
+        catch (Exception)
+        {
+            cues = [];
+        }
+
+        void Apply()
+        {
+            if (generation != _captionLoad || !string.Equals(_path, path, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (cues.Count == 0 && keepReady)
+            {
+                return;
+            }
+
+            ShowEditorCues(cues);
+        }
+
+        if (queue.HasThreadAccess)
+        {
+            Apply();
+            return;
+        }
+
+        queue.TryEnqueue(Apply);
+    }
+
+    private void ShowEditorCues(IReadOnlyList<SubtitleCue> cues)
+    {
+        _captionCues = cues;
+        ExportCaptionsButton.Visibility = cues.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        Playback.SetCaptionCues(cues.Select(cue => (cue.StartMs, cue.EndMs, cue.Text)).ToArray());
+    }
+
+    private IReadOnlyList<SubtitleCue> CaptionsToExport()
+    {
+        var speed = SpeedSlider is null ? 1 : SpeedSlider.Value;
+        if (_captionCues.Count == 0)
+        {
+            return [];
+        }
+
+        if ((HasCuts || HasTrim) && _durationMs > 0)
+        {
+            var spans = KeptSourceRanges()
+                .Select(span => ((long)TimeSpan.FromTicks(span.Start).TotalMilliseconds, (long)TimeSpan.FromTicks(span.End).TotalMilliseconds))
+                .ToArray();
+            return SubtitleEdit.Keep(_captionCues, spans, speed);
+        }
+
+        return SubtitleEdit.Scale(_captionCues, speed);
+    }
+
+    private async void ExportCaptions_Click(object sender, RoutedEventArgs e)
+    {
+        if (_exportingCaptions || _saving)
+        {
+            return;
+        }
+
+        var text = SubtitleEdit.ToSrt(CaptionsToExport());
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            ShowEditorStatus("The kept part has no captions.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        _exportingCaptions = true;
+        try
+        {
+            var file = await FilePickerHelper.PickSaveSrtAsync(App.MainAppWindow, SubtitleEdit.SuggestedName(FileNameText.Text));
+            if (file is null)
+            {
+                return;
+            }
+
+            await File.WriteAllTextAsync(file.Path, text, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            ShowEditorStatus("Saved the captions to " + file.Name, InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowEditorStatus(ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            _exportingCaptions = false;
+        }
+    }
+
+    private void Audio_Selected(object? sender, VideoPlaybackBar.CutSelection selection)
+    {
+        if (_durationMs <= 0 || !_hasAudio || _saving)
+        {
+            return;
+        }
+
+        var start = (long)(Math.Min(selection.Start, selection.End) * _durationMs);
+        var end = (long)(Math.Max(selection.Start, selection.End) * _durationMs);
+        if (end - start < AudioSilence.MinimumMs)
+        {
+            ShowEditorStatus("Select at least half a second.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        var volume = Math.Clamp(Playback.PartVolumePercent, AudioSilence.MinimumVolume, AudioSilence.MaximumVolume);
+        _silences.Add(new AudioSilence.Span(start, end, volume));
+        _linkedPart = (start, end);
+        CommitSilence(AudioLevelMessage(start, end, volume));
+    }
+
+    private void Audio_Clicked(object? sender, double fraction)
+    {
+        if (_durationMs <= 0 || _saving)
+        {
+            return;
+        }
+
+        var time = (long)(fraction * _durationMs);
+        var index = _silences.FindIndex(span => time >= span.StartMs && time < span.EndMs);
+        if (index < 0)
+        {
+            _linkedPart = null;
+            RefreshParts();
+            Timeline_Clicked(sender, fraction);
+            return;
+        }
+
+        _silences.RemoveAt(index);
+        _linkedPart = null;
+        CommitSilence("The sound is back in that part.");
+    }
+
+    private void PartLevel_Changed(int volume)
+    {
+        if (!_restoring)
+        {
+            UpdatePartsMark();
+        }
+
+        if (_restoring || _saving || _durationMs <= 0 || _linkedPart is not { } linked)
+        {
+            return;
+        }
+
+        volume = Math.Clamp(volume, AudioSilence.MinimumVolume, AudioSilence.MaximumVolume);
+        _silences.Add(new AudioSilence.Span(linked.StartMs, linked.EndMs, volume));
+        CommitSilence(AudioLevelMessage(linked.StartMs, linked.EndMs, volume));
+    }
+
+    private static string AudioLevelMessage(long start, long end, int volume)
+    {
+        if (volume <= 0)
+        {
+            return $"Silent from {FormatFine(start)} to {FormatFine(end)}. The picture keeps playing.";
+        }
+
+        if (volume == AudioSilence.OriginalVolume)
+        {
+            return "The sound is back in that part.";
+        }
+
+        return $"That part is at {volume}%, from {FormatFine(start)} to {FormatFine(end)}. The picture keeps playing.";
+    }
+
+    private void CommitSilence(string message)
+    {
+        var normalized = AudioSilence.Normalize(_silences, _durationMs);
+        var changed = !normalized.SequenceEqual(_previewSpans);
+        _silences.Clear();
+        _silences.AddRange(normalized);
+        RefreshParts();
+        if (!changed)
+        {
+            return;
+        }
+
+        _previewSpans = _silences.ToArray();
+        _previewGain = -1;
+        RefreshSilence();
+        ApplyPlaybackFades();
+        if (SaveButton is not null)
+        {
+            SaveButton.IsEnabled = HasEdits && !_saving;
+        }
+
+        ShowEditorStatus(message, InfoBarSeverity.Success);
+        NoteEdit();
+    }
+
+    private void RefreshSilence()
+    {
+        if (_durationMs <= 0)
+        {
+            return;
+        }
+
+        Playback.SetSilenceFractions(_silences
+            .Select(span => (span.StartMs / (double)_durationMs, span.EndMs / (double)_durationMs, span.VolumePercent))
+            .ToArray());
+    }
+
+    private void PartsTime_LostFocus(object sender, RoutedEventArgs e) => ApplyTypedParts(seek: false);
+
+    private void PartsTime_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            ApplyTypedParts(seek: true);
+            e.Handled = true;
+        }
+    }
+
+    private void ApplyTypedParts(bool seek)
+    {
+        if (_durationMs <= 0 || PartsFromBox is null || PartsToBox is null)
+        {
+            return;
+        }
+
+        var fromText = PartsFromBox.Text.Trim();
+        var toText = PartsToBox.Text.Trim();
+        var fromOk = TryParseClock(fromText, out var fromMs);
+        var toOk = TryParseClock(toText, out var toMs);
+        if (fromText.Length > 0 && !fromOk || toText.Length > 0 && !toOk)
+        {
+            if (PartsMarkLabel is not null)
+            {
+                PartsMarkLabel.Text = "Use a time like 1:05.4.";
+            }
+
+            return;
+        }
+
+        _partsStartMs = fromText.Length == 0 ? null : Math.Clamp(fromMs, 0, _durationMs);
+        _partsEndMs = toText.Length == 0 ? null : Math.Clamp(toMs, 0, _durationMs);
+        UpdatePartsMark();
+        if (seek && _player is not null && _partsStartMs is long start)
+        {
+            _player.Time = PlayableTime(start);
+            UpdateClock(reveal: true);
+        }
+    }
+
+    private void PartsStart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_player is null)
+        {
+            return;
+        }
+
+        _partsStartMs = _player.Time;
+        UpdatePartsMark();
+    }
+
+    private void PartsEnd_Click(object sender, RoutedEventArgs e)
+    {
+        if (_player is null)
+        {
+            return;
+        }
+
+        _partsEndMs = _player.Time;
+        UpdatePartsMark();
+    }
+
+    private void ApplyParts_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryReadPartsRange(out var start, out var end))
+        {
+            return;
+        }
+
+        if (!_hasAudio)
+        {
+            ShowEditorStatus("This video has no audio track.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        if (end - start < AudioSilence.MinimumMs)
+        {
+            ShowEditorStatus("Select at least half a second.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        var volume = Math.Clamp(Playback.PartVolumePercent, AudioSilence.MinimumVolume, AudioSilence.MaximumVolume);
+        _silences.Add(new AudioSilence.Span(start, end, volume));
+        _linkedPart = (start, end);
+        CommitSilence(AudioLevelMessage(start, end, volume));
+    }
+
+    private bool TryReadPartsRange(out long start, out long end)
+    {
+        start = 0;
+        end = 0;
+        if (_durationMs <= 0 || PartsFromBox is null || PartsToBox is null || PartsMarkLabel is null)
+        {
+            return false;
+        }
+
+        var fromText = PartsFromBox.Text.Trim();
+        var toText = PartsToBox.Text.Trim();
+        if (fromText.Length == 0 || toText.Length == 0)
+        {
+            PartsMarkLabel.Text = "Set the start and the end.";
+            return false;
+        }
+
+        if (!TryParseClock(fromText, out var fromMs) || !TryParseClock(toText, out var toMs))
+        {
+            PartsMarkLabel.Text = "Use a time like 1:05.4.";
+            return false;
+        }
+
+        start = Math.Clamp(fromMs, 0, _durationMs);
+        end = Math.Clamp(toMs, 0, _durationMs);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        _partsStartMs = start;
+        _partsEndMs = end;
+        return true;
+    }
+
+    private void UpdatePartsMark()
+    {
+        if (PartsMarkLabel is null)
+        {
+            return;
+        }
+
+        var hasBoth = _partsStartMs is long start && _partsEndMs is long end;
+        var fromMs = _partsStartMs ?? 0;
+        var toMs = _partsEndMs ?? 0;
+        PartsMarkLabel.Text = hasBoth
+            ? $"Selected {FormatFine(Math.Abs(toMs - fromMs))}: {FormatFine(Math.Min(fromMs, toMs))} to {FormatFine(Math.Max(fromMs, toMs))}. {PartsApplyText()}"
+            : _partsStartMs is long onlyStart
+                ? $"Start {FormatFine(onlyStart)}. Set the end. {PartsApplyText()}"
+                : _partsEndMs is long onlyEnd
+                    ? $"End {FormatFine(onlyEnd)}. Set the start. {PartsApplyText()}"
+                    : $"Nothing selected yet. {PartsApplyText()}";
+        if (PartsFromBox is not null && PartsFromBox.FocusState == FocusState.Unfocused && _partsStartMs is long from)
+        {
+            PartsFromBox.Text = FormatFine(from);
+        }
+
+        if (PartsToBox is not null && PartsToBox.FocusState == FocusState.Unfocused && _partsEndMs is long to)
+        {
+            PartsToBox.Text = FormatFine(to);
+        }
+    }
+
+    private string PartsApplyText()
+    {
+        var volume = Playback.PartVolumePercent;
+        if (volume <= 0)
+        {
+            return "Applies silence.";
+        }
+
+        if (volume == AudioSilence.OriginalVolume)
+        {
+            return "Applies the original sound.";
+        }
+
+        return $"Applies at {volume}%.";
+    }
+
+    private void RefreshParts()
+    {
+        if (PartsList is null)
+        {
+            return;
+        }
+
+        PartsList.Children.Clear();
+        if (PartsEmpty is not null)
+        {
+            PartsEmpty.Visibility = _silences.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (_silences.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var span in _silences.ToArray())
+        {
+            var editing = _linkedPart is { } linked && linked.StartMs == span.StartMs && linked.EndMs == span.EndMs;
+            var row = new StackPanel { Spacing = 8 };
+            var open = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Style = (Style)Resources["EditorChip"],
+                Content = new TextBlock
+                {
+                    Text = editing
+                        ? $"{FormatFine(span.StartMs)} – {FormatFine(span.EndMs)} · {span.VolumePercent}% · editing"
+                        : $"{FormatFine(span.StartMs)} – {FormatFine(span.EndMs)} · {span.VolumePercent}%",
+                    TextWrapping = TextWrapping.Wrap
+                }
+            };
+            var captured = span;
+            open.Click += (_, _) => LinkPart(captured);
+            var restore = new Button
+            {
+                Content = "Sound back",
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Style = (Style)Resources["EditorChip"]
+            };
+            restore.Click += (_, _) => RestorePart(captured);
+            row.Children.Add(open);
+            row.Children.Add(restore);
+            PartsList.Children.Add(new Border
+            {
+                Style = (Style)Resources["QuietWell"],
+                Child = row
+            });
+        }
+    }
+
+    private void LinkPart(AudioSilence.Span span)
+    {
+        if (_saving || _durationMs <= 0)
+        {
+            return;
+        }
+
+        _linkedPart = (span.StartMs, span.EndMs);
+        Playback.SetPartVolumePercent(span.VolumePercent);
+        RefreshParts();
+        UpdatePartsMark();
+        if (_player is not null)
+        {
+            _player.Time = PlayableTime(span.StartMs);
+            UpdateClock(reveal: true);
+        }
+
+        ShowEditorStatus(AudioLevelMessage(span.StartMs, span.EndMs, span.VolumePercent), InfoBarSeverity.Informational);
+    }
+
+    private void RestorePart(AudioSilence.Span span)
+    {
+        if (_saving || _durationMs <= 0 || !_hasAudio)
+        {
+            return;
+        }
+
+        if (_linkedPart is { } linked && linked.StartMs == span.StartMs && linked.EndMs == span.EndMs)
+        {
+            _linkedPart = null;
+        }
+
+        _silences.Add(new AudioSilence.Span(span.StartMs, span.EndMs, AudioSilence.OriginalVolume));
+        CommitSilence("The sound is back in that part.");
+    }
+
+    private void ShowEditorStatus(string message, InfoBarSeverity severity)
+    {
+        StatusBar.Severity = severity;
+        StatusBar.Message = message;
+        StatusBar.IsOpen = true;
     }
 
     private void Cut_Selected(object? sender, VideoPlaybackBar.CutSelection selection)
@@ -1141,7 +1771,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         }
 
         _player.Time = (long)(fraction * _durationMs);
-        UpdateClock();
+        UpdateClock(reveal: true);
     }
 
     private void VolumeSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -1246,7 +1876,8 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
                 VolumeSlider.Value / 100d,
                 _audioRate,
                 AudioFadeInBox.IsChecked == true ? AudioFadeInSeconds.Value : 0,
-                AudioFadeOutBox.IsChecked == true ? AudioFadeOutSeconds.Value : 0);
+                AudioFadeOutBox.IsChecked == true ? AudioFadeOutSeconds.Value : 0,
+                _silences);
             var savedTo = destination;
             if (!choice.OnPc)
             {
@@ -1399,12 +2030,15 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             return;
         }
 
+        var fromMerge = _mergeReturn is not null;
         var dialog = new ContentDialog
         {
-            Title = "Save edits",
-            Content = HasSpeedChange
-                ? "Save as a new video, or overwrite this one? Overwrite keeps the original, and bookmarks move to the new times."
-                : "Save as a new video, or overwrite this one? Overwrite keeps the original.",
+            Title = fromMerge ? "Save this clip" : "Save edits",
+            Content = fromMerge
+                ? "The saved video goes back into this spot in the merge. The other clips stay as they are. Save as new keeps the original file. Overwrite replaces this file and keeps the previous one."
+                : HasSpeedChange
+                    ? "Save as a new video, or overwrite this one? Overwrite keeps the original, and bookmarks move to the new times."
+                    : "Save as a new video, or overwrite this one? Overwrite keeps the original.",
             PrimaryButtonText = "Save as new",
             SecondaryButtonText = "Overwrite",
             CloseButtonText = "Cancel",
@@ -1420,6 +2054,8 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         var overwrite = result == ContentDialogResult.Secondary;
         var rate = SpeedSlider.Value;
         var source = _path;
+        var editSource = source;
+        string? silenced = null;
         var temp = source + ".speed.mp4";
         string? cutFile = null;
         _saving = true;
@@ -1430,7 +2066,15 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         {
             Playback.ReleaseHoverFile();
             ReleasePlayer();
-            var produced = source;
+            if (HasSilence && _hasAudio)
+            {
+                silenced = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".mp4");
+                await VideoTrimmer.SilenceAudioAsync(source, silenced, _silences, _durationMs);
+                editSource = silenced;
+            }
+
+            var produced = editSource;
+            var wroteOutput = false;
             string? working = null;
             string? oriented = null;
             var filters = CurrentOrientation().FfmpegFilters;
@@ -1439,7 +2083,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             {
                 oriented = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".mp4");
                 await VideoTrimmer.RenderAsync(
-                    source,
+                    editSource,
                     oriented,
                     [],
                     TimeSpan.Zero,
@@ -1451,7 +2095,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             if (!needsEncoder && (HasCuts || HasTrim || HasCrop || HasOrientation))
             {
                 working = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + Path.GetExtension(source));
-                File.Copy(source, working, overwrite: true);
+                File.Copy(editSource, working, overwrite: true);
                 try
                 {
                     (int X, int Y, int Width, int Height)? crop = HasCrop ? PixelCrop() : null;
@@ -1463,6 +2107,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
                         TimeSpan.FromMilliseconds(_trimEndMs > 0 ? _trimEndMs : _durationMs),
                         crop,
                         needsEncoder ? null : filters);
+                    wroteOutput = true;
                 }
                 finally
                 {
@@ -1475,7 +2120,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             else if (HasCuts || HasTrim)
             {
                 working = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + Path.GetExtension(source));
-                File.Copy(source, working, overwrite: true);
+                File.Copy(editSource, working, overwrite: true);
                 cutFile = Path.Combine(Path.GetTempPath(), Path.GetFileNameWithoutExtension(source) + ".sections.mp4");
                 if (File.Exists(cutFile))
                 {
@@ -1522,18 +2167,26 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
                     VolumeSlider.Value / 100d,
                     crop,
                     (HasCuts || HasTrim) && _durationMs > 0 ? KeptSourceRanges() : null);
+                wroteOutput = true;
             }
             else if (cutFile is not null)
             {
                 temp = cutFile;
                 cutFile = null;
+                wroteOutput = true;
+            }
+
+            if (!wroteOutput && !string.Equals(editSource, source, StringComparison.OrdinalIgnoreCase))
+            {
+                temp = editSource;
+                silenced = null;
             }
 
             if (HasVideoFade || (_hasAudio && HasAudioFade))
             {
                 var faded = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".mp4");
-                var edited = needsEncoder || HasCuts || HasTrim || HasCrop || HasOrientation;
-                var sourceForFade = edited && File.Exists(temp) ? temp : source;
+                var edited = needsEncoder || HasCuts || HasTrim || HasCrop || HasOrientation || !string.Equals(editSource, source, StringComparison.OrdinalIgnoreCase);
+                var sourceForFade = edited && File.Exists(temp) ? temp : editSource;
                 await VideoTrimmer.ApplyFadesAsync(
                     sourceForFade,
                     faded,
@@ -1607,20 +2260,47 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
             _allowLeave = true;
             ReleasePlayer();
-            if (Frame.CanGoBack)
+            if (_mergeReturn is not null)
             {
-                Frame.GoBack();
-                Frame.ForwardStack.Clear();
-            }
-            else if (Frame.Navigate(typeof(HomePage)))
-            {
-                Frame.BackStack.Clear();
-            }
+                var savedPath = string.IsNullOrWhiteSpace(saved.FilePath) ? source : saved.FilePath;
+                if (!_mergeReturn.Complete(savedPath))
+                {
+                    _allowLeave = false;
+                    throw new InvalidOperationException("The saved video could not be put back in the merge.");
+                }
 
-            if (App.MainAppWindow is not MainWindow window || !window.ShowPlayer(saved))
+                if (Frame.CanGoBack)
+                {
+                    Frame.GoBack();
+                    Frame.ForwardStack.Clear();
+                }
+                else if (Frame.Navigate(typeof(MergePage)))
+                {
+                    Frame.BackStack.Clear();
+                }
+                else
+                {
+                    _allowLeave = false;
+                    throw new InvalidOperationException("The merge list could not be opened.");
+                }
+            }
+            else
             {
-                _allowLeave = false;
-                throw new InvalidOperationException("The saved video could not be opened.");
+                if (Frame.CanGoBack)
+                {
+                    Frame.GoBack();
+                    Frame.ForwardStack.Clear();
+                }
+                else if (Frame.Navigate(typeof(HomePage)))
+                {
+                    Frame.BackStack.Clear();
+                }
+
+                if (App.MainAppWindow is not MainWindow window || !window.ShowPlayer(saved))
+                {
+                    _allowLeave = false;
+                    throw new InvalidOperationException("The saved video could not be opened.");
+                }
             }
         }
         catch (Exception ex)
@@ -1649,14 +2329,37 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
                 }
             }
 
-            StatusBar.Message = ex.Message;
-            StatusBar.IsOpen = true;
+            if (silenced is not null && File.Exists(silenced) && !string.Equals(silenced, temp, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    File.Delete(silenced);
+                }
+                catch (IOException)
+                {
+                    // The failed export can stay until the next save.
+                }
+            }
+
+            ShowEditorStatus(ex.Message, InfoBarSeverity.Error);
             _pendingPath = source;
             _videoView = null;
             AttachVideo();
         }
         finally
         {
+            if (silenced is not null && File.Exists(silenced) && !string.Equals(silenced, temp, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    File.Delete(silenced);
+                }
+                catch (IOException)
+                {
+                    // The temporary silenced copy can stay until the next save.
+                }
+            }
+
             _saving = false;
             SaveProgress.IsActive = false;
             SaveButton.IsEnabled = HasEdits;
@@ -1691,6 +2394,16 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         {
             var volume = (int)VolumeSlider.Value;
             parts.Add(volume <= 0 ? "muted" : $"{volume}%");
+        }
+
+        if (_silences.Any(span => span.VolumePercent <= 0))
+        {
+            parts.Add("silent");
+        }
+
+        if (_silences.Any(span => span.VolumePercent > 0))
+        {
+            parts.Add("level");
         }
 
         if (_quarterTurns != 0)
@@ -1776,6 +2489,12 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
                 SetDuration(media.Duration);
             }
         }
+
+        Playback.SetAudioLaneInteractive(
+            _hasAudio,
+            _hasAudio
+                ? "Drag the audio track. Part volume is how loud that stretch is. 0% silences it, and 100% puts the original sound back. The picture stays. Click a marked part to put the sound back. Click empty audio to leave the last part as it is. Parts lists each stretch."
+                : "This video has no audio track.");
     }
 
     private void VideoHost_SizeChanged(object sender, SizeChangedEventArgs e) => LayoutCrop();
@@ -1966,6 +2685,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             && left.CropBottom == right.CropBottom
             && left.CropPreview == right.CropPreview
             && left.Cuts.SequenceEqual(right.Cuts)
+            && left.Silences.SequenceEqual(right.Silences)
             && left.QuarterTurns == right.QuarterTurns
             && left.FlipHorizontal == right.FlipHorizontal
             && left.FlipVertical == right.FlipVertical
@@ -2033,6 +2753,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             _trimStartMs,
             _trimEndMs,
             _cuts.ToArray(),
+            _silences.ToArray(),
             _markStartMs,
             _markEndMs,
             CropSurface.Left,
@@ -2069,9 +2790,16 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
             _cuts.Clear();
             _cuts.AddRange(snap.Cuts);
+            _silences.Clear();
+            _silences.AddRange(snap.Silences);
+            _previewSpans = _silences.ToArray();
+            _linkedPart = null;
+            _previewGain = -1;
             _markStartMs = snap.MarkStartMs;
             _markEndMs = snap.MarkEndMs;
             NormalizeCuts();
+            RefreshSilence();
+            RefreshParts();
             UpdateCutMark();
             UpdateTrimSummary();
             _cropPreview = snap.CropPreview;
@@ -2124,6 +2852,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         long TrimStartMs,
         long TrimEndMs,
         (long StartMs, long EndMs)[] Cuts,
+        AudioSilence.Span[] Silences,
         long? MarkStartMs,
         long? MarkEndMs,
         double CropLeft,
@@ -2238,7 +2967,13 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
         if (_pendingPageType is not null)
         {
-            NavigationHelper.Follow(Frame, _pendingPageType, _pendingParameter, clearBackStack: false);
+            var page = _pendingPageType;
+            if (NavigationHelper.Follow(Frame, page, _pendingParameter, clearBackStack: false)
+                && page != typeof(VideoPlayerPage))
+            {
+                SectionArrival.Play(Frame.Content as UIElement);
+            }
+
             return;
         }
 

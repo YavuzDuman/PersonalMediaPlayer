@@ -17,6 +17,8 @@ internal static class SavedWords
 
     internal static string? StoreOverride { get; set; }
 
+    internal static event Action? Changed;
+
     private static string FilePath => StoreOverride ?? DefaultFilePath;
 
     public static IReadOnlyList<SavedWord> All()
@@ -222,6 +224,7 @@ internal static class SavedWords
     {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         File.WriteAllText(FilePath, JsonSerializer.Serialize(words, JsonOptions));
+        Changed?.Invoke();
     }
 }
 
@@ -248,4 +251,7 @@ internal sealed class SavedWord
     public long? TimeMs { get; set; }
 
     public string SavedAt { get; set; } = string.Empty;
+
+    internal bool SentenceIsWord()
+        => string.Equals(Sentence?.Trim(), English?.Trim(), StringComparison.Ordinal);
 }

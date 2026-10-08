@@ -148,6 +148,13 @@
                     <FontIcon FontSize="16" Glyph="&#xE7A6;" />
                 </Button>
                 <Button Click="Cancel_Click" Content="Cancel" Style="{StaticResource EditorChip}" />
+                <Button
+                    x:Name="ExportCaptionsButton"
+                    Click="ExportCaptions_Click"
+                    Content="SRT"
+                    Style="{StaticResource EditorChip}"
+                    ToolTipService.ToolTip="Save the captions as an SRT file. Trim, cut, and speed are included."
+                    Visibility="Collapsed" />
                 <Button x:Name="ExtractAudioButton" Click="ExtractAudio_Click" Style="{StaticResource EditorChip}" ToolTipService.ToolTip="Extract audio">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon FontSize="14" Glyph="&#xE8D6;" />
@@ -263,6 +270,13 @@
                             <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE8C6;" />
                             <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Cut" />
                             <Ellipse x:Name="ToolCutMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ToolPartsButton" Grid.Row="1" Grid.Column="3" Click="Tool_Click" Style="{StaticResource ToolChip}" Tag="parts" ToolTipService.ToolTip="Loudness of one stretch">
+                        <StackPanel HorizontalAlignment="Center" Spacing="3">
+                            <FontIcon HorizontalAlignment="Center" FontSize="16" Glyph="&#xE995;" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="11" Text="Parts" />
+                            <Ellipse x:Name="ToolPartsMark" Width="4" Height="4" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0" />
                         </StackPanel>
                     </Button>
                 </Grid>
@@ -480,6 +494,43 @@
                                 <Button Grid.Row="1" Grid.Column="1" Click="RemoveCut_Click" Content="Remove" Style="{StaticResource EditorAccent}" />
                             </Grid>
                             <StackPanel x:Name="CutList" Spacing="8" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="PartsPanel" Style="{StaticResource EditorCard}" Visibility="Collapsed">
+                        <StackPanel Spacing="12">
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Drag the audio track, or type a range. Part volume on the bar is the level." TextWrapping="Wrap" />
+                            <Border Style="{StaticResource QuietWell}">
+                                <TextBlock x:Name="PartsMarkLabel" Text="Nothing selected yet." TextWrapping="Wrap" />
+                            </Border>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="PartsFromBox" Header="From" PlaceholderText="0:00.0" LostFocus="PartsTime_LostFocus" KeyDown="PartsTime_KeyDown" />
+                                <TextBox x:Name="PartsToBox" Grid.Column="1" Header="To" PlaceholderText="0:12.5" LostFocus="PartsTime_LostFocus" KeyDown="PartsTime_KeyDown" />
+                            </Grid>
+                            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" Text="Use 1:05.4. Apply uses the Part volume slider." TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="8" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Button Click="PartsStart_Click" Content="Start here" Style="{StaticResource EditorChip}" />
+                                <Button Grid.Column="1" Click="PartsEnd_Click" Content="End here" Style="{StaticResource EditorChip}" />
+                                <Button Grid.ColumnSpan="2" Grid.Row="1" Click="ApplyParts_Click" Content="Apply" Style="{StaticResource EditorAccent}" />
+                            </Grid>
+                            <TextBlock
+                                x:Name="PartsEmpty"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="No parts yet."
+                                TextWrapping="Wrap" />
+                            <StackPanel x:Name="PartsList" Spacing="8" />
                         </StackPanel>
                     </Border>
                 </Grid>

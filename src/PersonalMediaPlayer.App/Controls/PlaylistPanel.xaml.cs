@@ -5,8 +5,6 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PersonalMediaPlayer.App.Playback;
 using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace PersonalMediaPlayer.App.Controls;
 
@@ -208,6 +206,14 @@ public sealed partial class PlaylistPanel : UserControl
 
     internal void PlayForward() => ChooseNeighbor(forward: true);
 
+    internal bool CanPlayForward()
+        => PlaylistRun.CanAdvance(
+            PlayQueue.Count,
+            _playlistId is null ? null : Playlists.Find(_playlistId),
+            CurrentRun(),
+            _index,
+            _unwatchedOnly);
+
     private void Shuffle_Click(object sender, RoutedEventArgs e)
     {
         var run = CurrentRun();
@@ -302,7 +308,7 @@ public sealed partial class PlaylistPanel : UserControl
             RepeatButton.Style = ButtonStyle("ActionButtonStyle");
             ModeLine.Text = "Saved order. Repeat is off.";
             PreviousButton.IsEnabled = false;
-            NextButton.IsEnabled = PlayQueue.Count > 0;
+            NextButton.IsEnabled = CanPlayForward();
             UpdateRail();
             return;
         }
@@ -329,15 +335,15 @@ public sealed partial class PlaylistPanel : UserControl
         if (list is null)
         {
             PreviousButton.IsEnabled = false;
-            NextButton.IsEnabled = PlayQueue.Count > 0;
         }
         else
         {
             var keys = PlaylistRun.Keys(list);
             bool Include(int index) => PlaylistRun.Include(list, index, _index, _unwatchedOnly);
             PreviousButton.IsEnabled = run.HasMove(keys, Include, _index, forward: false);
-            NextButton.IsEnabled = PlayQueue.Count > 0 || run.HasMove(keys, Include, _index, forward: true);
         }
+
+        NextButton.IsEnabled = CanPlayForward();
 
         UpdateRail();
         ModeChanged?.Invoke(this, EventArgs.Empty);
@@ -765,16 +771,11 @@ public sealed partial class PlaylistPanel : UserControl
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 192);
-            if (thumb is null || thumb.Size == 0)
+            var bitmap = await VideoThumbnail.LoadAsync(path, 192);
+            if (bitmap is not null)
             {
-                return;
+                target.Source = bitmap;
             }
-
-            var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(thumb);
-            target.Source = bitmap;
         }
         catch (Exception)
         {
@@ -1022,29 +1023,7 @@ public sealed partial class PlaylistPanel : UserControl
     private void OnQueueChanged(object? sender, EventArgs e)
         => DispatcherQueue.TryEnqueue(ApplyNextForQueue);
 
-    private void ApplyNextForQueue()
-    {
-        if (PlayQueue.Count > 0)
-        {
-            NextButton.IsEnabled = true;
-            return;
-        }
-
-        var list = _playlistId is null ? null : Playlists.Find(_playlistId);
-        var run = CurrentRun();
-        if (list is null || run is null || list.Videos.Count == 0)
-        {
-            NextButton.IsEnabled = false;
-            return;
-        }
-
-        var keys = PlaylistRun.Keys(list);
-        NextButton.IsEnabled = run.HasMove(
-            keys,
-            index => PlaylistRun.Include(list, index, _index, _unwatchedOnly),
-            _index,
-            forward: true);
-    }
+    private void ApplyNextForQueue() => NextButton.IsEnabled = CanPlayForward();
 
     private void QueueEntry(PlaylistEntry entry, IReadOnlyDictionary<string, string> names, bool next)
     {

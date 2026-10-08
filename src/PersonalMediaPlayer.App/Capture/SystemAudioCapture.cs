@@ -2,9 +2,16 @@ using System.Runtime.InteropServices;
 
 namespace PersonalMediaPlayer.App.Capture;
 
+internal enum CaptureInput
+{
+    Speakers,
+    Microphone
+}
+
 internal sealed class SystemAudioCapture : IDisposable
 {
     private const int RenderDevice = 0;
+    private const int CaptureDevice = 1;
     private const int ConsoleRole = 0;
     private const int SharedMode = 0;
     private const uint LoopbackFlag = 0x00020000;
@@ -18,7 +25,13 @@ internal sealed class SystemAudioCapture : IDisposable
     private static readonly Guid PcmSubFormat = new("00000001-0000-0010-8000-00aa00389b71");
     private static readonly Guid FloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
 
+    private readonly CaptureInput _input;
     private readonly ManualResetEventSlim _ready = new(false);
+
+    public SystemAudioCapture(CaptureInput input = CaptureInput.Speakers)
+    {
+        _input = input;
+    }
     private Action<byte[]>? _onPacket;
     private Thread? _thread;
     private volatile bool _stop;
@@ -38,13 +51,13 @@ internal sealed class SystemAudioCapture : IDisposable
         _thread = new Thread(CaptureLoop)
         {
             IsBackground = true,
-            Name = "System audio"
+            Name = _input == CaptureInput.Microphone ? "Microphone" : "System audio"
         };
         _thread.Start();
         if (!_ready.Wait(TimeSpan.FromSeconds(5)))
         {
             _stop = true;
-            throw new InvalidOperationException("System audio did not start. Check that a speaker is available.");
+            throw new InvalidOperationException(DidNotStart());
         }
 
         if (_startError is InvalidOperationException invalid)
@@ -54,7 +67,7 @@ internal sealed class SystemAudioCapture : IDisposable
 
         if (_startError is not null)
         {
-            throw new InvalidOperationException("System audio did not start. Check that a speaker is available.", _startError);
+            throw new InvalidOperationException(DidNotStart(), _startError);
         }
     }
 
@@ -82,43 +95,58 @@ internal sealed class SystemAudioCapture : IDisposable
         try
         {
             enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
-            var hr = enumerator.GetDefaultAudioEndpoint(RenderDevice, ConsoleRole, out device);
+            var microphone = _input == CaptureInput.Microphone;
+            var hr = enumerator.GetDefaultAudioEndpoint(microphone ? CaptureDevice : RenderDevice, ConsoleRole, out device);
             if (hr < 0 || device is null)
             {
-                throw new InvalidOperationException("No speaker is available for system audio.");
+                throw new InvalidOperationException(microphone
+                    ? "No microphone is available."
+                    : "No speaker is available for system audio.");
             }
 
             var clientId = typeof(IAudioClient).GUID;
             hr = device.Activate(ref clientId, ClassContextAll, IntPtr.Zero, out client);
             if (hr < 0 || client is null)
             {
-                throw new InvalidOperationException("System audio could not open the speaker.");
+                throw new InvalidOperationException(microphone
+                    ? "The microphone could not be opened."
+                    : "System audio could not open the speaker.");
             }
 
             hr = client.GetMixFormat(out format);
             if (hr < 0 || format == IntPtr.Zero)
             {
-                throw new InvalidOperationException("System audio could not read the speaker format.");
+                throw new InvalidOperationException(microphone
+                    ? "The microphone format could not be read."
+                    : "System audio could not read the speaker format.");
             }
 
             DescribeFormat(format);
-            hr = client.Initialize(SharedMode, LoopbackFlag, 1_000_0000, 0, format, IntPtr.Zero);
+            // Loopback listens to the speakers. A microphone uses the capture endpoint.
+            var flags = microphone ? 0u : LoopbackFlag;
+            hr = client.Initialize(SharedMode, flags, 1_000_0000, 0, format, IntPtr.Zero);
             if (hr < 0)
             {
-                throw new InvalidOperationException("System audio could not listen to the speaker.");
+                throw new InvalidOperationException(microphone
+                    ? "The microphone could not be recorded."
+                    : "System audio could not listen to the speaker.");
             }
 
             var captureId = CaptureClientId;
             hr = client.GetService(ref captureId, out capture);
             if (hr < 0 || capture is null)
             {
-                throw new InvalidOperationException("System audio could not listen to the speaker.");
+                throw new InvalidOperationException(microphone
+                    ? "The microphone could not be recorded."
+                    : "System audio could not listen to the speaker.");
             }
 
             hr = client.Start();
             if (hr < 0)
             {
-                throw new InvalidOperationException("System audio could not listen to the speaker.");
+                throw new InvalidOperationException(microphone
+                    ? "The microphone could not be recorded."
+                    : "System audio could not listen to the speaker.");
             }
 
             _ready.Set();
@@ -186,7 +214,9 @@ internal sealed class SystemAudioCapture : IDisposable
         var isPcm = tag == WaveFormatPcm || subFormat == PcmSubFormat;
         if (channels == 0 || sampleRate is < 8000 or > 192000 || (!isFloat && !isPcm) || bits is not (16 or 32))
         {
-            throw new InvalidOperationException("This speaker format cannot be recorded.");
+            throw new InvalidOperationException(_input == CaptureInput.Microphone
+                ? "This microphone format cannot be recorded."
+                : "This speaker format cannot be recorded.");
         }
 
         SampleRate = (int)sampleRate;
@@ -269,6 +299,11 @@ internal sealed class SystemAudioCapture : IDisposable
 
         return (short)Marshal.ReadInt16(source, offset);
     }
+
+    private string DidNotStart()
+        => _input == CaptureInput.Microphone
+            ? "The microphone did not start. Check that a microphone is available."
+            : "System audio did not start. Check that a speaker is available.";
 
     [DllImport("ole32.dll")]
     private static extern int CoInitializeEx(IntPtr reserved, uint coInit);

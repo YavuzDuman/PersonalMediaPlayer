@@ -2,6 +2,7 @@ using LibVLCSharp.Shared;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using PersonalMediaPlayer.App.Editing;
@@ -21,11 +22,14 @@ public sealed partial class VideoPlaybackBar : UserControl
     }
 
     private readonly DispatcherTimer _hoverTimer = new() { Interval = TimeSpan.FromMilliseconds(90) };
+    private readonly DispatcherTimer _edgeTimer = new() { Interval = TimeSpan.FromMilliseconds(32) };
     private readonly TimelineThumbnails _thumbs = new();
     private TrimHandle _trimDrag;
     private double _trimStart;
     private double _trimEnd = 1;
     private string? _hoverPath;
+    private readonly List<(long StartMs, long EndMs, string Text)> _captionCues = [];
+    private int _captionTip = -1;
     private long _hoverDurationMs;
     private TimeSpan _wantedHover = TimeSpan.MinValue;
     private bool _hoverBusy;
@@ -35,14 +39,23 @@ public sealed partial class VideoPlaybackBar : UserControl
     private bool _trimPassThrough;
     private double _trimGrab = 18;
     private bool _cutDragging;
+    private bool _audioDragging;
+    private bool _seekDragging;
+    private bool _holdView;
+    private double _edgePointerX = double.NaN;
+    private bool _audioInteractive = true;
+    private double _audioAnchor;
+    private List<(double Start, double End, int Volume)> _silenceFractions = [];
+    private (double Start, double End)? _audioSelection;
     private double _cutAnchor;
     private List<(double Start, double End)> _removedFractions = [];
     private (double Start, double End)? _selection;
-    private static readonly double[] ZoomSteps = [1, 2, 4, 8, 16];
     private int _zoomIndex;
+    private bool _timelineHovered;
     private MediaPlayer? _subtitlePlayer;
     private int _subtitleTrack = -1;
     private bool _subtitlesOn = true;
+    private bool _fileCaptions;
     private List<(int Id, string Name)>? _captionChoices;
     private int _announcedCaption = int.MinValue;
     private bool _timelineZoom;
@@ -84,6 +97,7 @@ public sealed partial class VideoPlaybackBar : UserControl
             _hoverTimer.Stop();
             _ = PumpHoverAsync();
         };
+        _edgeTimer.Tick += (_, _) => AdvanceEdgeScroll();
         Loaded += (_, _) =>
         {
             TimelineHost.AddHandler(PointerMovedEvent, new PointerEventHandler(Timeline_Moved), true);
@@ -91,16 +105,29 @@ public sealed partial class VideoPlaybackBar : UserControl
             TimelineHost.AddHandler(PointerReleasedEvent, new PointerEventHandler(Timeline_Released), true);
             TimelineHost.AddHandler(PointerExitedEvent, new PointerEventHandler(Timeline_Exited), true);
             TimelineHost.AddHandler(PointerCanceledEvent, new PointerEventHandler(Timeline_Released), true);
+            TimelineHost.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(Timeline_Released), true);
             TimelineHost.SizeChanged += (_, _) =>
             {
                 DrawRemovedFractions();
+                DrawAudioLane();
+                DrawCaptions();
                 ArrangeRepeat();
+                UpdateSeekPrecision();
             };
+            CaptionLane.SizeChanged += (_, _) => DrawCaptions();
             TimelineScroll.AddHandler(PointerWheelChangedEvent, new PointerEventHandler(TimelineScroll_Wheel), true);
+            TimelineScroll.AddHandler(PointerEnteredEvent, new PointerEventHandler(TimelineScroll_Entered), true);
+            TimelineScroll.AddHandler(PointerExitedEvent, new PointerEventHandler(TimelineScroll_Exited), true);
+            SeekSlider.AddHandler(PointerPressedEvent, new PointerEventHandler(Seek_EdgePressed), true);
+            SeekSlider.AddHandler(PointerMovedEvent, new PointerEventHandler(Seek_EdgeMoved), true);
+            SeekSlider.AddHandler(PointerReleasedEvent, new PointerEventHandler(Seek_EdgeReleased), true);
+            SeekSlider.AddHandler(PointerCanceledEvent, new PointerEventHandler(Seek_EdgeReleased), true);
+            SeekSlider.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(Seek_EdgeReleased), true);
         };
         Unloaded += (_, _) =>
         {
             _hoverTimer.Stop();
+            _edgeTimer.Stop();
             _thumbs.Dispose();
             CloseSettings();
         };
@@ -230,6 +257,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         _subtitlePlayer = null;
         _subtitleTrack = -1;
         _captionChoices = null;
+        _fileCaptions = false;
         _announcedCaption = int.MinValue;
         SubtitleButton.Visibility = Visibility.Collapsed;
         UpdateSettingsButton();
@@ -274,7 +302,13 @@ public sealed partial class VideoPlaybackBar : UserControl
     private void ApplySubtitles()
     {
         var tracks = SubtitleTracks();
-        if (tracks.Count == 0 || (_subtitlePlayer is null && _captionChoices is null))
+        if (tracks.Count == 0)
+        {
+            ShowFileCaptionToggle();
+            return;
+        }
+
+        if (_subtitlePlayer is null && _captionChoices is null)
         {
             SubtitleButton.Visibility = Visibility.Collapsed;
             CaptionCombo.Visibility = Visibility.Collapsed;
@@ -327,25 +361,54 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     public event EventHandler<int>? CaptionChosen;
 
+    public event EventHandler? CaptionExportRequested;
+
+    public void ShowCaptionExport(bool available)
+    {
+        ExportCaptionsButton.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ExportCaptions_Click(object sender, RoutedEventArgs e)
+    {
+        CaptionExportRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     public void OfferCaptions()
     {
+        _fileCaptions = true;
         _subtitlesOn = true;
-        CaptionCombo.Visibility = Visibility.Collapsed;
-        SubtitleButton.Visibility = Visibility.Visible;
-        SubtitleText.Text = "CC";
-        SubtitleButton.Opacity = 1;
-        ToolTipService.SetToolTip(SubtitleButton, "Hide subtitles");
-        SubtitlesChanged?.Invoke(this, true);
-        UpdateSettingsButton();
+        ShowFileCaptionToggle();
     }
 
     public void ClearHoverCaptions()
     {
+        ShowCaptionExport(false);
         _captionChoices = null;
+        _fileCaptions = false;
         _announcedCaption = int.MinValue;
         // LibVLC faults if subtitle tracks are read after Stop, or on a player that was already released.
         _subtitlePlayer = null;
         ApplySubtitles();
+    }
+
+    private void ShowFileCaptionToggle()
+    {
+        if (!_fileCaptions)
+        {
+            SubtitleButton.Visibility = Visibility.Collapsed;
+            CaptionCombo.Visibility = Visibility.Collapsed;
+            UpdateSettingsButton();
+            return;
+        }
+
+        CaptionCombo.Visibility = Visibility.Collapsed;
+        SubtitleButton.Visibility = Visibility.Visible;
+        SubtitleText.Text = _subtitlesOn ? "CC" : "Off";
+        SubtitleButton.Opacity = _subtitlesOn ? 1 : 0.45;
+        ToolTipService.SetToolTip(SubtitleButton, _subtitlesOn ? "Hide subtitles" : "Show subtitles");
+        _subtitlePlayer?.SetSpu(-1);
+        SubtitlesChanged?.Invoke(this, _subtitlesOn);
+        UpdateSettingsButton();
     }
 
     public void OfferCaptionChoices(IReadOnlyList<string> names, int selectedIndex = 0, bool announce = true)
@@ -586,6 +649,8 @@ public sealed partial class VideoPlaybackBar : UserControl
         {
             HideHover();
         }
+
+        UpdateCaptionLane();
     }
 
     public double TrimStart => _trimStart;
@@ -598,7 +663,13 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     public event EventHandler<CutSelection>? CutSelected;
 
+    public event EventHandler<CutSelection>? AudioRangeSelected;
+
+    public event EventHandler<double>? AudioSilenceClicked;
+
     public event EventHandler<double>? TimelineClicked;
+
+    public event EventHandler<long>? CaptionLineChosen;
 
     public readonly record struct CutSelection(double Start, double End);
 
@@ -621,6 +692,98 @@ public sealed partial class VideoPlaybackBar : UserControl
     {
         _removedFractions = fractions.ToList();
         DrawRemovedFractions();
+        DrawCaptions();
+    }
+
+    public void ShowAudioLane(bool show)
+    {
+        var visible = show ? Visibility.Visible : Visibility.Collapsed;
+        AudioLane.Visibility = visible;
+        AudioLaneLabel.Visibility = visible;
+        AudioHint.Visibility = visible;
+        FitTimeline();
+        UpdatePartVolumeVisibility();
+        DrawAudioLane();
+    }
+
+    public void SetAudioLaneInteractive(bool enabled, string? hint)
+    {
+        _audioInteractive = enabled;
+        AudioLane.IsHitTestVisible = enabled && AudioLane.Visibility == Visibility.Visible;
+        AudioLane.Opacity = enabled ? 1 : 0.55;
+        if (!string.IsNullOrWhiteSpace(hint))
+        {
+            AudioHint.Text = hint;
+        }
+
+        UpdatePartVolumeVisibility();
+        DrawAudioLane();
+    }
+
+    public int PartVolumePercent => PartVolumeSlider is null ? 0 : (int)Math.Round(PartVolumeSlider.Value);
+
+    public event EventHandler<int>? PartVolumeChanged;
+
+    private bool _settingPartVolume;
+
+    public void SetPartVolumePercent(int volume)
+    {
+        if (PartVolumeSlider is null)
+        {
+            return;
+        }
+
+        volume = Math.Clamp(volume, 0, 200);
+        _settingPartVolume = true;
+        try
+        {
+            PartVolumeSlider.Value = volume;
+            if (PartVolumeReadout is not null)
+            {
+                PartVolumeReadout.Text = $"{volume}%";
+            }
+        }
+        finally
+        {
+            _settingPartVolume = false;
+        }
+    }
+
+    private void UpdatePartVolumeVisibility()
+    {
+        PartVolumeBar.Visibility = _audioInteractive && AudioLane.Visibility == Visibility.Visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void PartVolumeSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (PartVolumeReadout is not null)
+        {
+            PartVolumeReadout.Text = $"{(int)Math.Round(e.NewValue)}%";
+        }
+
+        if (_settingPartVolume)
+        {
+            return;
+        }
+
+        PartVolumeChanged?.Invoke(this, (int)Math.Round(e.NewValue));
+    }
+
+    private void PartVolumePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && int.TryParse(button.Tag?.ToString(), out var volume))
+        {
+            PartVolumeSlider.Value = volume;
+        }
+    }
+
+    public void SetSilenceFractions(IReadOnlyList<(double Start, double End, int Volume)> fractions)
+    {
+        _silenceFractions = fractions.ToList();
+        _audioSelection = null;
+        DrawAudioLane();
     }
 
     public void UseSectionRepeat(bool enabled)
@@ -723,6 +886,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         TrimCanvas.IsHitTestVisible = true;
         SeekSlider.IsHitTestVisible = passThrough && !_cutPicking;
         ArrangeTrim();
+        TrimRange.Visibility = passThrough ? Visibility.Collapsed : Visibility.Visible;
         UpdateRepeatChrome();
     }
 
@@ -744,14 +908,16 @@ public sealed partial class VideoPlaybackBar : UserControl
 
         SeekSlider.IsHitTestVisible = !enabled && !_cutPicking;
         ArrangeTrim();
+        TrimRange.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public void SetTrimFractions(double start, double end)
     {
-        const double minGap = 0.01;
+        var minGap = TrimGap();
         _trimStart = Math.Clamp(Math.Min(start, end - minGap), 0, 1);
         _trimEnd = Math.Clamp(Math.Max(end, _trimStart + minGap), 0, 1);
         ArrangeTrim();
+        DrawCaptions();
     }
 
     public void EndTrim()
@@ -767,6 +933,12 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     private void Timeline_Moved(object sender, PointerRoutedEventArgs e)
     {
+        if (IsTimelineOverlay(e.OriginalSource as DependencyObject))
+        {
+            HideHover();
+            return;
+        }
+
         if (_hoverDurationMs <= 0 || string.IsNullOrWhiteSpace(_hoverPath) || TimelineHost.ActualWidth <= 1)
         {
             HideHover();
@@ -775,12 +947,16 @@ public sealed partial class VideoPlaybackBar : UserControl
 
         if (_cutDragging && TimelineHost.ActualWidth > 1)
         {
-            var dragEnd = CutFraction(e);
+            RememberEdgePointer(e);
+            var dragEnd = CutFraction();
             _selection = (Math.Min(_cutAnchor, dragEnd), Math.Max(_cutAnchor, dragEnd));
             DrawRemovedFractions();
         }
 
-        var x = Math.Clamp(e.GetCurrentPoint(TimelineHost).Position.X, 0, TimelineHost.ActualWidth);
+        var rawX = _cutDragging && !double.IsNaN(_edgePointerX)
+            ? PointerContentX()
+            : e.GetCurrentPoint(TimelineHost).Position.X;
+        var x = Math.Clamp(rawX, 0, TimelineHost.ActualWidth);
         var ms = (long)(x / TimelineHost.ActualWidth * _hoverDurationMs);
         HoverTime.Text = FormatHover(ms);
         _wantedHover = TimeSpan.FromMilliseconds(ms);
@@ -797,14 +973,16 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     private void Timeline_Pressed(object sender, PointerRoutedEventArgs e)
     {
-        if (_trimDrag != TrimHandle.None || !_cutPicking || TimelineHost.ActualWidth <= 1)
+        if (_audioDragging || IsTimelineOverlay(e.OriginalSource as DependencyObject) || _trimDrag != TrimHandle.None || !_cutPicking || TimelineHost.ActualWidth <= 1)
         {
             return;
         }
 
         _cutDragging = true;
-        _cutAnchor = CutFraction(e);
+        RememberEdgePointer(e);
+        _cutAnchor = CutFraction();
         TimelineHost.CapturePointer(e.Pointer);
+        StartEdge();
         e.Handled = true;
     }
 
@@ -815,12 +993,14 @@ public sealed partial class VideoPlaybackBar : UserControl
             return;
         }
 
+        RememberEdgePointer(e);
+        var end = CutFraction();
         _cutDragging = false;
+        StopEdge();
         TimelineHost.ReleasePointerCaptures();
-        var end = CutFraction(e);
         var start = Math.Min(_cutAnchor, end);
         end = Math.Max(_cutAnchor, end);
-        if (end - start < 0.008)
+        if (!TimelineGesture.IsDrag(start, end, TimelineHost.ActualWidth))
         {
             TimelineClicked?.Invoke(this, end);
         }
@@ -832,14 +1012,14 @@ public sealed partial class VideoPlaybackBar : UserControl
         e.Handled = true;
     }
 
-    private double CutFraction(PointerRoutedEventArgs e)
-        => Math.Clamp(e.GetCurrentPoint(TimelineHost).Position.X / Math.Max(1, TimelineHost.ActualWidth), 0, 1);
+    private double CutFraction()
+        => Math.Clamp(PointerContentX() / Math.Max(1, TimelineHost.ActualWidth), 0, 1);
 
     private void DrawRemovedFractions()
     {
         CutsCanvas.Children.Clear();
         var width = TimelineHost.ActualWidth;
-        var height = Math.Max(8, TimelineHost.ActualHeight);
+        var height = 28;
         if (width <= 1)
         {
             return;
@@ -855,6 +1035,16 @@ public sealed partial class VideoPlaybackBar : UserControl
         if (_selection is { } selected)
         {
             AddSpan(selected.Start, selected.End, width, height, 16, ColorHelper.FromArgb(230, 255, 186, 46));
+        }
+
+        foreach (var (start, end) in _removedFractions)
+        {
+            AddSpanLength(CutsCanvas, start, end, width, 6, always: false);
+        }
+
+        if (_selection is { } marked)
+        {
+            AddSpanLength(CutsCanvas, marked.Start, marked.End, width, 6, always: true);
         }
     }
 
@@ -939,13 +1129,211 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     private void TimelineScroll_Wheel(object sender, PointerRoutedEventArgs e)
     {
-        if (!_timelineZoom || !e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control))
+        if (!_timelineZoom)
+        {
+            return;
+        }
+
+        var delta = e.GetCurrentPoint(TimelineScroll).Properties.MouseWheelDelta;
+        if (e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control))
+        {
+            e.Handled = true;
+            var point = e.GetCurrentPoint(TimelineHost).Position.X;
+            var fraction = TimelineHost.ActualWidth > 1
+                ? Math.Clamp(point / TimelineHost.ActualWidth, 0, 1)
+                : (double?)null;
+            StepZoom(delta > 0 ? 1 : -1, fraction);
+            return;
+        }
+
+        if (_zoomIndex == 0 || delta == 0)
         {
             return;
         }
 
         e.Handled = true;
-        StepZoom(e.GetCurrentPoint(TimelineScroll).Properties.MouseWheelDelta > 0 ? 1 : -1);
+        if (Math.Abs(PanBy(TimelineGesture.WheelOffset(TimelineScroll.ViewportWidth, delta))) >= 0.5)
+        {
+            _holdView = true;
+        }
+    }
+
+    private void ScrollEarlier_Click(object sender, RoutedEventArgs e) => PanPage(-1);
+
+    private void ScrollLater_Click(object sender, RoutedEventArgs e) => PanPage(1);
+
+    private void TimelinePan_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (!_timelineZoom || _zoomIndex == 0)
+        {
+            return;
+        }
+
+        if (FocusManager.GetFocusedElement(XamlRoot) is TextBox or NumberBox or Slider or RichEditBox)
+        {
+            return;
+        }
+
+        var distance = sender.Key == VirtualKey.Left
+            ? -TimelineGesture.KeyPan(TimelineScroll.ViewportWidth)
+            : TimelineGesture.KeyPan(TimelineScroll.ViewportWidth);
+        if (Math.Abs(PanBy(distance)) < 0.5)
+        {
+            return;
+        }
+
+        _holdView = true;
+        args.Handled = true;
+    }
+
+    private void PanPage(int direction)
+    {
+        if (Math.Abs(PanBy(direction * TimelineGesture.PagePan(TimelineScroll.ViewportWidth))) >= 0.5)
+        {
+            _holdView = true;
+        }
+    }
+
+    private double PanBy(double delta)
+    {
+        if (Math.Abs(delta) < 0.5 || _layingZoom)
+        {
+            return 0;
+        }
+
+        var width = TimelineHost.ActualWidth;
+        var viewport = TimelineScroll.ViewportWidth;
+        if (width <= viewport + 1 || viewport <= 1)
+        {
+            return 0;
+        }
+
+        var next = Math.Clamp(TimelineScroll.HorizontalOffset + delta, 0, Math.Max(0, width - viewport));
+        var applied = next - TimelineScroll.HorizontalOffset;
+        if (Math.Abs(applied) < 0.5)
+        {
+            return 0;
+        }
+
+        TimelineScroll.ChangeView(next, null, null, true);
+        return applied;
+    }
+
+    private void Seek_EdgePressed(object sender, PointerRoutedEventArgs e)
+    {
+        _seekDragging = true;
+        RememberEdgePointer(e);
+        if (_timelineZoom && _zoomIndex > 0)
+        {
+            MoveSeekToContent();
+        }
+
+        StartEdge();
+    }
+
+    private void Seek_EdgeMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_seekDragging)
+        {
+            return;
+        }
+
+        RememberEdgePointer(e);
+        if (_timelineZoom && _zoomIndex > 0)
+        {
+            MoveSeekToContent();
+        }
+    }
+
+    private void Seek_EdgeReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _seekDragging = false;
+        StopEdge();
+    }
+
+    private void RememberEdgePointer(PointerRoutedEventArgs e)
+        => _edgePointerX = e.GetCurrentPoint(TimelineScroll).Position.X;
+
+    private double PointerContentX()
+        => _edgePointerX + TimelineScroll.HorizontalOffset;
+
+    private void StartEdge()
+    {
+        if (_timelineZoom && _zoomIndex > 0)
+        {
+            _edgeTimer.Start();
+        }
+    }
+
+    private void StopEdge()
+    {
+        if (_seekDragging || _audioDragging || _cutDragging || _trimDrag != TrimHandle.None)
+        {
+            return;
+        }
+
+        _edgeTimer.Stop();
+    }
+
+    private void AdvanceEdgeScroll()
+    {
+        if (_zoomIndex == 0 || _layingZoom || double.IsNaN(_edgePointerX))
+        {
+            return;
+        }
+
+        var applied = PanBy(TimelineGesture.EdgeScroll(_edgePointerX, TimelineScroll.ViewportWidth));
+        if (Math.Abs(applied) < 0.5)
+        {
+            return;
+        }
+
+        _holdView = true;
+        var contentX = PointerContentX();
+        var width = Math.Max(1, TimelineHost.ActualWidth);
+        if (_trimDrag != TrimHandle.None)
+        {
+            ApplyTrimDrag(contentX);
+        }
+
+        if (_cutDragging)
+        {
+            var end = Math.Clamp(contentX / width, 0, 1);
+            _selection = (Math.Min(_cutAnchor, end), Math.Max(_cutAnchor, end));
+            DrawRemovedFractions();
+        }
+
+        if (_audioDragging)
+        {
+            var end = Math.Clamp(contentX / Math.Max(1, AudioLane.ActualWidth), 0, 1);
+            _audioSelection = (Math.Min(_audioAnchor, end), Math.Max(_audioAnchor, end));
+            DrawAudioLane();
+        }
+
+        if (_seekDragging)
+        {
+            MoveSeekToContent();
+        }
+    }
+
+    private void MoveSeekToContent()
+    {
+        if (SeekSlider is null || SeekSlider.Maximum <= SeekSlider.Minimum || double.IsNaN(_edgePointerX))
+        {
+            return;
+        }
+
+        var width = Math.Max(1, TimelineHost.ActualWidth);
+        var range = SeekSlider.Maximum - SeekSlider.Minimum;
+        SeekSlider.Value = Math.Clamp(SeekSlider.Minimum + PointerContentX() / width * range, SeekSlider.Minimum, SeekSlider.Maximum);
+    }
+
+    private void TimelineScroll_Entered(object sender, PointerRoutedEventArgs e) => _timelineHovered = true;
+
+    private void TimelineScroll_Exited(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(TimelineScroll).Position;
+        _timelineHovered = point.X >= 0 && point.Y >= 0 && point.X < TimelineScroll.ActualWidth && point.Y < TimelineScroll.ActualHeight;
     }
 
     private void TimelineScroll_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -956,17 +1344,19 @@ public sealed partial class VideoPlaybackBar : UserControl
         }
     }
 
-    private void StepZoom(int direction)
+    private void StepZoom(int direction, double? anchor = null)
     {
-        var next = Math.Clamp(_zoomIndex + direction, 0, ZoomSteps.Length - 1);
+        var next = Math.Clamp(_zoomIndex + direction, 0, MaxZoomIndex());
         if (next == _zoomIndex)
         {
             return;
         }
 
         _zoomIndex = next;
-        LayoutZoom(ViewCenterFraction());
+        LayoutZoom(anchor ?? ZoomAnchorFraction());
     }
+
+    private int MaxZoomIndex() => TimelineGesture.HighestZoomIndex(TimelineScroll.ViewportWidth);
 
     private double ViewCenterFraction()
     {
@@ -992,14 +1382,22 @@ public sealed partial class VideoPlaybackBar : UserControl
         _layingZoom = true;
         try
         {
-            var zoom = ZoomSteps[_zoomIndex];
-            var width = Math.Max(viewport, viewport * zoom);
+            var maxIndex = MaxZoomIndex();
+            if (_zoomIndex > maxIndex)
+            {
+                _zoomIndex = maxIndex;
+            }
+
+            var width = TimelineGesture.TimelineWidth(viewport, _zoomIndex);
             TimelineHost.Width = width;
             UpdateZoomLabel();
+            UpdateSeekPrecision();
             TimelineHost.UpdateLayout();
             var offset = anchorFraction * width - viewport / 2;
             TimelineScroll.ChangeView(Math.Clamp(offset, 0, Math.Max(0, width - viewport)), null, null, true);
             DrawRemovedFractions();
+            DrawAudioLane();
+            DrawCaptions();
             ArrangeTrim();
         }
         finally
@@ -1015,9 +1413,128 @@ public sealed partial class VideoPlaybackBar : UserControl
             return;
         }
 
-        ZoomLabel.Text = $"{ZoomSteps[_zoomIndex]:0}×";
+        ZoomLabel.Text = $"{TimelineGesture.ZoomSteps[Math.Clamp(_zoomIndex, 0, TimelineGesture.ZoomSteps.Length - 1)]:0}×";
         ZoomOutButton.IsEnabled = _zoomIndex > 0;
-        ZoomInButton.IsEnabled = _zoomIndex < ZoomSteps.Length - 1;
+        ZoomInButton.IsEnabled = _zoomIndex < MaxZoomIndex();
+        var zoomed = _timelineZoom && _zoomIndex > 0;
+        if (!zoomed)
+        {
+            _holdView = false;
+        }
+
+        if (ScrollEarlierButton is not null)
+        {
+            ScrollEarlierButton.IsEnabled = zoomed;
+        }
+
+        if (ScrollLaterButton is not null)
+        {
+            ScrollLaterButton.IsEnabled = zoomed;
+        }
+    }
+
+    private void UpdateSeekPrecision()
+    {
+        if (_seekDragging || SeekSlider is null)
+        {
+            return;
+        }
+
+        var width = TimelineHost.ActualWidth;
+        if (TimelineHost.Width > width)
+        {
+            width = TimelineHost.Width;
+        }
+
+        if (width <= 1 || double.IsNaN(width))
+        {
+            return;
+        }
+
+        var step = TimelineGesture.SeekStep(SeekSlider.Maximum, width);
+        if (step <= 0)
+        {
+            return;
+        }
+
+        SeekSlider.StepFrequency = step;
+        SeekSlider.SmallChange = step;
+        var viewport = Math.Max(1, TimelineScroll.ViewportWidth);
+        SeekSlider.LargeChange = Math.Clamp(viewport / width * SeekSlider.Maximum, step, SeekSlider.Maximum);
+    }
+
+    private double ZoomAnchorFraction()
+    {
+        var playhead = SeekSlider.Maximum > 0 ? SeekSlider.Value / SeekSlider.Maximum : 0;
+        var width = TimelineHost.ActualWidth;
+        var viewport = TimelineScroll.ViewportWidth;
+        if (width <= 1 || viewport <= 1)
+        {
+            return playhead;
+        }
+
+        var left = TimelineScroll.HorizontalOffset;
+        var x = playhead * width;
+        if (x >= left - 1 && x <= left + viewport + 1)
+        {
+            return playhead;
+        }
+
+        return ViewCenterFraction();
+    }
+
+    public void RevealFraction(double fraction)
+    {
+        if (!_timelineZoom || _zoomIndex == 0 || _layingZoom || _timelineHovered || _holdView || _audioDragging || _cutDragging || _trimDrag != TrimHandle.None || _seekDragging)
+        {
+            if (_holdView && PlayheadInView(fraction))
+            {
+                _holdView = false;
+            }
+
+            return;
+        }
+
+        var width = TimelineHost.ActualWidth;
+        var viewport = TimelineScroll.ViewportWidth;
+        if (width <= viewport + 1 || viewport <= 1)
+        {
+            return;
+        }
+
+        var x = Math.Clamp(fraction, 0, 1) * width;
+        var left = TimelineScroll.HorizontalOffset;
+        var right = left + viewport;
+        const double margin = 64;
+        double target;
+        if (x < left + margin)
+        {
+            target = x - margin;
+        }
+        else if (x > right - margin)
+        {
+            target = x - (viewport - margin);
+        }
+        else
+        {
+            return;
+        }
+
+        TimelineScroll.ChangeView(Math.Clamp(target, 0, Math.Max(0, width - viewport)), null, null, true);
+    }
+
+    private bool PlayheadInView(double fraction)
+    {
+        var width = TimelineHost.ActualWidth;
+        var viewport = TimelineScroll.ViewportWidth;
+        if (width <= viewport + 1 || viewport <= 1)
+        {
+            return true;
+        }
+
+        var x = Math.Clamp(fraction, 0, 1) * width;
+        var left = TimelineScroll.HorizontalOffset;
+        return x >= left + 64 && x <= left + viewport - 64;
     }
 
     private void TrimCanvas_SizeChanged(object sender, SizeChangedEventArgs e) => ArrangeTrim();
@@ -1030,7 +1547,8 @@ public sealed partial class VideoPlaybackBar : UserControl
             return;
         }
 
-        var x = e.GetCurrentPoint(TrimCanvas).Position.X;
+        RememberEdgePointer(e);
+        var x = PointerContentX();
         var startX = _trimStart * width;
         var endX = _trimEnd * width;
         _trimDrag = Math.Abs(x - startX) <= _trimGrab
@@ -1040,6 +1558,7 @@ public sealed partial class VideoPlaybackBar : UserControl
                 : TrimHandle.Seek;
         TrimCanvas.CapturePointer(e.Pointer);
         ApplyTrimDrag(x);
+        StartEdge();
         e.Handled = true;
     }
 
@@ -1050,7 +1569,8 @@ public sealed partial class VideoPlaybackBar : UserControl
             return;
         }
 
-        ApplyTrimDrag(e.GetCurrentPoint(TrimCanvas).Position.X);
+        RememberEdgePointer(e);
+        ApplyTrimDrag(PointerContentX());
         e.Handled = true;
     }
 
@@ -1061,7 +1581,10 @@ public sealed partial class VideoPlaybackBar : UserControl
             return;
         }
 
+        RememberEdgePointer(e);
+        ApplyTrimDrag(PointerContentX());
         _trimDrag = TrimHandle.None;
+        StopEdge();
         TrimCanvas.ReleasePointerCapture(e.Pointer);
     }
 
@@ -1069,7 +1592,7 @@ public sealed partial class VideoPlaybackBar : UserControl
     {
         var width = Math.Max(1, TrimCanvas.ActualWidth);
         var fraction = Math.Clamp(x / width, 0, 1);
-        const double minGap = 0.01;
+        var minGap = TrimGap();
         if (_trimDrag == TrimHandle.Start)
         {
             _trimStart = Math.Min(fraction, _trimEnd - minGap);
@@ -1108,5 +1631,539 @@ public sealed partial class VideoPlaybackBar : UserControl
         Canvas.SetTop(TrimStartThumb, 3);
         Canvas.SetLeft(TrimEndThumb, Math.Clamp(endX - 6, 0, width - 12));
         Canvas.SetTop(TrimEndThumb, 3);
+        DrawAudioLane();
+    }
+
+    private void Audio_Pressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_audioInteractive || AudioLane.ActualWidth <= 1)
+        {
+            return;
+        }
+
+        _audioDragging = true;
+        RememberEdgePointer(e);
+        _audioAnchor = AudioFraction();
+        _audioSelection = (_audioAnchor, _audioAnchor);
+        AudioLane.CapturePointer(e.Pointer);
+        StartEdge();
+        DrawAudioLane();
+        e.Handled = true;
+    }
+
+    private void Audio_Moved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_audioDragging || AudioLane.ActualWidth <= 1)
+        {
+            return;
+        }
+
+        RememberEdgePointer(e);
+        var end = AudioFraction();
+        _audioSelection = (Math.Min(_audioAnchor, end), Math.Max(_audioAnchor, end));
+        DrawAudioLane();
+        e.Handled = true;
+    }
+
+    private void Audio_Released(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_audioDragging)
+        {
+            return;
+        }
+
+        RememberEdgePointer(e);
+        var end = AudioFraction();
+        _audioDragging = false;
+        StopEdge();
+        AudioLane.ReleasePointerCaptures();
+        var start = Math.Min(_audioAnchor, end);
+        end = Math.Max(_audioAnchor, end);
+        _audioSelection = null;
+        DrawAudioLane();
+        if (!TimelineGesture.IsDrag(start, end, AudioLane.ActualWidth))
+        {
+            AudioSilenceClicked?.Invoke(this, end);
+        }
+        else
+        {
+            AudioRangeSelected?.Invoke(this, new CutSelection(start, end));
+        }
+
+        e.Handled = true;
+    }
+
+    private double AudioFraction()
+        => Math.Clamp(PointerContentX() / Math.Max(1, AudioLane.ActualWidth), 0, 1);
+
+    private double TrimGap()
+    {
+        var gap = TimelineGesture.TrimGapFraction(_hoverDurationMs);
+        return gap > 0 ? gap : 0.01;
+    }
+
+    private void DrawAudioLane()
+    {
+        if (AudioCanvas is null || AudioLane.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        AudioCanvas.Children.Clear();
+        var width = AudioLane.ActualWidth;
+        if (width <= 1)
+        {
+            width = TimelineHost.ActualWidth;
+        }
+
+        if (width <= 1)
+        {
+            return;
+        }
+
+        AudioCanvas.Width = width;
+        AudioCanvas.Height = AudioLane.Height;
+        if (!_audioInteractive)
+        {
+            var empty = new TextBlock
+            {
+                Width = width,
+                Height = 22,
+                Text = "No audio",
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(200, 255, 255, 255)),
+                FontSize = 12,
+                TextAlignment = TextAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false
+            };
+            AudioCanvas.Children.Add(empty);
+            return;
+        }
+
+        AddAudioBand(0, 1, width, 8, ColorHelper.FromArgb(255, 126, 182, 214));
+        var outside = ColorHelper.FromArgb(150, 0, 0, 0);
+        if (_trimStart > 0.001)
+        {
+            AddAudioBand(0, _trimStart, width, 22, outside);
+        }
+
+        if (_trimEnd < 0.999)
+        {
+            AddAudioBand(_trimEnd, 1, width, 22, outside);
+        }
+        foreach (var (start, end, volume) in _silenceFractions)
+        {
+            AddAudioBand(start, end, width, 22, AudioLevelColor(volume));
+        }
+
+        if (_audioSelection is { } selected && selected.End > selected.Start)
+        {
+            AddAudioBand(selected.Start, selected.End, width, 22, ColorHelper.FromArgb(160, 255, 196, 64));
+        }
+
+        foreach (var (start, end, volume) in _silenceFractions)
+        {
+            AddSpanLength(AudioCanvas, start, end, width, 3, always: false, text: volume <= 0 ? "0%" : $"{volume}%");
+        }
+
+        if (_audioSelection is { } drag && drag.End > drag.Start)
+        {
+            AddSpanLength(AudioCanvas, drag.Start, drag.End, width, 3, always: true, text: AudioDragLabel(drag.Start, drag.End));
+        }
+    }
+
+    private void AddSpanLength(Canvas canvas, double start, double end, double width, double top, bool always, string? text = null)
+    {
+        if (!always && Math.Abs(end - start) * width < 48)
+        {
+            return;
+        }
+
+        var label = text ?? SpanLabel(start, end);
+        if (label is not null)
+        {
+            AddDragLabel(canvas, label, start, end, width, top);
+        }
+    }
+
+    private static Windows.UI.Color AudioLevelColor(int volume)
+    {
+        if (volume <= 0)
+        {
+            return ColorHelper.FromArgb(230, 90, 28, 28);
+        }
+
+        if (volume < AudioSilence.OriginalVolume)
+        {
+            return ColorHelper.FromArgb(220, 32, 112, 168);
+        }
+
+        return ColorHelper.FromArgb(230, 214, 148, 32);
+    }
+
+    private string? SpanLabel(double start, double end)
+    {
+        if (_hoverDurationMs <= 0)
+        {
+            return null;
+        }
+
+        var ms = (long)Math.Round(Math.Abs(end - start) * _hoverDurationMs);
+        if (ms <= 0)
+        {
+            return null;
+        }
+
+        var tenths = (int)((ms % 1000) / 100);
+        var seconds = ms / 1000;
+        if (seconds >= 3600)
+        {
+            return $"{seconds / 3600}:{(seconds / 60) % 60:00}:{seconds % 60:00}.{tenths}";
+        }
+
+        if (seconds >= 60)
+        {
+            return $"{seconds / 60}:{seconds % 60:00}.{tenths}";
+        }
+
+        return $"{seconds}.{tenths}s";
+    }
+
+    private string? AudioDragLabel(double start, double end)
+    {
+        var duration = SpanLabel(start, end);
+        if (duration is null)
+        {
+            return null;
+        }
+
+        var level = PartVolumePercent <= 0 ? "0%" : $"{PartVolumePercent}%";
+        return $"{duration} · {level}";
+    }
+
+    private static void AddDragLabel(Canvas canvas, string text, double start, double end, double width, double top)
+    {
+        var left = Math.Clamp(Math.Min(start, end), 0, 1) * width;
+        var chip = new Border
+        {
+            Height = 16,
+            Background = new SolidColorBrush(ColorHelper.FromArgb(220, 12, 12, 12)),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(4, 0, 4, 0),
+            IsHitTestVisible = false,
+            Child = new TextBlock
+            {
+                Text = text,
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Colors.White),
+                VerticalAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false
+            }
+        };
+        var reserve = text.Length * 7 + 8;
+        Canvas.SetLeft(chip, Math.Clamp(left, 0, Math.Max(0, width - reserve)));
+        Canvas.SetTop(chip, top);
+        canvas.Children.Add(chip);
+    }
+
+    private void AddAudioBand(double start, double end, double width, double band, Windows.UI.Color color)
+    {
+        var left = Math.Clamp(Math.Min(start, end), 0, 1) * width;
+        var right = Math.Clamp(Math.Max(start, end), 0, 1) * width;
+        var mark = new Border
+        {
+            Width = Math.Max(2, right - left),
+            Height = band,
+            Background = new SolidColorBrush(color),
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(mark, left);
+        Canvas.SetTop(mark, (22 - band) / 2);
+        AudioCanvas.Children.Add(mark);
+    }
+
+    private bool IsTimelineOverlay(DependencyObject? source) => IsLane(source, AudioLane) || IsLane(source, CaptionLane);
+
+    private static bool IsLane(DependencyObject? source, DependencyObject lane)
+    {
+        for (var node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (ReferenceEquals(node, lane))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public void SetCaptionCues(IReadOnlyList<(long StartMs, long EndMs, string Text)> cues)
+    {
+        _captionCues.Clear();
+        _captionTip = -1;
+        foreach (var cue in cues)
+        {
+            if (cue.EndMs <= cue.StartMs)
+            {
+                continue;
+            }
+
+            _captionCues.Add((cue.StartMs, cue.EndMs, OneCaptionLine(cue.Text)));
+        }
+
+        _captionCues.Sort((left, right) => left.StartMs.CompareTo(right.StartMs));
+        UpdateCaptionLane();
+    }
+
+    private void UpdateCaptionLane()
+    {
+        var show = _captionCues.Count > 0;
+        var visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (CaptionLane is not null)
+        {
+            CaptionLane.Visibility = visibility;
+        }
+
+        if (CaptionLaneLabel is not null)
+        {
+            CaptionLaneLabel.Visibility = visibility;
+        }
+
+        FitTimeline();
+        DrawCaptions();
+    }
+
+    private void FitTimeline()
+    {
+        if (TimelineHost is null || TimelineHost.RowDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        var height = TimelineHost.RowDefinitions[0].Height.GridUnitType == GridUnitType.Pixel
+            ? TimelineHost.RowDefinitions[0].Height.Value
+            : 28;
+        if (CaptionLane is { Visibility: Visibility.Visible })
+        {
+            height += CaptionLane.Margin.Top + CaptionLane.Height + CaptionLane.Margin.Bottom;
+        }
+
+        if (AudioLane is { Visibility: Visibility.Visible })
+        {
+            height += AudioLane.Margin.Top + AudioLane.Height + AudioLane.Margin.Bottom;
+        }
+
+        TimelineHost.MinHeight = Math.Max(28, height);
+    }
+
+    private void TimelineScroll_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e) => DrawCaptions();
+
+    private void Caption_Moved(object sender, PointerRoutedEventArgs e)
+    {
+        var width = CaptionWidth();
+        var index = width <= 1 ? -1 : CueIndexAt(e.GetCurrentPoint(CaptionLane).Position.X, width);
+        if (index == _captionTip)
+        {
+            return;
+        }
+
+        _captionTip = index;
+        ToolTipService.SetToolTip(CaptionLane, index < 0 ? null : _captionCues[index].Text);
+    }
+
+    private void Caption_Exited(object sender, PointerRoutedEventArgs e)
+    {
+        _captionTip = -1;
+        ToolTipService.SetToolTip(CaptionLane, null);
+    }
+
+    private void Caption_Pressed(object sender, PointerRoutedEventArgs e)
+    {
+        var width = CaptionWidth();
+        if (width <= 1)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var index = CueIndexAt(e.GetCurrentPoint(CaptionLane).Position.X, width);
+        if (index >= 0)
+        {
+            CaptionLineChosen?.Invoke(this, _captionCues[index].StartMs);
+        }
+
+        e.Handled = true;
+    }
+
+    private double CaptionWidth()
+    {
+        var width = CaptionLane?.ActualWidth ?? 0;
+        return width > 1 ? width : TimelineHost.ActualWidth;
+    }
+
+    private int CueIndexAt(double x, double width)
+    {
+        if (_hoverDurationMs <= 0 || _captionCues.Count == 0 || width <= 1)
+        {
+            return -1;
+        }
+
+        var fraction = x / width;
+        var slop = 4 / width;
+        var best = -1;
+        var bestDistance = double.MaxValue;
+        for (var i = 0; i < _captionCues.Count; i++)
+        {
+            var start = _captionCues[i].StartMs / (double)_hoverDurationMs;
+            var end = _captionCues[i].EndMs / (double)_hoverDurationMs;
+            if (fraction < start - slop || fraction > end + slop)
+            {
+                continue;
+            }
+
+            var distance = Math.Abs(fraction - (start + end) / 2);
+            if (fraction >= start && fraction <= end)
+            {
+                distance -= 1;
+            }
+
+            if (distance < bestDistance)
+            {
+                best = i;
+                bestDistance = distance;
+            }
+        }
+
+        return best;
+    }
+
+    private void DrawCaptions()
+    {
+        if (CaptionCanvas is null || CaptionLane is null || CaptionLane.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        CaptionCanvas.Children.Clear();
+        var width = CaptionWidth();
+        if (width <= 1 || _hoverDurationMs <= 0 || _captionCues.Count == 0)
+        {
+            return;
+        }
+
+        CaptionCanvas.Width = width;
+        CaptionCanvas.Height = 18;
+        var viewLeft = TimelineScroll.HorizontalOffset - 48;
+        var viewRight = TimelineScroll.HorizontalOffset + Math.Max(TimelineScroll.ViewportWidth, width) + 48;
+        double? runLeft = null;
+        var runRight = 0d;
+        var runKept = false;
+        foreach (var cue in _captionCues)
+        {
+            var start = Math.Clamp(cue.StartMs / (double)_hoverDurationMs, 0, 1);
+            var end = Math.Clamp(cue.EndMs / (double)_hoverDurationMs, 0, 1);
+            if (end <= start)
+            {
+                continue;
+            }
+
+            var left = start * width;
+            var right = Math.Max(left + 1, end * width);
+            if (right < viewLeft || left > viewRight)
+            {
+                FlushCaptionRun(ref runLeft, runRight, width, runKept);
+                continue;
+            }
+
+            var kept = CueKept(start, end);
+            if (right - left >= 72)
+            {
+                FlushCaptionRun(ref runLeft, runRight, width, runKept);
+                AddCaptionMark(left, right, width, kept, cue.Text);
+                continue;
+            }
+
+            if (runLeft is not null && kept == runKept && left <= runRight + 1.5)
+            {
+                runRight = Math.Max(runRight, right);
+                continue;
+            }
+
+            FlushCaptionRun(ref runLeft, runRight, width, runKept);
+            runLeft = left;
+            runRight = right;
+            runKept = kept;
+        }
+
+        FlushCaptionRun(ref runLeft, runRight, width, runKept);
+    }
+
+    private void FlushCaptionRun(ref double? runLeft, double runRight, double width, bool kept)
+    {
+        if (runLeft is not double left)
+        {
+            return;
+        }
+
+        AddCaptionMark(left, runRight, width, kept, null);
+        runLeft = null;
+    }
+
+    private bool CueKept(double start, double end)
+    {
+        var from = Math.Max(start, _trimStart);
+        var to = Math.Min(end, _trimEnd);
+        if (to - from <= 0.0000001)
+        {
+            return false;
+        }
+
+        foreach (var (cutStart, cutEnd) in _removedFractions)
+        {
+            if (Math.Min(to, cutEnd) - Math.Max(from, cutStart) >= (to - from) - 0.0000001)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void AddCaptionMark(double left, double right, double width, bool kept, string? text)
+    {
+        var wide = !string.IsNullOrWhiteSpace(text);
+        var mark = new Border
+        {
+            Width = Math.Max(1, Math.Min(width, right) - Math.Max(0, left)),
+            Height = wide ? 14 : 4,
+            Background = new SolidColorBrush(kept
+                ? ColorHelper.FromArgb(230, 214, 196, 255)
+                : ColorHelper.FromArgb(90, 255, 255, 255)),
+            CornerRadius = new CornerRadius(2),
+            IsHitTestVisible = false
+        };
+        if (wide)
+        {
+            mark.Child = new TextBlock
+            {
+                Text = text,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 24, 18, 36)),
+                Margin = new Thickness(4, 0, 4, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                IsHitTestVisible = false
+            };
+        }
+
+        Canvas.SetLeft(mark, Math.Max(0, left));
+        Canvas.SetTop(mark, wide ? 2 : 7);
+        CaptionCanvas.Children.Add(mark);
+    }
+
+    private static string OneCaptionLine(string text)
+    {
+        var line = string.Join(' ', text.Replace('\r', ' ').Replace('\n', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        return line.Length <= 80 ? line : line[..80];
     }
 }

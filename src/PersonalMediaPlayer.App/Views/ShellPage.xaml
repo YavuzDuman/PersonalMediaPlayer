@@ -10,6 +10,7 @@
     <NavigationView
         x:Name="NavView"
         CompactModeThresholdWidth="720"
+        CompactPaneLength="48"
         ExpandedModeThresholdWidth="1280"
         IsBackButtonVisible="Collapsed"
         IsPaneToggleButtonVisible="False"
@@ -17,7 +18,82 @@
         Loaded="NavView_Loaded"
         OpenPaneLength="240"
         ItemInvoked="NavView_ItemInvoked">
+        <NavigationView.Resources>
+            <ResourceDictionary>
+                <ResourceDictionary.ThemeDictionaries>
+                    <ResourceDictionary x:Key="Default">
+                        <StaticResource x:Key="NavigationViewDefaultPaneBackground" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                        <StaticResource x:Key="NavigationViewExpandedPaneBackground" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Opacity="0.24" Color="{ThemeResource SystemAccentColor}" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Opacity="0.34" Color="{ThemeResource SystemAccentColor}" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPressed" Opacity="0.18" Color="{ThemeResource SystemAccentColor}" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedDisabled" Opacity="0.12" Color="{ThemeResource SystemAccentColor}" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelected" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelectedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelectedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelectedDisabled" ResourceKey="TextFillColorDisabledBrush" />
+                        <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="Transparent" />
+                    </ResourceDictionary>
+                    <ResourceDictionary x:Key="Light">
+                        <StaticResource x:Key="NavigationViewDefaultPaneBackground" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                        <StaticResource x:Key="NavigationViewExpandedPaneBackground" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Opacity="0.14" Color="{ThemeResource SystemAccentColor}" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Opacity="0.22" Color="{ThemeResource SystemAccentColor}" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPressed" Opacity="0.10" Color="{ThemeResource SystemAccentColor}" />
+                        <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedDisabled" Opacity="0.08" Color="{ThemeResource SystemAccentColor}" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelected" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelectedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelectedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
+                        <StaticResource x:Key="NavigationViewItemForegroundSelectedDisabled" ResourceKey="TextFillColorDisabledBrush" />
+                        <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="Transparent" />
+                    </ResourceDictionary>
+                </ResourceDictionary.ThemeDictionaries>
+                <x:Double x:Key="NavigationViewItemOnLeftMinHeight">40</x:Double>
+                <x:Double x:Key="NavigationViewSelectionIndicatorWidth">0</x:Double>
+                <x:Double x:Key="NavigationViewSelectionIndicatorHeight">0</x:Double>
+                <Thickness x:Key="NavigationViewItemButtonMargin">4,3,4,3</Thickness>
+                <!-- HeaderTextCollapsed is the compact-pane state. Height 0 keeps the label from leaving a gap. -->
+                <Style x:Key="NavSectionHeaderStyle" TargetType="NavigationViewItemHeader">
+                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Setter Property="IsEnabled" Value="False" />
+                    <Setter Property="IsTabStop" Value="False" />
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="AutomationProperties.AccessibilityView" Value="Raw" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="NavigationViewItemHeader">
+                                <Grid x:Name="NavigationViewItemHeaderRootGrid">
+                                    <VisualStateManager.VisualStateGroups>
+                                        <VisualStateGroup x:Name="PaneStates">
+                                            <VisualState x:Name="HeaderTextVisible" />
+                                            <VisualState x:Name="HeaderTextCollapsed">
+                                                <VisualState.Setters>
+                                                    <Setter Target="HeaderText.Visibility" Value="Collapsed" />
+                                                    <Setter Target="InnerHeaderGrid.Height" Value="0" />
+                                                </VisualState.Setters>
+                                            </VisualState>
+                                        </VisualStateGroup>
+                                    </VisualStateManager.VisualStateGroups>
+                                    <Grid x:Name="InnerHeaderGrid" Height="32">
+                                        <TextBlock
+                                            x:Name="HeaderText"
+                                            Margin="16,0,12,4"
+                                            VerticalAlignment="Bottom"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Foreground="{TemplateBinding Foreground}"
+                                            Text="{TemplateBinding Content}" />
+                                    </Grid>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ResourceDictionary>
+        </NavigationView.Resources>
         <NavigationView.MenuItems>
+            <NavigationViewItemHeader Content="Media" Style="{StaticResource NavSectionHeaderStyle}" />
             <NavigationViewItem Content="Home" Tag="home">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE80F;" />
@@ -38,6 +114,7 @@
                     <FontIcon Glyph="&#xE82D;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItemHeader Content="Tools" Style="{StaticResource NavSectionHeaderStyle}" />
             <NavigationViewItem Content="Recordings" Tag="recordings">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE714;" />

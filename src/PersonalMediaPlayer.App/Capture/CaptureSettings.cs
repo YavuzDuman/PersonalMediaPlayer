@@ -52,6 +52,31 @@ internal static class CaptureSettings
         File.WriteAllText(SystemAudioPath, includeSystemAudio ? "true" : "false");
     }
 
+    private static readonly string MicrophonePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PersonalMediaPlayer",
+        "include-microphone.txt");
+
+    public static bool LoadIncludeMicrophone()
+    {
+        try
+        {
+            return File.Exists(MicrophonePath)
+                && bool.TryParse(File.ReadAllText(MicrophonePath).Trim(), out var value)
+                && value;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static void SaveIncludeMicrophone(bool includeMicrophone)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(MicrophonePath)!);
+        File.WriteAllText(MicrophonePath, includeMicrophone ? "true" : "false");
+    }
+
     private static readonly string DelayPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PersonalMediaPlayer",

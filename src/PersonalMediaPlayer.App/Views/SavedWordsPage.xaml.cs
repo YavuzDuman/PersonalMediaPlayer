@@ -238,7 +238,7 @@ public sealed partial class SavedWordsPage : Page
             TextWrapping = TextWrapping.Wrap,
             MaxLines = 3
         });
-        if (!string.IsNullOrWhiteSpace(word.Sentence))
+        if (!string.IsNullOrWhiteSpace(word.Sentence) && !word.SentenceIsWord())
         {
             text.Children.Add(new TextBlock
             {
@@ -357,7 +357,7 @@ public sealed partial class SavedWordsPage : Page
                 : $"{word.English} — {word.Turkish}");
         }
 
-        if (!string.IsNullOrWhiteSpace(word.Sentence))
+        if (!string.IsNullOrWhiteSpace(word.Sentence) && !word.SentenceIsWord())
         {
             lines.Add(word.Sentence);
         }

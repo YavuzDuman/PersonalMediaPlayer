@@ -1,4 +1,5 @@
 using PersonalMediaPlayer.App.Capture;
+using PersonalMediaPlayer.App.Download;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.App.Subtitles;
 
@@ -14,5 +15,7 @@ internal static class LibraryPaths
         Playlists.MoveFile(oldPath, newPath);
         MediaFavorites.Move(oldPath, newPath);
         ScreenshotTextIndex.Move(oldPath, newPath);
+        DownloadHistory.Move(oldPath, newPath);
+        DownloadPoster.Move(oldPath, newPath);
     }
 }

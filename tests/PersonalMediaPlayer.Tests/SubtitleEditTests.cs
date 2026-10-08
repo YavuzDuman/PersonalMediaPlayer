@@ -50,4 +50,15 @@ public class SubtitleEditTests
         var parsed = SubtitleCues.Parse(SubtitleEdit.ToSrt(joined));
         Assert.Equal(joined, parsed);
     }
+
+    [Fact]
+    public void A_caption_file_name_keeps_the_title()
+    {
+        Assert.Equal("My clip", SubtitleEdit.SuggestedName("My clip.mp4"));
+        Assert.Equal("My clip", SubtitleEdit.SuggestedName("C:\\Videos\\My clip.mp4"));
+        Assert.Equal("Talk The story", SubtitleEdit.SuggestedName("Talk: The story"));
+        Assert.Equal("A B", SubtitleEdit.SuggestedName("A:B"));
+        Assert.Equal("Captions", SubtitleEdit.SuggestedName("   "));
+        Assert.Equal("Captions", SubtitleEdit.SuggestedName(null));
+    }
 }

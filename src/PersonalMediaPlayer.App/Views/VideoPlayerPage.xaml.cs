@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using LibVLCSharp.Platforms.Windows;
 using LibVLCSharp.Shared;
@@ -12,6 +11,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Download;
 using PersonalMediaPlayer.App.Editing;
+using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.App.Subtitles;
 using PersonalMediaPlayer.Core.Models;
@@ -72,9 +72,11 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
     private CancellationToken _enrichToken;
     private bool _captionsEnriched;
     private bool _captionChosen;
+    private bool _exportingCaptions;
     private string? _captionChoice;
     private bool _applyingCaptionOffer;
     private bool _canSeek;
+    private bool _streamLive;
     private bool _seekKnown;
     private bool _streamFailed;
     private bool _streamOpening;
@@ -124,6 +126,10 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
     private bool _heldMissing;
     private bool _miniDragging;
     private bool _updatingMiniSeek;
+    private string _positionText = string.Empty;
+    private string _durationText = string.Empty;
+    private string _miniPositionText = string.Empty;
+    private string _miniDurationText = string.Empty;
     private bool _allowLeave;
     private Type? _pendingPageType;
     private object? _pendingParameter;
@@ -173,10 +179,24 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         QueuePanel.NextChosen += (_, _) => AdvanceForward();
         ChapterPanel.ChapterChosen += (_, args) => PlayChapter(args.StartMs);
         SubtitleSearchPanel.CueChosen += (_, time) => PlayChapter(time);
+        SubtitleSearchPanel.LineState = Captions.CueSaveState;
+        SubtitleSearchPanel.SaveLine = Captions.TrySaveCue;
         PlayQueue.Changed += OnQueueChanged;
-        Unloaded += (_, _) => PlayQueue.Changed -= OnQueueChanged;
-        Captions.WordSaved += (_, _) => WordsPanel.Refresh();
+        Playlists.Saved += OnPlaylistsSaved;
+        SavedWords.Changed += OnSavedWordsChanged;
+        Unloaded += (_, _) =>
+        {
+            PlayQueue.Changed -= OnQueueChanged;
+            Playlists.Saved -= OnPlaylistsSaved;
+            SavedWords.Changed -= OnSavedWordsChanged;
+        };
+        Captions.WordSaved += (_, _) =>
+        {
+            WordsPanel.Refresh();
+            SubtitleSearchPanel.NoteSaved();
+        };
         Playback.CaptionChosen += (_, index) => ChoosePageSubtitle(index);
+        Playback.CaptionExportRequested += (_, _) => _ = ExportCaptionsAsync();
         Playback.QualityChosen += (_, index) => ChooseStreamQuality(index);
         Playback.AudioChosen += (_, index) => ChooseAudio(index);
         Playback.SectionARequested += (_, _) => SetRepeatPoint(a: true);
@@ -375,8 +395,11 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         RestoreButton.Visibility = Visibility.Collapsed;
         ResetDuration();
         _pendingPath = null;
+        _miniPositionText = "Missing";
         MiniPosition.Text = "Missing";
         MiniSeek.IsEnabled = false;
+        MiniBack.IsEnabled = false;
+        MiniForward.IsEnabled = false;
         StartWatching();
     }
 
@@ -672,6 +695,18 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         }
     }
 
+    private void OnSavedWordsChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnSavedWordsChanged);
+            return;
+        }
+
+        WordsPanel.Refresh();
+        SubtitleSearchPanel.NoteSaved();
+    }
+
     internal void SetChrome(bool mini)
     {
         if (mini == _mini)
@@ -701,6 +736,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             _mini = true;
             SyncMiniVolume();
             UpdatePlayIcon();
+            UpdateMiniNext();
             return;
         }
 
@@ -715,6 +751,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         if (_wordsBeforeMini)
         {
             WordsPanel.Visibility = Visibility.Visible;
+            WordsPanel.Refresh();
         }
 
         if (_searchBeforeMini)
@@ -814,11 +851,42 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         VideoHost.CornerRadius = new CornerRadius(16);
         ShowQueue();
         ShowChapters();
+        ShowLocalChrome();
     }
 
     private void MiniExpand_Click(object sender, RoutedEventArgs e)
     {
         HostWindow?.ExpandPlayer();
+    }
+
+    private void MiniNext_Click(object sender, RoutedEventArgs e) => AdvanceForward();
+
+    private void OnPlaylistsSaved()
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            UpdateMiniNext();
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(UpdateMiniNext);
+    }
+
+    private void UpdateMiniNext() => MiniNext.IsEnabled = PlaylistPanel.CanPlayForward();
+
+    private void SetSkipEnabled(bool enabled)
+    {
+        Playback.BackButton.IsEnabled = enabled;
+        Playback.ForwardButton.IsEnabled = enabled;
+        if (_heldMissing)
+        {
+            MiniBack.IsEnabled = false;
+            MiniForward.IsEnabled = false;
+            return;
+        }
+
+        MiniBack.IsEnabled = enabled;
+        MiniForward.IsEnabled = enabled;
     }
 
     private void MiniClose_Click(object sender, RoutedEventArgs e)
@@ -1146,6 +1214,8 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             Playback.OfferCaptions();
         }
 
+        Playback.ShowCaptionExport(Captions.HasCues);
+
         if (_player is not null)
         {
             Captions.SetTime(_captionHoldMs ?? _player.Time);
@@ -1190,7 +1260,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
                 return;
             }
 
-            ApplyDuration(e.Length, "vlc-length");
+            ApplyDuration(e.Length);
             if (_player is not null)
             {
                 Playback.UseSubtitles(_player);
@@ -1545,8 +1615,10 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
     {
         if (_heldMissing)
         {
-            MiniPosition.Text = "Missing";
+            ShowClock(MiniPosition, ref _miniPositionText, "Missing");
             MiniSeek.IsEnabled = false;
+            MiniBack.IsEnabled = false;
+            MiniForward.IsEnabled = false;
             UpdatePlayIcon();
             return;
         }
@@ -1556,7 +1628,14 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             return;
         }
 
-        ApplyDuration(_player.Length, "vlc-timer");
+        if (_streamLive)
+        {
+            ShowLiveClock();
+            UpdatePlayIcon();
+            return;
+        }
+
+        ApplyDuration(_player.Length);
         if (_streamPage is not null && _player.Time > 0)
         {
             _streamLastMs = _player.Time;
@@ -1574,24 +1653,29 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             KeepInsideSection();
         }
 
+        var position = FormatMs(_player.Time);
         if (!_dragging)
         {
-            Playback.PositionText.Text = FormatMs(_player.Time);
+            ShowClock(Playback.PositionText, ref _positionText, position);
         }
 
-        MiniPosition.Text = FormatMs(_player.Time);
+        ShowClock(MiniPosition, ref _miniPositionText, position);
         var canSeek = _hasValidDuration && _durationMs > 0 && (_streamUrl is null || _canSeek);
         MiniSeek.IsEnabled = canSeek;
         if (_hasValidDuration && _durationMs > 0)
         {
-            MiniDuration.Text = FormatMs(_durationMs);
+            ShowClock(MiniDuration, ref _miniDurationText, FormatMs(_durationMs));
         }
 
         if (canSeek && !_miniDragging)
         {
-            _updatingMiniSeek = true;
-            MiniSeek.Value = Math.Clamp(_player.Time / (double)_durationMs * MiniSeek.Maximum, 0, MiniSeek.Maximum);
-            _updatingMiniSeek = false;
+            var mini = Math.Clamp(_player.Time / (double)_durationMs * MiniSeek.Maximum, 0, MiniSeek.Maximum);
+            if (Math.Abs(MiniSeek.Value - mini) > 0.01)
+            {
+                _updatingMiniSeek = true;
+                MiniSeek.Value = mini;
+                _updatingMiniSeek = false;
+            }
         }
 
         HighlightChapter();
@@ -1600,10 +1684,14 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             return;
         }
 
-        Playback.DurationText.Text = FormatMs(_durationMs);
-        _updatingSlider = true;
-        Playback.SeekSlider.Value = Math.Clamp(_player.Time / (double)_durationMs * Playback.SeekSlider.Maximum, 0, Playback.SeekSlider.Maximum);
-        _updatingSlider = false;
+        ShowClock(Playback.DurationText, ref _durationText, FormatMs(_durationMs));
+        var full = Math.Clamp(_player.Time / (double)_durationMs * Playback.SeekSlider.Maximum, 0, Playback.SeekSlider.Maximum);
+        if (Math.Abs(Playback.SeekSlider.Value - full) > 0.01)
+        {
+            _updatingSlider = true;
+            Playback.SeekSlider.Value = full;
+            _updatingSlider = false;
+        }
         UpdatePlayIcon();
         RememberPosition(force: false);
         ShowCaptions();
@@ -1678,7 +1766,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             {
                 _streamOpening = false;
                 _seekKnown = true;
-                _canSeek = _player.IsSeekable;
+                _canSeek = _player.IsSeekable && !_streamLive;
                 ApplyStreamControls();
             }
 
@@ -1849,14 +1937,22 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         Playback.SeekSlider.IsEnabled = false;
         Playback.SeekSlider.Value = 0;
         EditTrimButton.IsEnabled = false;
-        Playback.DurationText.Text = "--:--";
-        Playback.PositionText.Text = "00:00";
+        _durationText = "--:--";
+        _positionText = "00:00";
+        Playback.DurationText.Text = _durationText;
+        Playback.PositionText.Text = _positionText;
+        ShowClock(MiniDuration, ref _miniDurationText, "--:--");
+        ShowClock(MiniPosition, ref _miniPositionText, "00:00");
         Playback.SetHoverDuration(0);
     }
 
-    private void ApplyDuration(long durationMs, string source)
+    private void ApplyDuration(long durationMs)
     {
-        Debug.WriteLine($"{DateTime.Now:O} source={source} durationMs={durationMs} usable={IsUsableDuration(durationMs)} alreadyValid={_hasValidDuration}");
+        if (_streamLive)
+        {
+            ShowLiveClock();
+            return;
+        }
 
         if (_hasValidDuration || !IsUsableDuration(durationMs))
         {
@@ -1866,7 +1962,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         _hasValidDuration = true;
         _durationMs = durationMs;
         Playback.SetHoverDuration(_streamUrl is null ? durationMs : 0);
-        Playback.DurationText.Text = FormatMs(durationMs);
+        ShowClock(Playback.DurationText, ref _durationText, FormatMs(durationMs));
         if (_streamUrl is null)
         {
             Playback.SeekSlider.IsEnabled = true;
@@ -1890,8 +1986,26 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
     private void UpdatePlayIcon()
     {
         var glyph = _player?.IsPlaying == true ? "\uE769" : "\uE768";
-        Playback.PlayIcon.Glyph = glyph;
-        MiniPlayIcon.Glyph = glyph;
+        if (Playback.PlayIcon.Glyph != glyph)
+        {
+            Playback.PlayIcon.Glyph = glyph;
+        }
+
+        if (MiniPlayIcon.Glyph != glyph)
+        {
+            MiniPlayIcon.Glyph = glyph;
+        }
+    }
+
+    private static void ShowClock(TextBlock block, ref string shown, string text)
+    {
+        if (shown == text)
+        {
+            return;
+        }
+
+        shown = text;
+        block.Text = text;
     }
 
     private async void Restore_Click(object sender, RoutedEventArgs e)
@@ -2190,12 +2304,13 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             return;
         }
 
-        if (!PrepareToLeave(typeof(VideoEditorPage), item, back: false))
+        var launch = new EditorLaunch(item, Captions.CopyCues());
+        if (!PrepareToLeave(typeof(VideoEditorPage), launch, back: false))
         {
             return;
         }
 
-        HostWindow?.LeavePlayerFor(typeof(VideoEditorPage), item, null);
+        HostWindow?.LeavePlayerFor(typeof(VideoEditorPage), launch, null);
     }
 
     private bool HasSectionLoop =>
@@ -2507,6 +2622,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         _filePath = null;
         _streamUrl = stream.Url;
         _streamPage = stream.Page;
+        _streamLive = stream.Live;
         _streamAudio = stream.Audio;
         _streamSubtitles = stream.Subtitles;
         _streamSubtitle = null;
@@ -2531,6 +2647,11 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             }
         }
 
+        if (_streamLive)
+        {
+            start = null;
+        }
+
         _streamStartMs = start;
         var heldAddress = _streamPage ?? _streamUrl;
         if (_streamPage is not null)
@@ -2547,20 +2668,20 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         _explicitStart = false;
         _resumePending = false;
         TitleText.Text = stream.DisplayName;
-        AddedText.Text = _fromQueue ? QueueCaption() : "Streaming";
+        AddedText.Text = _fromQueue ? QueueCaption() : _streamLive ? "Live" : "Streaming";
         EditButton.Visibility = Visibility.Collapsed;
         WordsButton.Visibility = Visibility.Visible;
         RestoreButton.Visibility = Visibility.Collapsed;
         EditTrimButton.Visibility = Visibility.Collapsed;
         PlaylistButton.Visibility = _playlistId is null ? Visibility.Collapsed : Visibility.Visible;
         AddPlaylistButton.Visibility = stream.Page is null ? Visibility.Collapsed : Visibility.Visible;
-        SaveCopyButton.Visibility = _streamPage is null ? Visibility.Collapsed : Visibility.Visible;
-        SaveCopyButton.IsEnabled = _streamPage is not null && _streamQuality is not null;
+        var saveCopy = CanSaveStreamCopy(_streamPage);
+        SaveCopyButton.Visibility = saveCopy ? Visibility.Visible : Visibility.Collapsed;
+        SaveCopyButton.IsEnabled = saveCopy && _streamQuality is not null;
         SaveCopyLabel.Text = "Save a copy";
         Playback.SnapshotButton.Visibility = Visibility.Collapsed;
         Playback.BookmarkButton.Visibility = _streamPage is null ? Visibility.Collapsed : Visibility.Visible;
-        Playback.BackButton.IsEnabled = false;
-        Playback.ForwardButton.IsEnabled = false;
+        SetSkipEnabled(false);
         Playback.UseSectionRepeat(false);
         Playback.SetHoverSource(null);
         Playback.ClearHoverCaptions();
@@ -2599,6 +2720,11 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         }
 
         ResetDuration();
+        if (_streamLive)
+        {
+            ShowLiveClock();
+        }
+
         _pendingPath = null;
         var unresolvedPage = stream.Page is Uri savedPage && SameAddress(stream.Url, savedPage);
         _pendingPageResolve = unresolvedPage && _player is null;
@@ -2721,8 +2847,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         _ended = false;
         AddedText.Text = "Opening…";
         ResetDuration();
-        Playback.BackButton.IsEnabled = false;
-        Playback.ForwardButton.IsEnabled = false;
+        SetSkipEnabled(false);
         Playback.UseSectionRepeat(false);
         Media? media = null;
         var handedToPlayer = false;
@@ -2809,6 +2934,17 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             if (generation == _streamGeneration)
             {
                 _streamOpening = false;
+                if (_streamLive && !_streamFailed)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (generation == _streamGeneration && _streamLive && !_streamFailed)
+                        {
+                            AddedText.Text = "Live";
+                            ShowLiveClock();
+                        }
+                    });
+                }
             }
         }
     }
@@ -2827,7 +2963,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         DispatcherQueue.TryEnqueue(() =>
         {
             _seekKnown = true;
-            _canSeek = seekable;
+            _canSeek = seekable && !_streamLive;
             ApplyStreamControls();
         });
     }
@@ -2868,10 +3004,20 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             return;
         }
 
+        if (_streamLive)
+        {
+            ShowLiveClock();
+            if (!_streamFailed && !_streamOpening && AddedText.Text != TranslationWaitMessage)
+            {
+                AddedText.Text = _fromQueue ? QueueCaption() : "Live";
+            }
+
+            return;
+        }
+
         var allow = _seekKnown && _canSeek && _hasValidDuration;
         Playback.SeekSlider.IsEnabled = allow;
-        Playback.BackButton.IsEnabled = allow;
-        Playback.ForwardButton.IsEnabled = allow;
+        SetSkipEnabled(allow);
         if (_seekKnown)
         {
             Playback.UseSectionRepeat(allow);
@@ -3264,6 +3410,12 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
 
             var captionsWereOffered = _streamSubtitles is { Count: > 0 };
             _streamUrl = choice.Media;
+            _streamLive = choice.Live;
+            if (_streamLive)
+            {
+                startMs = null;
+            }
+
             _streamAudio = choice.Audio;
             _streamReferrer = page;
             _streamThumbnail = StreamThumbnail.Choose(page.AbsoluteUri, choice.Thumbnail);
@@ -3274,7 +3426,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             {
                 var qualityWasMissing = _streamQuality is null;
                 _streamQuality = choice.Quality;
-                if (qualityWasMissing)
+                if (qualityWasMissing && CanSaveStreamCopy(page))
                 {
                     SaveCopyButton.IsEnabled = true;
                 }
@@ -3331,6 +3483,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
             {
                 _streamSubtitle = null;
                 Captions.LoadCues([]);
+                Playback.ShowCaptionExport(false);
                 SubtitleSearchPanel.ShowOff();
             }
             else
@@ -3366,6 +3519,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         {
             _streamSubtitle = null;
             Captions.LoadCues([]);
+            Playback.ShowCaptionExport(false);
             if (index < 0 && _streamSubtitles is { Count: > 0 })
             {
                 SubtitleSearchPanel.ShowOff();
@@ -3509,6 +3663,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         {
             _streamSubtitle = null;
             Captions.LoadCues([]);
+            Playback.ShowCaptionExport(false);
             return;
         }
 
@@ -3553,7 +3708,21 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
     }
 
     private string StreamStatusText()
-        => _canSeek ? "Streaming" : "Streaming. This video cannot seek.";
+        => _streamLive ? "Live" : _canSeek ? "Streaming" : "Streaming. This video cannot seek.";
+
+    private void ShowLiveClock()
+    {
+        ShowClock(Playback.PositionText, ref _positionText, "");
+        ShowClock(Playback.DurationText, ref _durationText, "Live");
+        ShowClock(MiniPosition, ref _miniPositionText, "");
+        ShowClock(MiniDuration, ref _miniDurationText, "Live");
+        Playback.SeekSlider.IsEnabled = false;
+        Playback.SeekSlider.Value = 0;
+        MiniSeek.IsEnabled = false;
+        MiniSeek.Value = 0;
+        SetSkipEnabled(false);
+        Playback.UseSectionRepeat(false);
+    }
 
     private void SetAddedText(string text)
     {
@@ -3578,6 +3747,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         }
 
         Captions.LoadCues(cues);
+        Playback.ShowCaptionExport(cues.Count > 0);
         SubtitleSearchPanel.ShowCues(cues);
         if (_savedFocus is { } focus)
         {
@@ -3590,9 +3760,49 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         }
     }
 
+    private async Task ExportCaptionsAsync()
+    {
+        if (_exportingCaptions)
+        {
+            return;
+        }
+
+        var text = SubtitleEdit.ToSrt(Captions.CopyCues());
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            AddedText.Text = "These captions have no lines to save.";
+            return;
+        }
+
+        _exportingCaptions = true;
+        try
+        {
+            var file = await FilePickerHelper.PickSaveSrtAsync(App.MainAppWindow, SubtitleEdit.SuggestedName(TitleText.Text));
+            if (file is null)
+            {
+                return;
+            }
+
+            await File.WriteAllTextAsync(file.Path, text, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            AddedText.Text = "Saved the captions to " + file.Name;
+        }
+        catch (Exception ex)
+        {
+            AddedText.Text = ex.Message;
+        }
+        finally
+        {
+            _exportingCaptions = false;
+        }
+    }
+
+    // The download page accepts YouTube links only. Other streams stay in the player.
+    private static bool CanSaveStreamCopy(Uri? page)
+        => page is not null && YoutubeDownloader.TryNormalize(page.AbsoluteUri, out _);
+
     private void SaveCopy_Click(object sender, RoutedEventArgs e)
     {
-        if (_streamPage is not Uri page || _streamQuality is null || !SaveCopyButton.IsEnabled)
+        if (_streamPage is not Uri page || _streamQuality is null || !SaveCopyButton.IsEnabled || !CanSaveStreamCopy(page))
         {
             return;
         }
@@ -4021,6 +4231,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         }
 
         Captions.RememberChoice(audio, _streamSubtitle?.Language);
+        SubtitleSearchPanel.NoteSaved();
     }
 
     private string? LocalAudioName(int id)
@@ -4050,45 +4261,56 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
 
     private void StopWatchingStream()
     {
-        if (_streamUrl is null && _streamPage is null)
+        if (_streamUrl is not null || _streamPage is not null)
         {
-            return;
+            _streamGeneration++;
+            _streamWork?.Cancel();
+            _subtitleWork?.Cancel();
+            try
+            {
+                _player?.Stop();
+            }
+            catch (Exception)
+            {
+                // The stream player can already be stopped.
+            }
+
+            ReleaseStreamMedia();
+            _streamUrl = null;
+            _streamPage = null;
+            _streamAudio = null;
+            _streamSubtitles = null;
+            _streamSubtitle = null;
+            _streamQuality = null;
+            _streamThumbnail = null;
+            _streamReferrer = null;
+            _streamStartMs = null;
+            _streamFailed = false;
+            _streamResolving = false;
+            _streamOpening = false;
+            _pendingStream = null;
+            _pendingPageResolve = false;
+            _restoreAudioLanguage = null;
         }
 
-        _streamGeneration++;
-        _streamWork?.Cancel();
-        _subtitleWork?.Cancel();
-        try
-        {
-            _player?.Stop();
-        }
-        catch (Exception)
-        {
-            // The stream player can already be stopped.
-        }
+        ShowLocalChrome();
+    }
 
-        ReleaseStreamMedia();
-        _streamUrl = null;
-        _streamPage = null;
-        _streamAudio = null;
-        _streamSubtitles = null;
-        _streamSubtitle = null;
-        _streamQuality = null;
-        _streamThumbnail = null;
-        _streamReferrer = null;
-        _streamStartMs = null;
-        _streamFailed = false;
-        _streamResolving = false;
-        _streamOpening = false;
-        _pendingStream = null;
-        _pendingPageResolve = false;
-        _restoreAudioLanguage = null;
+    // The same page is reused. Closing a stream forgets its address without
+    // building a new page, so the local header is put back on close and on
+    // every file open, including when that address is already gone.
+    private void ShowLocalChrome()
+    {
         ClearStreamChoices();
+        Playback.ClearHoverCaptions();
+        Captions.Prepare(null);
         AddPlaylistButton.Visibility = Visibility.Collapsed;
         EditButton.Visibility = Visibility.Visible;
         WordsButton.Visibility = Visibility.Visible;
         EditTrimButton.Visibility = Visibility.Visible;
         SaveCopyButton.Visibility = Visibility.Collapsed;
+        SaveCopyButton.IsEnabled = true;
+        SaveCopyLabel.Text = "Save a copy";
         if (_playlistId is null)
         {
             PlaylistButton.Visibility = Visibility.Collapsed;
@@ -4102,6 +4324,9 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
 
         Playback.SnapshotButton.Visibility = Visibility.Visible;
         Playback.BookmarkButton.Visibility = Visibility.Visible;
+        // A live stream leaves this flag set. The next library video is a normal file.
+        _streamLive = false;
+        SetSkipEnabled(true);
         Playback.UseSectionRepeat(true);
     }
 
@@ -4349,6 +4574,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
     {
         var items = PlayQueue.Snapshot();
         QueuePanel.Bind(items);
+        UpdateMiniNext();
         var undo = PlayQueue.IsPending(out _);
         QueuePanel.Visibility = !_mini && HasSession && (items.Count > 0 || undo)
             ? Visibility.Visible
@@ -4651,6 +4877,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         if (_mini)
         {
             PlaylistPanel.Sync(_playlistId, _playlistIndex);
+            UpdateMiniNext();
             return;
         }
 
@@ -4704,6 +4931,7 @@ public sealed partial class VideoPlayerPage : Page, IPlaybackSource
         _playlistBeforeMini = false;
         PlaylistButton.Visibility = Visibility.Collapsed;
         PlaylistPanel.Hide();
+        UpdateMiniNext();
     }
 
     private void NotePlaylist(string path)

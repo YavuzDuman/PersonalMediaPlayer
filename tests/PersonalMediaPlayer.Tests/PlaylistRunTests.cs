@@ -221,5 +221,41 @@ public class PlaylistRunTests
         Assert.Equal(0, step.Index);
     }
 
+    [Fact]
+    public void NextIsReadyWhenAQueueOrAnotherPlaylistVideoIsWaiting()
+    {
+        var first = PlaylistEntry.Page("https://www.youtube.com/watch?v=abcdefghijk", "One");
+        var second = PlaylistEntry.Page("https://www.youtube.com/watch?v=bbcdefghijk", "Two");
+        var list = new Playlist
+        {
+            Id = "list",
+            Name = "Evening",
+            Videos = [first, second]
+        };
+        var run = new PlaylistRun();
+
+        Assert.True(PlaylistRun.CanAdvance(2, null, null, -1, false));
+        Assert.False(PlaylistRun.CanAdvance(0, null, null, -1, false));
+        Assert.True(PlaylistRun.CanAdvance(0, list, run, 0, false));
+        Assert.False(PlaylistRun.CanAdvance(0, list, run, 1, false));
+
+        run.CycleRepeat();
+        Assert.True(PlaylistRun.CanAdvance(0, list, run, 1, false));
+
+        var only = new Playlist { Id = "one", Name = "One", Videos = [first] };
+        var solo = new PlaylistRun();
+        solo.CycleRepeat();
+        Assert.False(PlaylistRun.CanAdvance(0, only, solo, 0, false));
+        Assert.True(PlaylistRun.CanAdvance(1, only, solo, 0, false));
+
+        var missing = new Playlist
+        {
+            Id = "gone",
+            Name = "Gone",
+            Videos = [PlaylistEntry.ForFile(@"C:\clips\gone.mp4")]
+        };
+        Assert.False(PlaylistRun.CanAdvance(0, missing, new PlaylistRun(), 0, false));
+    }
+
     private static bool All(int _) => true;
 }

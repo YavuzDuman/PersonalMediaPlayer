@@ -3,7 +3,8 @@
     x:Class="PersonalMediaPlayer.App.Views.MergePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:PersonalMediaPlayer.App.Controls">
+    xmlns:controls="using:PersonalMediaPlayer.App.Controls"
+    NavigationCacheMode="Required">
 
     <Grid Padding="24,8,24,24" RowSpacing="16">
         <Grid.RowDefinitions>
@@ -191,6 +192,7 @@
                                 </StackPanel>
                             </Grid>
                             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4">
+                                <Button Padding="10,4" Click="Edit_Click" Content="Edit" ToolTipService.ToolTip="Edit this clip. The saved video comes back to this spot." />
                                 <Button Padding="10,4" Click="MoveUp_Click" ToolTipService.ToolTip="Move up">
                                     <FontIcon FontSize="14" Glyph="&#xE70E;" />
                                 </Button>

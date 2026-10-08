@@ -28,7 +28,12 @@ internal sealed class ScreenRecorder : IAsyncDisposable
     private MediaStreamSourceSampleRequest? _audioRequest;
     private MediaStreamSourceSampleRequestDeferral? _audioDeferral;
     private readonly Queue<AudioPacket> _audioPackets = new();
+    private MixedAudioClock? _mixClock;
     private SystemAudioCapture? _audio;
+    private SystemAudioCapture? _microphone;
+    private bool _mixMicrophone;
+    private int _outputChannels;
+    private int _outputRate;
     private AudioStreamDescriptor? _audioDescriptor;
     private TimeSpan _audioWritten = TimeSpan.Zero;
     private int _audioBytesPerSecond;
@@ -81,10 +86,11 @@ internal sealed class ScreenRecorder : IAsyncDisposable
         string path,
         bool includeCursor,
         FrameCrop? crop = null,
-        bool includeSystemAudio = false)
+        bool includeSystemAudio = false,
+        bool includeMicrophone = false)
     {
         var recorder = new ScreenRecorder();
-        await recorder.StartCoreAsync(item, path, includeCursor, crop, includeSystemAudio);
+        await recorder.StartCoreAsync(item, path, includeCursor, crop, includeSystemAudio, includeMicrophone);
         return recorder;
     }
 
@@ -129,7 +135,14 @@ internal sealed class ScreenRecorder : IAsyncDisposable
             _stopping = true;
             _paused = false;
             _acceptAudio = false;
-            EnqueueSilence(end - _audioWritten);
+            if (_mixClock is not null)
+            {
+                QueueMixed(_mixClock.CatchUp(end, flushShort: true));
+            }
+            else
+            {
+                EnqueueSilence(end - _audioWritten);
+            }
         }
 
         TryDeliverVideo();
@@ -137,6 +150,9 @@ internal sealed class ScreenRecorder : IAsyncDisposable
         DisposeCapture();
         _audio?.Dispose();
         _audio = null;
+        _microphone?.Dispose();
+        _microphone = null;
+        _mixMicrophone = false;
         TryDeliverVideo();
         TryDeliverAudio();
     }
@@ -177,7 +193,7 @@ internal sealed class ScreenRecorder : IAsyncDisposable
         }
     }
 
-    private async Task StartCoreAsync(GraphicsCaptureItem item, string path, bool includeCursor, FrameCrop? crop, bool includeSystemAudio)
+    private async Task StartCoreAsync(GraphicsCaptureItem item, string path, bool includeCursor, FrameCrop? crop, bool includeSystemAudio, bool includeMicrophone)
     {
         if (!GraphicsCaptureSession.IsSupported())
         {
@@ -216,22 +232,55 @@ internal sealed class ScreenRecorder : IAsyncDisposable
         var started = false;
         try
         {
-            if (includeSystemAudio)
+            if (includeSystemAudio || includeMicrophone)
             {
-                var capture = new SystemAudioCapture();
                 try
                 {
-                    capture.Start(OnAudioPacket);
+                    if (includeSystemAudio)
+                    {
+                        var speakers = new SystemAudioCapture(CaptureInput.Speakers);
+                        _audio = speakers;
+                        speakers.Start(OnAudioPacket);
+                        _outputChannels = speakers.ChannelCount;
+                    }
+
+                    if (includeMicrophone)
+                    {
+                        var microphone = new SystemAudioCapture(CaptureInput.Microphone);
+                        if (_audio is null)
+                        {
+                            _audio = microphone;
+                            microphone.Start(OnAudioPacket);
+                            _outputChannels = microphone.ChannelCount;
+                        }
+                        else
+                        {
+                            _microphone = microphone;
+                            _mixMicrophone = true;
+                            microphone.Start(OnMicrophonePacket);
+                        }
+                    }
                 }
                 catch
                 {
-                    capture.Dispose();
+                    _acceptAudio = false;
+                    _audio?.Dispose();
+                    _audio = null;
+                    _microphone?.Dispose();
+                    _microphone = null;
+                    _mixMicrophone = false;
                     throw;
                 }
 
-                _audio = capture;
-                _audioBytesPerSecond = capture.BytesPerSecond;
-                _audioBlockAlign = Math.Max(2, capture.ChannelCount * 2);
+                var clock = _audio!;
+                _outputRate = clock.SampleRate;
+                _outputChannels = clock.ChannelCount;
+                _audioBytesPerSecond = clock.BytesPerSecond;
+                _audioBlockAlign = Math.Max(2, clock.ChannelCount * 2);
+                if (_mixMicrophone)
+                {
+                    _mixClock = new MixedAudioClock(_audioBytesPerSecond, _audioBlockAlign, AudioIdleGap);
+                }
             }
 
             var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD720p);
@@ -282,6 +331,9 @@ internal sealed class ScreenRecorder : IAsyncDisposable
                 _acceptAudio = false;
                 _audio?.Dispose();
                 _audio = null;
+                _microphone?.Dispose();
+                _microphone = null;
+                _mixMicrophone = false;
                 _output?.Dispose();
                 _output = null;
                 DisposeCapture();
@@ -524,6 +576,7 @@ internal sealed class ScreenRecorder : IAsyncDisposable
             return;
         }
 
+        var queued = false;
         lock (_gate)
         {
             if (!_acceptAudio || _paused || _stopping)
@@ -531,30 +584,44 @@ internal sealed class ScreenRecorder : IAsyncDisposable
                 return;
             }
 
-            var ticks = pcm.Length * (long)TimeSpan.TicksPerSecond / _audioBytesPerSecond;
-            if (ticks <= 0)
+            if (_mixClock is not null)
             {
-                ticks = 1;
+                // Loopback sends nothing while the speakers are idle, so mixed audio
+                // is written from the recording clock as packets arrive.
+                _mixClock.AppendSpeaker(pcm);
+                queued = QueueMixed(_mixClock.CatchUp(ElapsedCore()));
             }
-
-            var duration = TimeSpan.FromTicks(ticks);
-            var packetStart = ElapsedCore() - duration;
-            if (packetStart < TimeSpan.Zero)
+            else
             {
-                packetStart = TimeSpan.Zero;
-            }
+                var ticks = pcm.Length * (long)TimeSpan.TicksPerSecond / _audioBytesPerSecond;
+                if (ticks <= 0)
+                {
+                    ticks = 1;
+                }
 
-            var gap = packetStart - _audioWritten;
-            if (gap >= AudioIdleGap)
-            {
-                EnqueueSilence(gap);
-            }
+                var duration = TimeSpan.FromTicks(ticks);
+                var packetStart = ElapsedCore() - duration;
+                if (packetStart < TimeSpan.Zero)
+                {
+                    packetStart = TimeSpan.Zero;
+                }
 
-            _audioPackets.Enqueue(new AudioPacket(pcm, _audioWritten, duration));
-            _audioWritten += duration;
+                var gap = packetStart - _audioWritten;
+                if (gap >= AudioIdleGap)
+                {
+                    EnqueueSilence(gap);
+                }
+
+                _audioPackets.Enqueue(new AudioPacket(pcm, _audioWritten, duration));
+                _audioWritten += duration;
+                queued = true;
+            }
         }
 
-        TryDeliverAudio();
+        if (queued)
+        {
+            TryDeliverAudio();
+        }
     }
 
     private void EnqueueSilence(TimeSpan gap)
@@ -588,10 +655,64 @@ internal sealed class ScreenRecorder : IAsyncDisposable
             }
 
             var duration = TimeSpan.FromTicks(size * (long)TimeSpan.TicksPerSecond / _audioBytesPerSecond);
-            _audioPackets.Enqueue(new AudioPacket(new byte[size], _audioWritten, duration));
+            var silence = new byte[size];
+            _audioPackets.Enqueue(new AudioPacket(silence, _audioWritten, duration));
             _audioWritten += duration;
             totalBytes -= size;
         }
+    }
+
+    private void OnMicrophonePacket(byte[] pcm)
+    {
+        if (!_acceptAudio || !_mixMicrophone || pcm.Length == 0 || _audioBytesPerSecond <= 0 || _outputChannels <= 0 || _outputRate <= 0)
+        {
+            return;
+        }
+
+        var microphone = _microphone;
+        if (microphone is null || microphone.SampleRate <= 0 || microphone.ChannelCount <= 0)
+        {
+            return;
+        }
+
+        var converted = PcmMix.Convert(pcm, microphone.ChannelCount, microphone.SampleRate, _outputChannels, _outputRate);
+        if (converted.Length == 0)
+        {
+            return;
+        }
+
+        var queued = false;
+        lock (_gate)
+        {
+            if (!_acceptAudio || _mixClock is null || _paused || _stopping)
+            {
+                return;
+            }
+
+            _mixClock.AppendMicrophone(converted);
+            queued = QueueMixed(_mixClock.CatchUp(ElapsedCore()));
+        }
+
+        if (queued)
+        {
+            TryDeliverAudio();
+        }
+    }
+
+    private bool QueueMixed(List<MixedAudioChunk> chunks)
+    {
+        if (chunks.Count == 0 || _audioDescriptor is null || _mixClock is null)
+        {
+            return false;
+        }
+
+        foreach (var chunk in chunks)
+        {
+            _audioPackets.Enqueue(new AudioPacket(chunk.Pcm, chunk.Stamp, chunk.Duration));
+        }
+
+        _audioWritten = _mixClock.Written;
+        return true;
     }
 
     private void OnSampleRequested(MediaStreamSourceSampleRequestedEventArgs args)

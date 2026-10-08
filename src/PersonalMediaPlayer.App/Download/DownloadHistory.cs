@@ -89,6 +89,45 @@ internal static class DownloadHistory
         }
     }
 
+    internal static string? PageFor(string mediaPath)
+    {
+        try
+        {
+            if (!File.Exists(FilePath))
+            {
+                return null;
+            }
+
+            return DownloadPoster.PageFromHistory(File.ReadAllText(FilePath), mediaPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    internal static void Move(string oldPath, string newPath)
+    {
+        try
+        {
+            if (!File.Exists(FilePath))
+            {
+                return;
+            }
+
+            var rewritten = DownloadPoster.RewriteHistory(File.ReadAllText(FilePath), oldPath, newPath);
+            if (rewritten is null)
+            {
+                return;
+            }
+
+            File.WriteAllText(FilePath, rewritten);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+        }
+    }
+
     public static void OpenFolder(string path)
     {
         Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"") { UseShellExecute = true });

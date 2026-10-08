@@ -3,8 +3,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace PersonalMediaPlayer.App.Controls;
 
@@ -133,16 +131,11 @@ public sealed partial class PlaylistHomeCard : UserControl
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 240);
-            if (thumb is null || thumb.Size == 0)
+            var bitmap = await VideoThumbnail.LoadAsync(path, 240);
+            if (bitmap is not null)
             {
-                return;
+                target.Source = bitmap;
             }
-
-            var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(thumb);
-            target.Source = bitmap;
         }
         catch (Exception)
         {

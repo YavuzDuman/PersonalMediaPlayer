@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PersonalMediaPlayer.App.Playback;
@@ -5,13 +6,45 @@ using PersonalMediaPlayer.App.Subtitles;
 
 namespace PersonalMediaPlayer.App.Controls;
 
-public sealed class SubtitleHit
+public sealed class SubtitleHit : INotifyPropertyChanged
 {
+    private bool _saved;
+    private bool _ready;
+
     public long StartMs { get; init; }
 
     public string Time { get; init; } = string.Empty;
 
     public string Line { get; init; } = string.Empty;
+
+    public string SaveLabel => _saved ? "Saved" : "Save";
+
+    public bool CanSave => _ready;
+
+    public string SaveTip
+        => _saved
+            ? "Saved on this computer"
+            : _ready
+                ? "Save this line on this computer"
+                : "This caption is not attached to a video.";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    internal void Apply(CaptionLineSaveState state)
+    {
+        var saved = state == CaptionLineSaveState.Saved;
+        var ready = state == CaptionLineSaveState.Ready;
+        if (_saved == saved && _ready == ready)
+        {
+            return;
+        }
+
+        _saved = saved;
+        _ready = ready;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SaveLabel)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanSave)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SaveTip)));
+    }
 }
 
 public sealed partial class SubtitleSearchPanel : UserControl
@@ -35,6 +68,10 @@ public sealed partial class SubtitleSearchPanel : UserControl
     }
 
     internal event EventHandler<long>? CueChosen;
+
+    internal Func<string, long, bool>? SaveLine { get; set; }
+
+    internal Func<string, long, CaptionLineSaveState>? LineState { get; set; }
 
     internal void BeginVideo()
     {
@@ -77,13 +114,52 @@ public sealed partial class SubtitleSearchPanel : UserControl
         Render();
     }
 
-    private void Results_ItemClick(object sender, ItemClickEventArgs e)
+    internal void NoteSaved()
     {
-        if (e.ClickedItem is SubtitleHit hit)
+        if (Results.ItemsSource is not IEnumerable<SubtitleHit> hits)
         {
-            CueChosen?.Invoke(this, hit.StartMs);
+            return;
+        }
+
+        foreach (var hit in hits)
+        {
+            hit.Apply(StateFor(hit.Line, hit.StartMs));
         }
     }
+
+    private void Hit_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.DataContext is not SubtitleHit hit)
+        {
+            return;
+        }
+
+        CueChosen?.Invoke(this, hit.StartMs);
+    }
+
+    private void SaveHit_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.DataContext is not SubtitleHit hit || !hit.CanSave)
+        {
+            return;
+        }
+
+        if (SaveLine?.Invoke(hit.Line, hit.StartMs) != true)
+        {
+            hit.Apply(StateFor(hit.Line, hit.StartMs));
+            if (hit.CanSave)
+            {
+                Status.Text = "Could not save this line.";
+            }
+
+            return;
+        }
+
+        hit.Apply(CaptionLineSaveState.Saved);
+    }
+
+    private CaptionLineSaveState StateFor(string line, long startMs)
+        => LineState?.Invoke(line, startMs) ?? CaptionLineSaveState.Unavailable;
 
     private void Render()
     {
@@ -120,11 +196,16 @@ public sealed partial class SubtitleSearchPanel : UserControl
         }
 
         Status.Text = matches.Count == 1 ? "1 line" : $"{matches.Count} lines";
-        Results.ItemsSource = matches.Select(cue => new SubtitleHit
+        Results.ItemsSource = matches.Select(cue =>
         {
-            StartMs = cue.StartMs,
-            Time = VideoChapters.Format(cue.StartMs),
-            Line = cue.Text
+            var hit = new SubtitleHit
+            {
+                StartMs = cue.StartMs,
+                Time = VideoChapters.Format(cue.StartMs),
+                Line = cue.Text
+            };
+            hit.Apply(StateFor(cue.Text, cue.StartMs));
+            return hit;
         }).ToArray();
         Results.Visibility = Visibility.Visible;
     }

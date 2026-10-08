@@ -145,6 +145,19 @@ internal static class FilePickerHelper
         return await picker.PickSaveFileAsync();
     }
 
+    public static async Task<StorageFile?> PickSaveSrtAsync(Window window, string suggestedName)
+    {
+        var picker = new FileSavePicker
+        {
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = suggestedName
+        };
+        picker.FileTypeChoices.Add("SubRip captions", [".srt"]);
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        return await picker.PickSaveFileAsync();
+    }
+
     public static async Task<StorageFile?> PickSaveBackupAsync(Window window)
     {
         var picker = new FileSavePicker

@@ -582,4 +582,118 @@ public class PlaylistStoreTests : IDisposable
         Assert.Equal(@"C:\videos\clip.mp4", list.Videos[1].Location);
         Assert.True(list.Videos[1].Watched);
     }
+
+    [Fact]
+    public void SavingAPlaylistTellsListeners()
+    {
+        var notes = 0;
+        void Note() => notes++;
+        Playlists.Saved += Note;
+        try
+        {
+            var created = Playlists.Create("Evening");
+            Assert.NotNull(created);
+            Assert.Equal(1, notes);
+
+            Assert.Equal(1, Playlists.Add(created!.Id, [@"C:\videos\a.mp4"]));
+            Assert.Equal(2, notes);
+            Assert.Equal(0, Playlists.Add(created.Id, [@"C:\videos\a.mp4"]));
+            Assert.Equal(2, notes);
+        }
+        finally
+        {
+            Playlists.Saved -= Note;
+        }
+    }
+
+    [Fact]
+    public void SavingTheQueueCopiesThoseVideosIntoANewPlaylist()
+    {
+        var notes = 0;
+        void Note() => notes++;
+        Playlists.QueueCopied += Note;
+        try
+        {
+            Assert.False(File.Exists(_store));
+            Assert.Equal("Queue", Playlists.NextQueueName());
+            var empty = Playlists.SaveFromQueue("Queue", []);
+            Assert.Equal(QueuePlaylistProblem.NothingToSave, empty.Problem);
+            Assert.False(File.Exists(_store));
+            Assert.Equal(0, notes);
+
+            var one = new PlayQueueItem("1", "One", PlayQueueKind.File, @"C:\clips\one.mp4", null);
+            Assert.Equal(QueuePlaylistProblem.BlankName, Playlists.SaveFromQueue("  ", [one]).Problem);
+            Assert.Equal(QueuePlaylistProblem.LongName, Playlists.SaveFromQueue(new string('n', 81), [one]).Problem);
+            Assert.False(File.Exists(_store));
+
+            var evening = Playlists.Create("Evening");
+            Assert.NotNull(evening);
+            Assert.Equal(2, Playlists.Add(evening.Id, [@"C:\videos\a.mp4", @"C:\videos\b.mp4"]));
+            Assert.True(PlaylistChanges.Apply(evening.Id, "Moved a video.", () => Playlists.MoveTo(evening.Id, 0, 2)));
+            Assert.Equal("Queue", Playlists.NextQueueName());
+
+            var page = "https://www.youtube.com/watch?v=abcdefghijk";
+            var waiting = new PlayQueueItem[]
+            {
+                one,
+                new("2", "Harbor", PlayQueueKind.Page, page, "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"),
+                new("3", "One again", PlayQueueKind.File, @"c:\clips\one.mp4", null),
+                new("4", "Harbor again", PlayQueueKind.Page, "www.youtube.com/watch?v=abcdefghijk", null),
+                new("5", "Gone", PlayQueueKind.File, @"C:\clips\gone.mp4", null),
+                new("6", "Blank", PlayQueueKind.File, "   ", null),
+                new("7", "Not a page", PlayQueueKind.Page, @"C:\not-a-page", null)
+            };
+
+            var saved = Playlists.SaveFromQueue("  Harbor night  ", waiting);
+            Assert.Equal(QueuePlaylistProblem.None, saved.Problem);
+            Assert.Equal(3, saved.Saved);
+            Assert.Equal(2, saved.Repeated);
+            Assert.Equal(1, notes);
+            Assert.Equal("Harbor night", saved.Playlist?.Name);
+            Assert.False(saved.Playlist!.PlayNext);
+
+            var list = Playlists.Find(saved.Playlist.Id);
+            Assert.NotNull(list);
+            Assert.Equal(3, list.Videos.Count);
+            Assert.Equal(@"C:\clips\one.mp4", list.Videos[0].Location);
+            Assert.False(list.Videos[0].Resolve);
+            Assert.Null(list.Videos[0].Title);
+            Assert.False(list.Videos[0].Watched);
+            Assert.Equal(page, list.Videos[1].Location);
+            Assert.True(list.Videos[1].Resolve);
+            Assert.Equal("Harbor", list.Videos[1].Title);
+            Assert.Equal("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg", list.Videos[1].Thumbnail);
+            Assert.Equal(@"C:\clips\gone.mp4", list.Videos[2].Location);
+            Assert.False(list.Videos[2].Resolve);
+            Assert.True(list.Videos[0].AddedUtc < list.Videos[1].AddedUtc);
+            Assert.True(list.Videos[1].AddedUtc < list.Videos[2].AddedUtc);
+
+            var kept = Playlists.Find(evening.Id);
+            Assert.NotNull(kept);
+            Assert.Equal(@"C:\videos\b.mp4", kept.Videos[0].Location);
+            Assert.Equal(@"C:\videos\a.mp4", kept.Videos[1].Location);
+            Assert.True(PlaylistChanges.IsPending(evening.Id, out var message));
+            Assert.Equal("Moved a video.", message);
+
+            var taken = Playlists.SaveFromQueue("harbor night", waiting);
+            Assert.Equal(QueuePlaylistProblem.NameTaken, taken.Problem);
+            Assert.Equal(2, Playlists.All().Count);
+            Assert.Equal(1, notes);
+            Assert.Equal("Queue", Playlists.NextQueueName());
+
+            var named = Playlists.SaveFromQueue("Queue", [one]);
+            Assert.Equal(QueuePlaylistProblem.None, named.Problem);
+            Assert.Equal(2, notes);
+            Assert.Equal("Queue 2", Playlists.NextQueueName());
+
+            var stored = File.ReadAllText(_store);
+            Assert.Contains(page, stored);
+            Assert.Contains(@"C:\\clips\\gone.mp4", stored);
+            Assert.DoesNotContain("play-queue", stored);
+        }
+        finally
+        {
+            Playlists.QueueCopied -= Note;
+        }
+    }
 }
