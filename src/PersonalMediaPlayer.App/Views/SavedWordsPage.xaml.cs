@@ -13,6 +13,10 @@ namespace PersonalMediaPlayer.App.Views;
 public sealed partial class SavedWordsPage : Page
 {
     private bool _compactWords;
+    private bool _reviewing;
+    private List<SavedWord> _deck = [];
+    private int _reviewIndex;
+    private bool _revealed;
 
     public SavedWordsPage()
     {
@@ -97,11 +101,17 @@ public sealed partial class SavedWordsPage : Page
 
     private void ShowWords()
     {
+        if (_reviewing)
+        {
+            return;
+        }
+
         WordList.Children.Clear();
         var all = SavedWords.All();
         var query = SearchBox.Text.Trim();
         var shown = query.Length == 0 ? all : all.Where(word => Matches(word, query)).ToArray();
         CountText.Text = query.Length == 0 ? CountLabel(all.Count) : $"{shown.Count} of {CountLabel(all.Count)}";
+        ReviewButton.IsEnabled = shown.Count > 0;
         if (shown.Count == 0)
         {
             ListHost.Visibility = Visibility.Collapsed;
@@ -217,7 +227,7 @@ public sealed partial class SavedWordsPage : Page
         AddLabel(row, word.Sentence, 2, header: false, strong: false);
         if (located && word.TimeMs is long time)
         {
-            var clock = AddLabel(row, FormatClock(time), 3, header: false, strong: false);
+            var clock = AddLabel(row, FormatClock(SubtitleLook.PlaybackMs(time)), 3, header: false, strong: false);
             clock.HorizontalAlignment = HorizontalAlignment.Right;
         }
 
@@ -254,7 +264,7 @@ public sealed partial class SavedWordsPage : Page
         {
             text.Children.Add(new TextBlock
             {
-                Text = FormatClock(time),
+                Text = FormatClock(SubtitleLook.PlaybackMs(time)),
                 FontSize = 14,
                 Foreground = SecondaryInk.Foreground
             });
@@ -372,7 +382,7 @@ public sealed partial class SavedWordsPage : Page
         }
         else if (word.TimeMs is long time)
         {
-            lines.Add($"Open at {FormatClock(time)}");
+            lines.Add($"Open at {FormatClock(SubtitleLook.PlaybackMs(time))}");
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -476,6 +486,94 @@ public sealed partial class SavedWordsPage : Page
         => DateTimeOffset.TryParse(word.SavedAt, out var saved) ? saved.UtcTicks : 0;
 
     private static string CountLabel(int count) => count == 1 ? "1 word" : $"{count} words";
+
+    private void Review_Click(object sender, RoutedEventArgs e)
+    {
+        var query = SearchBox.Text.Trim();
+        var all = SavedWords.All();
+        var shown = query.Length == 0 ? all : all.Where(word => Matches(word, query)).ToArray();
+        if (shown.Count == 0)
+        {
+            return;
+        }
+
+        _deck = WordReview.Shuffle(shown, Random.Shared);
+        _reviewIndex = 0;
+        _revealed = false;
+        _reviewing = true;
+        ListHost.Visibility = Visibility.Collapsed;
+        EmptyText.Visibility = Visibility.Collapsed;
+        ReviewHost.Visibility = Visibility.Visible;
+        ReviewButton.Visibility = Visibility.Collapsed;
+        ShowReviewCard();
+    }
+
+    private void ReviewShow_Click(object sender, RoutedEventArgs e)
+    {
+        _revealed = true;
+        ShowReviewCard();
+    }
+
+    private void ReviewNext_Click(object sender, RoutedEventArgs e)
+    {
+        if (_reviewIndex >= _deck.Count - 1)
+        {
+            StopReview();
+            return;
+        }
+
+        _reviewIndex++;
+        _revealed = false;
+        ShowReviewCard();
+    }
+
+    private void ReviewOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (_reviewIndex < 0 || _reviewIndex >= _deck.Count)
+        {
+            return;
+        }
+
+        OpenWord(_deck[_reviewIndex]);
+    }
+
+    private void ReviewStop_Click(object sender, RoutedEventArgs e) => StopReview();
+
+    private void StopReview()
+    {
+        _reviewing = false;
+        _deck = [];
+        ReviewHost.Visibility = Visibility.Collapsed;
+        ReviewButton.Visibility = Visibility.Visible;
+        ShowWords();
+    }
+
+    private void ShowReviewCard()
+    {
+        if (_reviewIndex < 0 || _reviewIndex >= _deck.Count)
+        {
+            StopReview();
+            return;
+        }
+
+        var word = _deck[_reviewIndex];
+        ReviewCount.Text = $"{_reviewIndex + 1} of {_deck.Count}";
+        ReviewSource.Text = SavedWords.SourceTitle(word);
+        ReviewPrompt.Text = WordReview.Prompt(word.Sentence, word.English);
+        ReviewWord.Text = word.English;
+        var meaning = word.Turkish?.Trim() ?? string.Empty;
+        ReviewMeaning.Text = meaning;
+        ReviewMeaning.Visibility = meaning.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var sentence = word.Sentence?.Trim() ?? string.Empty;
+        var showSentence = sentence.Length > 0 && !word.SentenceIsWord();
+        ReviewSentence.Text = showSentence ? sentence : string.Empty;
+        ReviewSentence.Visibility = showSentence ? Visibility.Visible : Visibility.Collapsed;
+        ReviewAnswer.Visibility = _revealed ? Visibility.Visible : Visibility.Collapsed;
+        ReviewShow.Visibility = _revealed ? Visibility.Collapsed : Visibility.Visible;
+        ReviewNext.Visibility = _revealed ? Visibility.Visible : Visibility.Collapsed;
+        ReviewNext.Content = _reviewIndex == _deck.Count - 1 ? "Done" : "Next";
+        ReviewOpen.Visibility = _revealed && SavedWords.CanOpen(word) ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private static string FormatClock(long durationMs)
     {

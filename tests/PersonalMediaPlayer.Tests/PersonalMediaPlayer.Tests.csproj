@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="LibVLCSharp" Version="3.10.1" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.9" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -23,22 +24,36 @@
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\DownloadPoster.cs" Link="DownloadPoster.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Download\DownloadBatchSave.cs" Link="DownloadBatchSave.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleCues.cs" Link="SubtitleCues.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\ScreenshotSubtitles.cs" Link="ScreenshotSubtitles.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\LearningMode.cs" Link="LearningMode.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\CaptionFrame.cs" Link="CaptionFrame.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleLook.cs" Link="SubtitleLook.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleSearch.cs" Link="SubtitleSearch.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\LibraryCaptionSearch.cs" Link="LibraryCaptionSearch.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Library\LibrarySort.cs" Link="LibrarySort.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Library\FolderRun.cs" Link="FolderRun.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Library\LibrarySortChoice.cs" Link="LibrarySortChoice.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\ListeningSession.cs" Link="ListeningSession.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SubtitleEdit.cs" Link="SubtitleEdit.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\SavedWords.cs" Link="SavedWords.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Subtitles\WordReview.cs" Link="WordReview.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\Playlists.cs" Link="Playlists.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaylistChanges.cs" Link="PlaylistChanges.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaylistRun.cs" Link="PlaylistRun.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlayQueue.cs" Link="PlayQueue.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\WatchingSession.cs" Link="WatchingSession.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\VideoChapters.cs" Link="VideoChapters.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\ListsWidth.cs" Link="ListsWidth.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\FloatingPlayerPlacement.cs" Link="FloatingPlayerPlacement.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackVisit.cs" Link="PlaybackVisit.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackTime.cs" Link="PlaybackTime.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackFocus.cs" Link="PlaybackFocus.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackVolume.cs" Link="PlaybackVolume.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackSound.cs" Link="PlaybackSound.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\MediaFavorites.cs" Link="MediaFavorites.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamLink.cs" Link="StreamLink.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackProgress.cs" Link="PlaybackProgress.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\PlaybackBookmarks.cs" Link="PlaybackBookmarks.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamThumbnail.cs" Link="StreamThumbnail.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\HomeSearch.cs" Link="HomeSearch.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\SearchSession.cs" Link="SearchSession.cs" />
@@ -49,9 +64,13 @@
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Playback\StreamLanguageSettings.cs" Link="StreamLanguageSettings.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Storage\AppDataBackup.cs" Link="AppDataBackup.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\AudioSilence.cs" Link="AudioSilence.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\AudioWaveform.cs" Link="AudioWaveform.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\TimelineGesture.cs" Link="TimelineGesture.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\TimelinePreviewFrame.cs" Link="TimelinePreviewFrame.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\TimelinePreviewCache.cs" Link="TimelinePreviewCache.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Capture\PcmMix.cs" Link="PcmMix.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Capture\MixedAudioClock.cs" Link="MixedAudioClock.cs" />
     <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\MergeHandoff.cs" Link="MergeHandoff.cs" />
+    <Compile Include="..\..\src\PersonalMediaPlayer.App\Editing\WorkDrafts.cs" Link="WorkDrafts.cs" />
   </ItemGroup>
 </Project>

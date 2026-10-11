@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Navigation;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Controls;
 using PersonalMediaPlayer.App.Helpers;
+using PersonalMediaPlayer.App.Library;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.App.Storage;
 using PersonalMediaPlayer.App.ViewModels;
@@ -602,6 +603,13 @@ public sealed partial class LibraryPage : Page
             var open = new MenuFlyoutItem { Text = "Open" };
             open.Click += (_, _) => OpenSelected();
             flyout.Items.Add(open);
+
+            if (one.IsVideo && !one.IsMissing)
+            {
+                var rest = new MenuFlyoutItem { Text = "Play the rest" };
+                rest.Click += async (_, _) => await PlayRestAsync(one);
+                flyout.Items.Add(rest);
+            }
 
             if (one.IsMissing)
             {
@@ -1493,6 +1501,54 @@ public sealed partial class LibraryPage : Page
 
     private async void PlayNext_Click(object sender, RoutedEventArgs e)
         => await QueueSelectionAsync(next: true);
+
+    private async void PlayRest_Click(object sender, RoutedEventArgs e)
+    {
+        var videos = SelectedItems()
+            .Where(item => item.IsVideo && !item.IsMissing && !string.IsNullOrWhiteSpace(item.FilePath))
+            .ToArray();
+        if (videos.Length != 1)
+        {
+            ViewModel.ShowStatus("Choose one video. The videos after it in this list will play next.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        await PlayRestAsync(videos[0]);
+    }
+
+    private async Task PlayRestAsync(MediaItem item)
+    {
+        if (ViewModel.SelectedFolder?.IsRecentlyDeleted == true)
+        {
+            return;
+        }
+
+        if (!item.IsVideo || item.IsMissing || string.IsNullOrWhiteSpace(item.FilePath))
+        {
+            ViewModel.ShowStatus("Choose a video that is on this PC. Photos are not played.", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var rest = FolderRun.After(ViewModel.Items.ToArray(), item.FilePath)
+            .Select(video => (Title: video.DisplayName, Path: video.FilePath))
+            .ToArray();
+        var existing = rest.Length == 0
+            ? []
+            : await Task.Run(() => rest.Where(video => File.Exists(video.Path)).ToArray());
+        var added = existing.Length == 0 ? 0 : PlayQueue.AddFiles(existing, next: true);
+        var opened = NavigationHelper.OpenPlayer(item);
+        var message = added == 0
+            ? "Nothing comes after this video in this list."
+            : added == 1
+                ? "1 video will play after this one."
+                : $"{added} videos will play after this one.";
+        if (opened && App.MainAppWindow is MainWindow window)
+        {
+            window.NoteFolderRest(message);
+        }
+
+        ViewModel.ShowStatus(message, added == 0 ? InfoBarSeverity.Informational : InfoBarSeverity.Success);
+    }
 
     private async void AddToQueue_Click(object sender, RoutedEventArgs e)
         => await QueueSelectionAsync(next: false);

@@ -44,6 +44,28 @@ public class TimelineGestureTests
     }
 
     [Fact]
+    public void A_click_follows_the_playhead_center()
+    {
+        Assert.Equal(0, TimelineGesture.SliderFraction(0, 1000, 18), 5);
+        Assert.Equal(0, TimelineGesture.SliderFraction(9, 1000, 18), 5);
+        Assert.Equal(1, TimelineGesture.SliderFraction(991, 1000, 18), 5);
+        Assert.Equal(1, TimelineGesture.SliderFraction(1000, 1000, 18), 5);
+        Assert.InRange(TimelineGesture.SliderFraction(250, 1000, 18), 0.244, 0.247);
+        Assert.Equal(0.25, TimelineGesture.SliderFraction(250, 1000, 0), 5);
+        Assert.Equal(0, TimelineGesture.SliderFraction(double.NaN, 1000, 18));
+    }
+
+    [Fact]
+    public void Slider_values_land_on_a_step()
+    {
+        Assert.Equal(10, TimelineGesture.SnapValue(10.2, 0, 1000, 2.5));
+        Assert.Equal(12.5, TimelineGesture.SnapValue(11.3, 0, 1000, 2.5));
+        Assert.Equal(0, TimelineGesture.SnapValue(-4, 0, 100, 1));
+        Assert.Equal(1000, TimelineGesture.SnapValue(1000, 0, 1000, 1000d / 900d), 5);
+        Assert.Equal(4.2, TimelineGesture.SnapValue(4.2, 0, 10, 0));
+    }
+
+    [Fact]
     public void A_zoomed_playhead_moves_one_pixel_at_a_time()
     {
         var wide = TimelineGesture.SeekStep(1000, 102_400);

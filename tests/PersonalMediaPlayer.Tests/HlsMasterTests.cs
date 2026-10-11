@@ -29,6 +29,33 @@ public class HlsMasterTests
     }
 
     [Fact]
+    public void AnAudioRenditionCanPlayWithoutThePicture()
+    {
+        const string text = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac",NAME="English",LANGUAGE="en",DEFAULT=YES,URI="audio/en.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=1280x720,AUDIO="aac"
+            video/720.m3u8
+            """;
+
+        var master = Parse(text);
+
+        Assert.Equal("https://cdn.example/file/audio/en.m3u8", master.AudioPlaylist("en", Playlist));
+    }
+
+    [Fact]
+    public void AMuxedStreamHasNoSeparateAudioPlaylist()
+    {
+        const string text = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1000,RESOLUTION=1280x720
+            video/720.m3u8
+            """;
+
+        Assert.Null(Parse(text).AudioPlaylist(null, Playlist));
+    }
+
+    [Fact]
     public void FiveAudioLanguagesStayListed()
     {
         var master = Parse(Master(new[] { "ar", "de", "en", "es", "fr" }, "en"));

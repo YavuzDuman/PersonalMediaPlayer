@@ -68,6 +68,47 @@ internal static class TimelineGesture
         return Math.Min(0.01, Math.Min(1, halfSecond));
     }
 
+    // WinUI parks the playhead center inside the bar. A click at x is the value whose
+    // thumb center lands on x, so the ends of the bar are inset by half the thumb.
+    internal static double SliderFraction(double pointerX, double width, double thumbWidth)
+    {
+        if (width <= 1 || double.IsNaN(width) || double.IsInfinity(width)
+            || double.IsNaN(pointerX) || double.IsInfinity(pointerX))
+        {
+            return 0;
+        }
+
+        var x = Math.Clamp(pointerX, 0, width);
+        if (thumbWidth < 1 || thumbWidth >= width || double.IsNaN(thumbWidth) || double.IsInfinity(thumbWidth))
+        {
+            return x / width;
+        }
+
+        return Math.Clamp((x - thumbWidth / 2d) / (width - thumbWidth), 0, 1);
+    }
+
+    internal static double SnapValue(double value, double minimum, double maximum, double step)
+    {
+        if (double.IsNaN(minimum) || double.IsNaN(maximum) || maximum < minimum)
+        {
+            return 0;
+        }
+
+        var clamped = Math.Clamp(value, minimum, maximum);
+        if (step <= 0 || double.IsNaN(step) || double.IsInfinity(step))
+        {
+            return clamped;
+        }
+
+        if (maximum - clamped <= step / 2d)
+        {
+            return maximum;
+        }
+
+        var steps = Math.Round((clamped - minimum) / step, MidpointRounding.AwayFromZero);
+        return Math.Clamp(minimum + steps * step, minimum, maximum);
+    }
+
     // One slider step is one pixel, so a zoomed playhead follows the pointer.
     internal static double SeekStep(double maximum, double widthPixels)
     {

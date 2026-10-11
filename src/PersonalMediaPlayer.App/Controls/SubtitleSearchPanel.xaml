@@ -5,7 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     VerticalAlignment="Stretch">
     <Border
-        Width="320"
+        HorizontalAlignment="Stretch"
         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
@@ -81,7 +81,8 @@
                                 Content="{Binding SaveLabel}"
                                 IsEnabled="{Binding CanSave}"
                                 Style="{StaticResource ActionButtonStyle}"
-                                ToolTipService.ToolTip="{Binding SaveTip}" />
+                                ToolTipService.ToolTip="{Binding SaveTip}"
+                                Visibility="{Binding SaveVisibility}" />
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>

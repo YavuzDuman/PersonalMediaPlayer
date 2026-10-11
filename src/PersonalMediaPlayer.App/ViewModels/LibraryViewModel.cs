@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -6,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PersonalMediaPlayer.App.Capture;
 using PersonalMediaPlayer.App.Helpers;
+using PersonalMediaPlayer.App.Library;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.App.Storage;
 using PersonalMediaPlayer.Core;
@@ -21,6 +23,8 @@ public sealed partial class LibraryViewModel : ObservableObject
     private readonly IMediaLibrary _library;
     private readonly List<MediaItem> _allItems = [];
     private readonly Dictionary<string, int> _duplicateGroup = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (long Size, long Ms)> _lengths = new(StringComparer.OrdinalIgnoreCase);
+    private int _lengthPass;
     private bool _suppressFolderLoad;
     private bool _duplicateCountKnown;
     private int _duplicateFileCount;
@@ -40,6 +44,11 @@ public sealed partial class LibraryViewModel : ObservableObject
 
             await LoadFoldersAsync();
         };
+        var savedSort = LibrarySortChoice.Current;
+        if (savedSort != sortIndex)
+        {
+            SortIndex = savedSort;
+        }
     }
 
     public ObservableCollection<MediaItem> Items { get; } = [];
@@ -131,16 +140,7 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     public IReadOnlyList<string> TypeFilters { get; } = ["All types", "Images", "Videos"];
 
-    public IReadOnlyList<string> SortOptions { get; } =
-    [
-        "Newest first",
-        "Oldest first",
-        "Name A–Z",
-        "Name Z–A",
-        "Largest",
-        "Smallest",
-        "Type"
-    ];
+    public IReadOnlyList<string> SortOptions => LibrarySort.Options;
 
     [ObservableProperty]
     private string statusMessage = string.Empty;
@@ -210,6 +210,7 @@ public sealed partial class LibraryViewModel : ObservableObject
         _allItems.Clear();
         _allItems.AddRange(media);
         ApplyFilter();
+        RememberLengths();
         _ = IndexScreenshotTextAsync(_allItems.ToArray());
     }
 
@@ -240,6 +241,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             _duplicateCoverPath = cover?.FilePath;
             _duplicateCoverIsVideo = cover?.IsVideo == true;
             ApplyFilter();
+            RememberLengths();
             RememberDuplicateFolder();
         }
         finally
@@ -1041,7 +1043,23 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     partial void OnTypeFilterIndexChanged(int value) => ApplyFilter();
 
-    partial void OnSortIndexChanged(int value) => ApplyFilter();
+    partial void OnSortIndexChanged(int value)
+    {
+        if (value < LibrarySort.Newest || value > LibrarySort.Type)
+        {
+            var saved = LibrarySortChoice.Current;
+            if (value != saved)
+            {
+                SortIndex = saved;
+            }
+
+            return;
+        }
+
+        LibrarySortChoice.Save(value);
+        ApplyFilter();
+        RememberLengths();
+    }
 
     private void ApplyFilter()
     {
@@ -1071,7 +1089,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             var filtered = matches.ToList();
             foreach (var group in filtered.GroupBy(item => _duplicateGroup.GetValueOrDefault(item.FilePath)).OrderBy(group => group.Key))
             {
-                var list = group.ToList();
+                var list = LibrarySort.Order(group, SortIndex, LengthOf);
                 if (list.Count < 2)
                 {
                     continue;
@@ -1094,25 +1112,82 @@ public sealed partial class LibraryViewModel : ObservableObject
             return;
         }
 
-        matches = SortIndex switch
-        {
-            1 => matches.OrderBy(item => item.ImportedAt),
-            2 => matches.OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
-            3 => matches.OrderByDescending(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
-            4 => matches.OrderByDescending(item => item.FileSizeBytes),
-            5 => matches.OrderBy(item => item.FileSizeBytes),
-            6 => matches.OrderBy(item => item.TypeLabel).ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
-            _ => matches.OrderByDescending(item => item.ImportedAt)
-        };
-
         Items.Clear();
-        foreach (var item in matches)
+        foreach (var item in LibrarySort.Order(matches, SortIndex, LengthOf))
         {
             Items.Add(item);
         }
 
         IsEmpty = Items.Count == 0;
         ShowingDuplicates = false;
+    }
+
+    private void RememberLengths()
+    {
+        if (LibrarySort.NeedsLength(SortIndex))
+        {
+            _ = RefreshLengthsAsync();
+        }
+    }
+
+    private long LengthOf(MediaItem item)
+    {
+        if (!item.IsVideo)
+        {
+            return 0;
+        }
+
+        return _lengths.TryGetValue(item.FilePath, out var cached) && cached.Size == item.FileSizeBytes
+            ? cached.Ms
+            : 0;
+    }
+
+    private async Task RefreshLengthsAsync()
+    {
+        var pass = ++_lengthPass;
+        var jobs = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in _allItems)
+        {
+            if (!item.IsVideo || item.IsMissing || string.IsNullOrWhiteSpace(item.FilePath))
+            {
+                continue;
+            }
+
+            if (_lengths.TryGetValue(item.FilePath, out var cached) && cached.Size == item.FileSizeBytes)
+            {
+                continue;
+            }
+
+            jobs[item.FilePath] = item.FileSizeBytes;
+        }
+
+        if (jobs.Count == 0)
+        {
+            return;
+        }
+
+        var found = new ConcurrentDictionary<string, (long Size, long Ms)>(StringComparer.OrdinalIgnoreCase);
+        await Parallel.ForEachAsync(jobs, new ParallelOptions { MaxDegreeOfParallelism = 4 }, async (job, _) =>
+        {
+            var duration = await VideoDuration.ReadAsync(job.Key);
+            var ms = duration is TimeSpan time && time > TimeSpan.Zero ? (long)time.TotalMilliseconds : 0L;
+            found[job.Key] = (job.Value, ms);
+        });
+
+        if (pass != _lengthPass)
+        {
+            return;
+        }
+
+        foreach (var pair in found)
+        {
+            _lengths[pair.Key] = pair.Value;
+        }
+
+        if (LibrarySort.NeedsLength(SortIndex))
+        {
+            ApplyFilter();
+        }
     }
 
     private bool CanImport => !IsBusy;

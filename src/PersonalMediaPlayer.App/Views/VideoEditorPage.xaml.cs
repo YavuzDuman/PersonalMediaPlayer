@@ -44,7 +44,11 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
     private string _tool = "speed";
     private bool _trimReady;
     private MergeEditorSeed? _seed;
+    private string? _draftId;
+    private EditDraft? _pendingDraft;
+    private EditDraft? _savedWork;
     private MergeClipReturn? _mergeReturn;
+    private string? _mergeSourcePath;
     private IReadOnlyList<SubtitleCue> _captionCues = [];
     private bool _exportingCaptions;
     private long _trimStartMs;
@@ -95,6 +99,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         Playback.PlayButton.Click += Play_Click;
         Playback.BackButton.Click += (_, _) => Skip(-10_000);
         Playback.ForwardButton.Click += (_, _) => Skip(10_000);
+        Playback.SleepButton.Visibility = Visibility.Collapsed;
         Playback.SeekSlider.AddHandler(PointerPressedEvent, new PointerEventHandler(Seek_Pressed), true);
         Playback.SeekSlider.AddHandler(PointerReleasedEvent, new PointerEventHandler(Seek_Released), true);
         Playback.SeekSlider.AddHandler(PointerCanceledEvent, new PointerEventHandler(Seek_Released), true);
@@ -122,6 +127,10 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         IReadOnlyList<SubtitleCue> ready = [];
+        _draftId = null;
+        _pendingDraft = null;
+        _savedWork = null;
+        _mergeSourcePath = null;
         _mergeReturn = e.Parameter is EditorLaunch returning ? returning.MergeReturn : null;
         _seed = e.Parameter is EditorLaunch seeded ? seeded.Seed : null;
         _item = e.Parameter switch
@@ -137,6 +146,11 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         }
 
         _path = _item.FilePath;
+        if (_mergeReturn is not null)
+        {
+            _mergeSourcePath = _path;
+        }
+
         FileNameText.Text = _item.DisplayName;
         ApplySeedFades();
         LoadEditorCaptions(_path, ready);
@@ -182,12 +196,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         _pendingPageType = pageType;
         _pendingParameter = parameter;
         _pendingIsBack = back;
-        if (_allowLeave || !HasEdits)
-        {
-            return true;
-        }
-
-        if (_saving)
+        if (_saving && !_allowLeave)
         {
             StatusBar.Severity = InfoBarSeverity.Informational;
             StatusBar.Message = "The video is still saving.";
@@ -195,18 +204,18 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             return false;
         }
 
-        LeavePrompt.Visibility = Visibility.Visible;
+        if (_allowLeave || !UnsavedEdits())
+        {
+            return true;
+        }
+
+        ShowLeavePrompt();
         return false;
     }
 
     internal bool TryHandleHostClose()
     {
-        if (_allowLeave || !HasEdits)
-        {
-            return false;
-        }
-
-        if (_saving)
+        if (_saving && !_allowLeave)
         {
             StatusBar.Severity = InfoBarSeverity.Informational;
             StatusBar.Message = "The video is still saving.";
@@ -214,14 +223,22 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             return true;
         }
 
+        if (_allowLeave || !UnsavedEdits())
+        {
+            return false;
+        }
+
         _closeWindow = true;
-        DispatcherQueue.TryEnqueue(() => LeavePrompt.Visibility = Visibility.Visible);
+        DispatcherQueue.TryEnqueue(ShowLeavePrompt);
         return true;
     }
 
     protected override void OnNavigatingFrom(NavigatingCancelEventArgs e)
     {
-        if (_allowLeave || !HasEdits)
+        // A finished save sets _allowLeave and then goes back while _saving is still true.
+        // Cancelling that navigation keeps the editor up. Clearing the forward stack in that
+        // same call then throws, because the frame is still navigating.
+        if (_allowLeave || (!_saving && !UnsavedEdits()))
         {
             ReleasePlayer();
             return;
@@ -239,8 +256,27 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         _pendingIsBack = e.NavigationMode == Microsoft.UI.Xaml.Navigation.NavigationMode.Back;
         if (LeavePrompt.Visibility != Visibility.Visible)
         {
-            DispatcherQueue.TryEnqueue(() => LeavePrompt.Visibility = Visibility.Visible);
+            DispatcherQueue.TryEnqueue(ShowLeavePrompt);
         }
+    }
+
+    private bool UnsavedEdits()
+        => WorkDrafts.EditDiffersFromSaved(_savedWork, CaptureDraft(), HasEdits);
+
+    private void ShowLeavePrompt()
+    {
+        if (_savedWork is not null)
+        {
+            LeavePromptTitle.Text = "These changes are not in the draft.";
+            LeavePromptDetail.Text = "Leave without keeping them? The saved draft stays on this PC.";
+        }
+        else
+        {
+            LeavePromptTitle.Text = "These edits are not saved.";
+            LeavePromptDetail.Text = "Leave without keeping them?";
+        }
+
+        LeavePrompt.Visibility = Visibility.Visible;
     }
 
     private bool HasSpeedChange => SpeedSlider is not null && Math.Abs(SpeedSlider.Value - 1d) > 0.02;
@@ -698,6 +734,15 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         Playback.SeekSlider.IsEnabled = true;
         if (!_trimReady)
         {
+            if (_pendingDraft is { } pending)
+            {
+                _pendingDraft = null;
+                ApplyLoadedDraft(pending, durationMs);
+                UpdateSpeedText();
+                RefreshSilence();
+                return;
+            }
+
             _trimStartMs = 0;
             _trimEndMs = durationMs;
             if (_seed is { } seed)
@@ -714,6 +759,13 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             Playback.BeginTrim(passThrough: true);
             Playback.SetTrimFractions(_trimStartMs / (double)durationMs, _trimEndMs / (double)durationMs);
             _trimReady = true;
+            // A draft saved before the length was known stored a full-length trim as 0.
+            // Filling that in is not a new edit.
+            if (_savedWork is not null && _savedWork.TrimStartMs <= 0 && _savedWork.TrimEndMs <= 0)
+            {
+                _savedWork.TrimStartMs = _trimStartMs;
+                _savedWork.TrimEndMs = _trimEndMs;
+            }
             ApplyTimelineMode();
             UpdateTrimSummary();
             if (_seed is not null)
@@ -729,6 +781,353 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
         UpdateSpeedText();
         RefreshSilence();
+    }
+
+    private async void Drafts_Click(object sender, RoutedEventArgs e)
+    {
+        if (_saving)
+        {
+            ShowDraftStatus("The video is still saving.");
+            return;
+        }
+
+        var chosen = await ShowDraftsAsync();
+        if (chosen is null)
+        {
+            return;
+        }
+
+        if (!File.Exists(chosen.VideoPath))
+        {
+            var found = await FilePickerHelper.PickSingleVideoAsync(App.MainAppWindow);
+            if (found is null)
+            {
+                return;
+            }
+
+            chosen = WorkDrafts.PointEdit(chosen.Id, found.Path);
+            if (chosen is null)
+            {
+                ShowDraftStatus("That video could not be used.");
+                return;
+            }
+        }
+
+        if (UnsavedEdits())
+        {
+            var confirm = new ContentDialog
+            {
+                Title = "Open this draft?",
+                Content = "The edit on screen is replaced. Save a draft first if you want to keep it.",
+                PrimaryButtonText = "Open",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot
+            };
+            if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+
+        LoadEditDraft(chosen);
+    }
+
+    private async Task<EditDraft?> ShowDraftsAsync()
+    {
+        var list = new StackPanel { Spacing = 8 };
+        var scroll = new ScrollViewer { MaxHeight = 360, Content = list };
+        EditDraft? chosen = null;
+        var dialog = new ContentDialog
+        {
+            Title = "Drafts",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Width = 420,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Save draft keeps this edit on this PC. The video file stays where it is.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    scroll
+                }
+            },
+            PrimaryButtonText = "Save draft",
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(_path),
+            XamlRoot = XamlRoot
+        };
+
+        void Fill()
+        {
+            list.Children.Clear();
+            var drafts = WorkDrafts.Edits();
+            if (drafts.Count == 0)
+            {
+                list.Children.Add(new TextBlock { Text = "No drafts yet.", Opacity = 0.7 });
+                return;
+            }
+
+            foreach (var draft in drafts)
+            {
+                var ready = File.Exists(draft.VideoPath);
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var text = new StackPanel { Spacing = 2 };
+                text.Children.Add(new TextBlock { Text = draft.Name, TextTrimming = TextTrimming.CharacterEllipsis });
+                text.Children.Add(new TextBlock
+                {
+                    Text = WorkDrafts.When(draft.SavedUtc) + (ready ? "" : " · Video moved"),
+                    FontSize = 12,
+                    Opacity = 0.7
+                });
+                var open = new Button { Content = ready ? "Open" : "Find", MinWidth = 72 };
+                var remove = new Button { Content = "Remove" };
+                open.Click += (_, _) =>
+                {
+                    chosen = draft;
+                    dialog.Hide();
+                };
+                remove.Click += (_, _) =>
+                {
+                    WorkDrafts.RemoveEdit(draft.Id);
+                    if (_draftId == draft.Id)
+                    {
+                        _draftId = null;
+                        _savedWork = null;
+                    }
+
+                    Fill();
+                };
+                Grid.SetColumn(text, 0);
+                Grid.SetColumn(open, 1);
+                Grid.SetColumn(remove, 2);
+                row.Children.Add(text);
+                row.Children.Add(open);
+                row.Children.Add(remove);
+                list.Children.Add(row);
+            }
+        }
+
+        Fill();
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            SaveCurrentDraft();
+            return null;
+        }
+
+        return chosen;
+    }
+
+    private void SaveCurrentDraft()
+    {
+        if (string.IsNullOrWhiteSpace(_path))
+        {
+            ShowDraftStatus("Open a video before saving a draft.");
+            return;
+        }
+
+        var draft = CaptureDraft();
+        var snapshot = WorkDrafts.CopyEdit(draft);
+        var saved = WorkDrafts.SaveEdit(draft);
+        if (saved is null)
+        {
+            ShowDraftStatus("The draft could not be saved.");
+            return;
+        }
+
+        _draftId = saved.Id;
+        _savedWork = snapshot;
+        ShowDraftStatus("Draft saved. It stays on this PC after you close the app.");
+    }
+
+    private EditDraft CaptureDraft()
+    {
+        return new EditDraft
+        {
+            Id = _draftId ?? string.Empty,
+            Name = Path.GetFileNameWithoutExtension(string.IsNullOrWhiteSpace(FileNameText.Text) ? _path : FileNameText.Text) ?? "Draft",
+            VideoPath = _path ?? string.Empty,
+            VideoName = Path.GetFileName(_path ?? string.Empty),
+            Speed = SpeedSlider.Value,
+            Volume = VolumeSlider.Value,
+            TrimStartMs = _trimStartMs,
+            TrimEndMs = _trimEndMs,
+            Cuts = _cuts.Select(cut => new TimeMark { StartMs = cut.StartMs, EndMs = cut.EndMs }).ToList(),
+            Parts = _silences.Select(span => new LevelMark { StartMs = span.StartMs, EndMs = span.EndMs, VolumePercent = span.VolumePercent }).ToList(),
+            MarkStartMs = _markStartMs,
+            MarkEndMs = _markEndMs,
+            CropLeft = CropSurface.Left,
+            CropTop = CropSurface.Top,
+            CropRight = CropSurface.Right,
+            CropBottom = CropSurface.Bottom,
+            CropPreview = _cropPreview,
+            QuarterTurns = _quarterTurns,
+            FlipHorizontal = _flipHorizontal,
+            FlipVertical = _flipVertical,
+            VideoFadeIn = VideoFadeInBox.IsChecked == true,
+            VideoFadeInSeconds = VideoFadeInSeconds.Value,
+            VideoFadeOut = VideoFadeOutBox.IsChecked == true,
+            VideoFadeOutSeconds = VideoFadeOutSeconds.Value,
+            AudioFadeIn = AudioFadeInBox.IsChecked == true,
+            AudioFadeInSeconds = AudioFadeInSeconds.Value,
+            AudioFadeOut = AudioFadeOutBox.IsChecked == true,
+            AudioFadeOutSeconds = AudioFadeOutSeconds.Value
+        };
+    }
+
+    private void LoadEditDraft(EditDraft draft)
+    {
+        var item = ItemForDraft(draft.VideoPath);
+        if (item is null)
+        {
+            ShowDraftStatus("That video is no longer there.");
+            return;
+        }
+
+        _draftId = draft.Id;
+        _pendingDraft = draft;
+        _savedWork = null;
+        if (_mergeReturn is not null && !WorkDrafts.SameVideo(_mergeSourcePath, item.FilePath))
+        {
+            _mergeReturn = null;
+            _mergeSourcePath = null;
+        }
+
+        _seed = null;
+        _trimReady = false;
+        _durationMs = 0;
+        _item = item;
+        _path = item.FilePath;
+        FileNameText.Text = item.DisplayName;
+        _restoring = true;
+        _cuts.Clear();
+        _silences.Clear();
+        _previewSpans = [];
+        _linkedPart = null;
+        _markStartMs = null;
+        _markEndMs = null;
+        _trimStartMs = 0;
+        _trimEndMs = 0;
+        _quarterTurns = 0;
+        _flipHorizontal = false;
+        _flipVertical = false;
+        _cropPreview = false;
+        _restoring = false;
+        LoadEditorCaptions(_path, []);
+        Playback.SetHoverSource(_path);
+        _pendingPath = _path;
+        _timer.Start();
+        if (_player is not null)
+        {
+            PlayFile(_path);
+        }
+        else
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, AttachVideo);
+        }
+
+        ShowDraftStatus("Draft opened.");
+    }
+
+    private void ApplyLoadedDraft(EditDraft draft, long durationMs)
+    {
+        var start = Math.Clamp(draft.TrimStartMs, 0, durationMs);
+        var end = draft.TrimEndMs <= 0 ? durationMs : Math.Clamp(draft.TrimEndMs, 0, durationMs);
+        if (end <= start + 50)
+        {
+            start = 0;
+            end = durationMs;
+        }
+
+        var snap = new EditorSnapshot(
+            draft.Speed,
+            draft.Volume,
+            start,
+            end,
+            draft.Cuts.Select(cut => (cut.StartMs, cut.EndMs)).ToArray(),
+            draft.Parts.Select(part => new AudioSilence.Span(part.StartMs, part.EndMs, part.VolumePercent)).ToArray(),
+            draft.MarkStartMs,
+            draft.MarkEndMs,
+            draft.CropLeft,
+            draft.CropTop,
+            draft.CropRight,
+            draft.CropBottom,
+            draft.CropPreview,
+            draft.QuarterTurns,
+            draft.FlipHorizontal,
+            draft.FlipVertical,
+            draft.VideoFadeIn,
+            draft.VideoFadeInSeconds,
+            draft.VideoFadeOut,
+            draft.VideoFadeOutSeconds,
+            draft.AudioFadeIn,
+            draft.AudioFadeInSeconds,
+            draft.AudioFadeOut,
+            draft.AudioFadeOutSeconds);
+        Playback.BeginTrim(passThrough: true);
+        Restore(snap);
+        _trimReady = true;
+        ApplyTimelineMode();
+        VideoFadeInSeconds.IsEnabled = draft.VideoFadeIn;
+        VideoFadeOutSeconds.IsEnabled = draft.VideoFadeOut;
+        AudioFadeInSeconds.IsEnabled = draft.AudioFadeIn;
+        AudioFadeOutSeconds.IsEnabled = draft.AudioFadeOut;
+        _history.Clear();
+        _history.Add(Capture());
+        _historyIndex = 0;
+        UpdateHistoryButtons();
+        UpdateToolMarks();
+        _savedWork = WorkDrafts.CopyEdit(CaptureDraft());
+    }
+
+    private static MediaItem? ItemForDraft(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var full = Path.GetFullPath(path);
+        var known = App.MediaLibrary.GetById(full);
+        if (known is not null)
+        {
+            return known;
+        }
+
+        foreach (var item in App.MediaLibrary.GetItems())
+        {
+            if (string.Equals(item.FilePath, full, StringComparison.OrdinalIgnoreCase))
+            {
+                return item;
+            }
+        }
+
+        var info = new FileInfo(full);
+        return new MediaItem
+        {
+            Id = full,
+            Kind = PersonalMediaPlayer.Core.MediaFileTypes.GetKind(full),
+            DisplayName = info.Name,
+            FilePath = full,
+            ImportedAt = new DateTimeOffset(DateTime.SpecifyKind(info.CreationTimeUtc, DateTimeKind.Utc)),
+            FileSizeBytes = info.Exists ? info.Length : 0,
+            FolderName = string.Empty,
+            IsLinked = false
+        };
+    }
+
+    private void ShowDraftStatus(string message)
+    {
+        StatusBar.Severity = InfoBarSeverity.Informational;
+        StatusBar.Message = message;
+        StatusBar.IsOpen = true;
     }
 
     private void SpeedSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -2030,7 +2429,12 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             return;
         }
 
-        var fromMerge = _mergeReturn is not null;
+        var fromMerge = _mergeReturn is not null && WorkDrafts.SameVideo(_mergeSourcePath, _path);
+        if (!fromMerge)
+        {
+            _mergeReturn = null;
+        }
+
         var dialog = new ContentDialog
         {
             Title = fromMerge ? "Save this clip" : "Save edits",
@@ -2269,16 +2673,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
                     throw new InvalidOperationException("The saved video could not be put back in the merge.");
                 }
 
-                if (Frame.CanGoBack)
-                {
-                    Frame.GoBack();
-                    Frame.ForwardStack.Clear();
-                }
-                else if (Frame.Navigate(typeof(MergePage)))
-                {
-                    Frame.BackStack.Clear();
-                }
-                else
+                if (!ReturnedFromSave(typeof(MergePage)))
                 {
                     _allowLeave = false;
                     throw new InvalidOperationException("The merge list could not be opened.");
@@ -2286,16 +2681,7 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
             }
             else
             {
-                if (Frame.CanGoBack)
-                {
-                    Frame.GoBack();
-                    Frame.ForwardStack.Clear();
-                }
-                else if (Frame.Navigate(typeof(HomePage)))
-                {
-                    Frame.BackStack.Clear();
-                }
-
+                ReturnedFromSave(typeof(HomePage));
                 if (App.MainAppWindow is not MainWindow window || !window.ShowPlayer(saved))
                 {
                     _allowLeave = false;
@@ -2931,11 +3317,19 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
-        if (HasEdits)
+        if (_saving)
+        {
+            StatusBar.Severity = InfoBarSeverity.Informational;
+            StatusBar.Message = "The video is still saving.";
+            StatusBar.IsOpen = true;
+            return;
+        }
+
+        if (UnsavedEdits())
         {
             _pendingIsBack = true;
             _pendingPageType = null;
-            LeavePrompt.Visibility = Visibility.Visible;
+            ShowLeavePrompt();
             return;
         }
 
@@ -2987,6 +3381,71 @@ public sealed partial class VideoEditorPage : Page, PlaybackStore.IPlaybackSourc
         if (Frame.CanGoBack)
         {
             Frame.GoBack();
+        }
+    }
+
+    private bool ReturnedFromSave(Type? fallback)
+    {
+        var frame = Frame;
+        if (frame is null)
+        {
+            return false;
+        }
+
+        if (frame.CanGoBack)
+        {
+            frame.GoBack();
+            if (ReferenceEquals(frame.Content, this))
+            {
+                return false;
+            }
+
+            ClearStackAfterLeave(frame, forward: true);
+            return true;
+        }
+
+        if (fallback is null || !frame.Navigate(fallback))
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(frame.Content, this))
+        {
+            return false;
+        }
+
+        ClearStackAfterLeave(frame, forward: false);
+        return true;
+    }
+
+    private static void ClearStackAfterLeave(Frame frame, bool forward)
+    {
+        var stack = forward ? frame.ForwardStack : frame.BackStack;
+        try
+        {
+            if (stack.Count > 0)
+            {
+                stack.Clear();
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // GoBack can still be finishing. Retry once the frame is idle so this
+            // never surfaces as a failed save after the file is already written.
+            frame.DispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    if (stack.Count > 0)
+                    {
+                        stack.Clear();
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // The spent editor can stay on the forward stack. The save already landed.
+                }
+            });
         }
     }
 

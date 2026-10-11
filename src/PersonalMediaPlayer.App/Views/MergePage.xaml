@@ -30,6 +30,10 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <ProgressRing x:Name="BusyRing" Width="20" Height="20" IsActive="False" />
                 <Button Click="Add_Click" Content="Add videos" Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    Click="Drafts_Click"
+                    Content="Drafts"
+                    ToolTipService.ToolTip="Save these clips on this PC and open them again later." />
                 <Button x:Name="MergeButton" Click="Merge_Click" Content="Merge" IsEnabled="False" />
             </StackPanel>
         </Grid>
@@ -49,11 +53,11 @@
             CornerRadius="16">
             <StackPanel Spacing="10">
                 <TextBlock x:Name="SummaryText" Style="{StaticResource BodyStrongTextBlockStyle}" Text="No videos yet" />
-                <Grid x:Name="TimelineBar" Height="48" />
+                <Grid x:Name="TimelineBar" Height="52" />
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="Drag the white handles to choose what each clip keeps. Click the bright part to play there." />
+                    Text="Drag the white handles to choose what each clip keeps. Taller marks are louder. Click the bright part to play there." />
             </StackPanel>
         </Border>
 
@@ -193,6 +197,7 @@
                             </Grid>
                             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4">
                                 <Button Padding="10,4" Click="Edit_Click" Content="Edit" ToolTipService.ToolTip="Edit this clip. The saved video comes back to this spot." />
+                                <Button Padding="10,4" Click="FindClip_Click" Content="Find" Visibility="{Binding FindVisibility}" ToolTipService.ToolTip="This video was moved. Choose it again. The trim and fades stay." />
                                 <Button Padding="10,4" Click="MoveUp_Click" ToolTipService.ToolTip="Move up">
                                     <FontIcon FontSize="14" Glyph="&#xE70E;" />
                                 </Button>

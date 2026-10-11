@@ -25,6 +25,8 @@ public sealed partial class SavedWordsPanel : UserControl
 
     internal event EventHandler<SavedWord>? WordChosen;
 
+    internal event EventHandler? Closed;
+
     public bool IsOpen => Visibility == Visibility.Visible;
 
     public string? CurrentVideoPath
@@ -213,7 +215,11 @@ public sealed partial class SavedWordsPanel : UserControl
         }
     }
 
-    private void Collapse_Click(object sender, RoutedEventArgs e) => Collapse();
+    private void Collapse_Click(object sender, RoutedEventArgs e)
+    {
+        Collapse();
+        Closed?.Invoke(this, EventArgs.Empty);
+    }
 
     private void Search_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
@@ -295,7 +301,7 @@ public sealed partial class SavedWordsPanel : UserControl
         {
             var clock = new TextBlock
             {
-                Text = FormatClock(time),
+                Text = FormatClock(SubtitleLook.PlaybackMs(time)),
                 Margin = new Thickness(8, 0, 0, 0),
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = SecondaryInk.Foreground,
@@ -405,7 +411,7 @@ public sealed partial class SavedWordsPanel : UserControl
         }
         else if (word.TimeMs is long time)
         {
-            lines.Add($"Open at {FormatClock(time)}");
+            lines.Add($"Open at {FormatClock(SubtitleLook.PlaybackMs(time))}");
         }
 
         return string.Join(Environment.NewLine, lines);

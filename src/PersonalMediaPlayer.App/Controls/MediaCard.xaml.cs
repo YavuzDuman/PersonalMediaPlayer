@@ -3,10 +3,9 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using PersonalMediaPlayer.App.Download;
+using PersonalMediaPlayer.App.Library;
 using PersonalMediaPlayer.App.Playback;
 using PersonalMediaPlayer.Core.Models;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace PersonalMediaPlayer.App.Controls;
 
@@ -149,7 +148,7 @@ public sealed partial class MediaCard : UserControl
 
         var path = Item.FilePath;
         var thumbnailTask = VideoThumbnail.LoadAsync(path, 440);
-        var durationTask = TryGetVideoDurationAsync(path);
+        var durationTask = VideoDuration.ReadAsync(path);
         ThumbImage.Source = await thumbnailTask;
         if (!string.Equals(Item?.FilePath, path, StringComparison.OrdinalIgnoreCase))
         {
@@ -166,20 +165,6 @@ public sealed partial class MediaCard : UserControl
             ? $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}"
             : $"{(int)time.TotalMinutes}:{time.Seconds:00}";
         DurationBadge.Visibility = Visibility.Visible;
-    }
-
-    private static async Task<TimeSpan?> TryGetVideoDurationAsync(string path)
-    {
-        try
-        {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            var properties = await file.Properties.GetVideoPropertiesAsync();
-            return properties.Duration;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
 }

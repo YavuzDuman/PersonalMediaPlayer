@@ -14,10 +14,13 @@
         ExpandedModeThresholdWidth="1280"
         IsBackButtonVisible="Collapsed"
         IsPaneToggleButtonVisible="False"
+        DisplayModeChanged="NavView_DisplayModeChanged"
         IsSettingsVisible="True"
+        ItemInvoked="NavView_ItemInvoked"
         Loaded="NavView_Loaded"
         OpenPaneLength="240"
-        ItemInvoked="NavView_ItemInvoked">
+        PaneClosed="NavView_PaneClosed"
+        PaneOpened="NavView_PaneOpened">
         <NavigationView.Resources>
             <ResourceDictionary>
                 <ResourceDictionary.ThemeDictionaries>
@@ -109,7 +112,7 @@
                     <FontIcon Glyph="&#xE93F;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="Saved words" Tag="words">
+            <NavigationViewItem x:Name="WordsNav" Content="Saved words" Tag="words">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE82D;" />
                 </NavigationViewItem.Icon>
@@ -136,18 +139,55 @@
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
         </NavigationView.MenuItems>
+        <NavigationView.PaneFooter>
+            <Grid Padding="0,4,0,8" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ToggleSwitch
+                    x:Name="LearningSwitch"
+                    MinWidth="0"
+                    VerticalAlignment="Center"
+                    AutomationProperties.Name="Learning mode"
+                    OffContent=""
+                    OnContent=""
+                    ToolTipService.ToolTip="Learning mode"
+                    Toggled="LearningSwitch_Toggled" />
+                <TextBlock
+                    x:Name="LearningLabel"
+                    Grid.Column="1"
+                    Margin="4,0,12,0"
+                    VerticalAlignment="Center"
+                    Text="Learning mode"
+                    TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </NavigationView.PaneFooter>
         <Grid>
-            <Frame x:Name="NavFrame" />
-            <Border
-                x:Name="PlayerHost"
-                HorizontalAlignment="Stretch"
-                VerticalAlignment="Stretch"
-                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="0"
-                Canvas.ZIndex="2"
-                CornerRadius="0"
-                Visibility="Collapsed" />
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <InfoBar
+                x:Name="LearningWarning"
+                Margin="16,0,16,0"
+                Closed="LearningWarning_Closed"
+                IsClosable="True"
+                IsOpen="False"
+                Severity="Warning" />
+            <Grid Grid.Row="1">
+                <Frame x:Name="NavFrame" />
+                <Border
+                    x:Name="PlayerHost"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0"
+                    Canvas.ZIndex="2"
+                    CornerRadius="0"
+                    Visibility="Collapsed" />
+            </Grid>
         </Grid>
     </NavigationView>
 </UserControl>

@@ -4,10 +4,16 @@ namespace PersonalMediaPlayer.App.Playback;
 
 internal static class PlaybackBookmarks
 {
-    private static readonly string FilePath = Path.Combine(
+    internal const int MaxNoteLength = 200;
+
+    private static readonly string DefaultFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PersonalMediaPlayer",
         "playback-bookmarks.json");
+
+    internal static string? StoreOverride { get; set; }
+
+    private static string FilePath => StoreOverride ?? DefaultFilePath;
 
     public static IReadOnlyList<Bookmark> Load(string filePath)
     {
@@ -15,6 +21,26 @@ internal static class PlaybackBookmarks
         return all.TryGetValue(filePath, out var marks)
             ? marks.OrderBy(mark => mark.TimeMs).ToArray()
             : [];
+    }
+
+    public static IReadOnlyList<Bookmark> Matching(IReadOnlyList<Bookmark> marks, string? query)
+    {
+        if (marks.Count == 0 || string.IsNullOrWhiteSpace(query))
+        {
+            return marks;
+        }
+
+        var term = query.Trim();
+        var found = new List<Bookmark>();
+        foreach (var mark in marks)
+        {
+            if (mark.Note.Contains(term, StringComparison.CurrentCultureIgnoreCase))
+            {
+                found.Add(mark);
+            }
+        }
+
+        return found;
     }
 
     public static bool Add(string filePath, long timeMs, string? note)
@@ -162,7 +188,11 @@ internal static class PlaybackBookmarks
         Write(all);
     }
 
-    private static string Clean(string? note) => (note ?? string.Empty).Trim();
+    private static string Clean(string? note)
+    {
+        var text = (note ?? string.Empty).Trim();
+        return text.Length <= MaxNoteLength ? text : text[..MaxNoteLength].TrimEnd();
+    }
 
     private static Dictionary<string, List<Bookmark>> Read()
     {

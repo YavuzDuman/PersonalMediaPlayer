@@ -27,7 +27,7 @@
                     MaxWidth="720"
                     HorizontalAlignment="Left"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="Click a word to open its video. The list stays open beside the video."
+                    Text="Click a word to open its video. Review covers each word and asks you to recall it. The list stays open beside the video."
                     TextWrapping="Wrap" />
             </StackPanel>
             <controls:WrapBar Spacing="8">
@@ -38,6 +38,13 @@
                     PlaceholderText="Search words"
                     QueryIcon="Find"
                     TextChanged="Search_TextChanged" />
+                <Button
+                    x:Name="ReviewButton"
+                    Click="Review_Click"
+                    Content="Review"
+                    IsEnabled="False"
+                    Style="{StaticResource ActionButtonStyle}"
+                    ToolTipService.ToolTip="Cover each saved word and recall it" />
                 <TextBlock
                     x:Name="CountText"
                     VerticalAlignment="Center"
@@ -59,6 +66,75 @@
                 VerticalAlignment="Top"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 TextWrapping="Wrap" />
+            <Border
+                x:Name="ReviewHost"
+                Padding="28,24"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Visibility="Collapsed">
+                <StackPanel MaxWidth="640" HorizontalAlignment="Left" Spacing="16">
+                    <TextBlock
+                        x:Name="ReviewCount"
+                        FontSize="14"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock
+                        x:Name="ReviewSource"
+                        FontSize="14"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <TextBlock
+                        x:Name="ReviewPrompt"
+                        FontSize="22"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        TextWrapping="Wrap" />
+                    <StackPanel x:Name="ReviewAnswer" Spacing="4" Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="ReviewWord"
+                            FontSize="20"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="ReviewMeaning"
+                            FontSize="16"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="ReviewSentence"
+                            FontSize="16"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                    <controls:WrapBar Spacing="8">
+                        <Button
+                            x:Name="ReviewShow"
+                            Click="ReviewShow_Click"
+                            Content="Show the word"
+                            Style="{StaticResource ActionButtonStyle}" />
+                        <Button
+                            x:Name="ReviewNext"
+                            Click="ReviewNext_Click"
+                            Content="Next"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="Collapsed" />
+                        <Button
+                            x:Name="ReviewOpen"
+                            Click="ReviewOpen_Click"
+                            Content="Open video"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="Collapsed" />
+                        <Button
+                            Click="ReviewStop_Click"
+                            Content="Back to the list"
+                            Style="{StaticResource ActionButtonStyle}" />
+                    </controls:WrapBar>
+                </StackPanel>
+            </Border>
             <Border
                 x:Name="ListHost"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"

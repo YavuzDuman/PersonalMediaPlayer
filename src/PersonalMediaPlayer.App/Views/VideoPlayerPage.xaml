@@ -9,6 +9,51 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Background="Transparent"
     mc:Ignorable="d">
+    <Page.Resources>
+        <MenuFlyout x:Name="SleepMenu">
+            <MenuFlyoutItem Click="SleepChoice_Click" Tag="off" Text="Off" />
+            <MenuFlyoutItem Click="SleepChoice_Click" Tag="1" Text="1 minute" />
+            <MenuFlyoutItem Click="SleepChoice_Click" Tag="5" Text="5 minutes" />
+            <MenuFlyoutItem Click="SleepChoice_Click" Tag="15" Text="15 minutes" />
+            <MenuFlyoutItem Click="SleepChoice_Click" Tag="30" Text="30 minutes" />
+            <MenuFlyoutItem Click="SleepChoice_Click" Tag="60" Text="60 minutes" />
+            <MenuFlyoutItem Click="SleepChoice_Click" Tag="end" Text="End of this video" />
+        </MenuFlyout>
+        <MenuFlyout x:Name="ToolsMenu" Placement="Top">
+            <MenuFlyoutItem x:Name="ToolsEdit" Click="EditVideo_Click" Text="Edit" />
+            <MenuFlyoutItem x:Name="ToolsTrim" Click="EditTrim_Click" IsEnabled="False" Text="Trim" />
+            <MenuFlyoutItem
+                x:Name="ToolsRest"
+                Click="PlayRest_Click"
+                Text="Play the rest of this folder"
+                ToolTipService.ToolTip="Queue the later videos in this folder, in the library sort" />
+            <MenuFlyoutItem
+                x:Name="ToolsSnapshot"
+                AutomationProperties.Name="Save this frame"
+                Click="Snapshot_Click"
+                Text="Save this frame" />
+            <MenuFlyoutItem
+                x:Name="ToolsCopy"
+                AutomationProperties.Name="Copy this frame"
+                Click="CopyFrame_Click"
+                Text="Copy this frame" />
+            <ToggleMenuFlyoutItem
+                x:Name="ToolsSubtitles"
+                AutomationProperties.Name="Include subtitles"
+                Click="SubtitlesInFrames_Click"
+                Text="Include subtitles"
+                ToolTipService.ToolTip="Add the subtitle on the picture to saved and copied frames" />
+            <MenuFlyoutSubItem x:Name="ToolsSleep" AutomationProperties.Name="Sleep" Text="Sleep">
+                <MenuFlyoutItem Click="SleepChoice_Click" Tag="off" Text="Off" />
+                <MenuFlyoutItem Click="SleepChoice_Click" Tag="1" Text="1 minute" />
+                <MenuFlyoutItem Click="SleepChoice_Click" Tag="5" Text="5 minutes" />
+                <MenuFlyoutItem Click="SleepChoice_Click" Tag="15" Text="15 minutes" />
+                <MenuFlyoutItem Click="SleepChoice_Click" Tag="30" Text="30 minutes" />
+                <MenuFlyoutItem Click="SleepChoice_Click" Tag="60" Text="60 minutes" />
+                <MenuFlyoutItem Click="SleepChoice_Click" Tag="end" Text="End of this video" />
+            </MenuFlyoutSubItem>
+        </MenuFlyout>
+    </Page.Resources>
 
     <Grid x:Name="RootGrid" Padding="24,8,24,24" RowSpacing="12" Background="Transparent">
         <Grid.RowDefinitions>
@@ -48,6 +93,16 @@
                 Orientation="Horizontal"
                 Spacing="8"
                 VerticalAlignment="Center">
+                <Button
+                    x:Name="ListsButton"
+                    Click="ListsButton_Click"
+                    AutomationProperties.Name="Lists"
+                    ToolTipService.ToolTip="Search, words, bookmarks, and chapters">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontSize="16" Glyph="&#xE8FD;" />
+                        <TextBlock Text="Lists" />
+                    </StackPanel>
+                </Button>
                 <Button x:Name="SaveCopyButton" Click="SaveCopy_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon FontSize="16" Glyph="&#xE896;" />
@@ -70,32 +125,7 @@
                         <TextBlock Text="Playlist" />
                     </StackPanel>
                 </Button>
-                <Button x:Name="ChaptersButton" Click="ChaptersButton_Click" ToolTipService.ToolTip="Chapters" Visibility="Collapsed">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="16" Glyph="&#xE8FD;" />
-                        <TextBlock Text="Chapters" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="SearchButton" Click="SearchButton_Click" ToolTipService.ToolTip="Search subtitles">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="16" Glyph="&#xE721;" />
-                        <TextBlock Text="Search" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="WordsButton" Click="WordsButton_Click" ToolTipService.ToolTip="Saved words">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="16" Glyph="&#xE82D;" />
-                        <TextBlock Text="Words" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="EditButton" Click="EditVideo_Click" Style="{StaticResource AccentButtonStyle}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon FontSize="16" Glyph="&#xE70F;" />
-                        <TextBlock Text="Edit" />
-                    </StackPanel>
-                </Button>
                 <Button x:Name="RestoreButton" Click="Restore_Click" Content="Restore original" Visibility="Collapsed" />
-                <Button x:Name="EditTrimButton" Click="EditTrim_Click" Content="Trim" IsEnabled="False" />
             </StackPanel>
             <StackPanel
                 x:Name="TrimActions"
@@ -116,63 +146,214 @@
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1">
+        <Grid x:Name="PlayerRow" Grid.Row="1" SizeChanged="PlayerRow_SizeChanged">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Grid>
+            <Grid x:Name="PictureGrid" SizeChanged="PictureGrid_SizeChanged">
+            <Border x:Name="PicturePlate" Background="Black" CornerRadius="16">
             <Border x:Name="VideoHost" Background="Black" CornerRadius="16">
                 <lvs:VideoView x:Name="VideoView" Initialized="VideoView_Initialized" />
             </Border>
+            </Border>
+            <Border
+                x:Name="AudioStage"
+                Background="#FF141418"
+                CornerRadius="16"
+                Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                    <FontIcon
+                        x:Name="AudioStageIcon"
+                        HorizontalAlignment="Center"
+                        FontSize="42"
+                        Foreground="White"
+                        Glyph="&#xE189;" />
+                    <TextBlock
+                        x:Name="AudioStageTitle"
+                        MaxWidth="520"
+                        HorizontalAlignment="Center"
+                        FontSize="22"
+                        FontWeight="SemiBold"
+                        Foreground="White"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Foreground="#B3FFFFFF"
+                        Text="Audio only" />
+                </StackPanel>
+            </Border>
+            <Border
+                x:Name="PictureInput"
+                Background="#01000000"
+                DoubleTapped="Picture_DoubleTapped"
+                PointerPressed="Picture_PointerPressed"
+                PointerReleased="Picture_PointerReleased" />
             <controls:HoverCaptions x:Name="Captions" />
+            <Button
+                x:Name="ListenToggle"
+                Height="36"
+                MinWidth="96"
+                Margin="0,16,0,0"
+                Padding="14,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Background="#CC1A1A1A"
+                BorderBrush="#55FFFFFF"
+                BorderThickness="1"
+                CornerRadius="18"
+                Click="Listen_Click"
+                RequestedTheme="Dark"
+                Visibility="Collapsed"
+                AutomationProperties.Name="Audio only"
+                ToolTipService.ToolTip="Audio only">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon x:Name="ListenToggleIcon" FontSize="16" Glyph="&#xE189;" />
+                    <TextBlock
+                        x:Name="ListenToggleLabel"
+                        VerticalAlignment="Center"
+                        FontSize="14"
+                        Text="Audio" />
+                </StackPanel>
+            </Button>
             <controls:VideoPlaybackBar
                 x:Name="Playback"
                 Margin="16"
                 VerticalAlignment="Bottom" />
+            </Grid>
             <Grid
-                x:Name="BookmarkHost"
-                Margin="16,16,16,88"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Stretch"
+                x:Name="ListsColumn"
+                Grid.Column="1"
+                Width="340"
+                Margin="12,0,0,0"
+                RowSpacing="8"
                 Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <Button
-                    x:Name="BookmarkToggle"
-                    Width="44"
-                    Height="44"
-                    HorizontalAlignment="Right"
-                    Click="BookmarkToggle_Click"
-                    ToolTipService.ToolTip="Bookmarks">
-                    <FontIcon FontSize="16" Glyph="&#xE700;" />
-                </Button>
-                <Border
-                    x:Name="BookmarkPanel"
-                    Grid.Row="1"
-                    Width="300"
-                    Margin="0,8,0,0"
-                    Padding="12"
-                    Background="#CC161616"
-                    CornerRadius="16"
-                    Visibility="Collapsed">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel x:Name="BookmarkList" Spacing="8" />
+                <Grid ColumnSpacing="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ScrollViewer
+                        Height="32"
+                        HorizontalScrollBarVisibility="Hidden"
+                        HorizontalScrollMode="Auto"
+                        VerticalScrollBarVisibility="Disabled"
+                        VerticalScrollMode="Disabled">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Button
+                                x:Name="SearchTab"
+                                Height="32"
+                                Padding="8,0"
+                                Click="SearchTab_Click"
+                                AutomationProperties.Name="Search"
+                                Content="Search"
+                                FontSize="13"
+                                ToolTipService.ToolTip="Search subtitles" />
+                            <Button
+                                x:Name="WordsTab"
+                                Height="32"
+                                Padding="8,0"
+                                Click="WordsTab_Click"
+                                AutomationProperties.Name="Words"
+                                Content="Words"
+                                FontSize="13"
+                                ToolTipService.ToolTip="Saved words" />
+                            <Button
+                                x:Name="BookmarksTab"
+                                Height="32"
+                                Padding="8,0"
+                                Click="BookmarksTab_Click"
+                                AutomationProperties.Name="Bookmarks"
+                                Content="Bookmarks"
+                                FontSize="13"
+                                ToolTipService.ToolTip="Bookmarks"
+                                Visibility="Collapsed" />
+                            <Button
+                                x:Name="ChaptersTab"
+                                Height="32"
+                                Padding="8,0"
+                                Click="ChaptersTab_Click"
+                                AutomationProperties.Name="Chapters"
+                                Content="Chapters"
+                                FontSize="13"
+                                ToolTipService.ToolTip="Chapters"
+                                Visibility="Collapsed" />
+                        </StackPanel>
                     </ScrollViewer>
-                </Border>
+                    <Button
+                        x:Name="ListsClose"
+                        Grid.Column="1"
+                        Width="32"
+                        Height="32"
+                        Padding="0"
+                        Click="ListsClose_Click"
+                        AutomationProperties.Name="Close lists"
+                        ToolTipService.ToolTip="Close">
+                        <FontIcon FontSize="12" Glyph="&#xE8BB;" />
+                    </Button>
+                </Grid>
+                <Grid Grid.Row="1">
+                    <controls:SubtitleSearchPanel
+                        x:Name="SubtitleSearchPanel"
+                        HorizontalAlignment="Stretch"
+                        Visibility="Collapsed" />
+                    <controls:SavedWordsPanel
+                        x:Name="WordsPanel"
+                        HorizontalAlignment="Stretch"
+                        Visibility="Collapsed" />
+                    <Border
+                        x:Name="BookmarkPanel"
+                        Padding="12"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Visibility="Collapsed">
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBox
+                                x:Name="BookmarkSearch"
+                                PlaceholderText="Search notes"
+                                AutomationProperties.Name="Search notes"
+                                TextChanged="BookmarkSearch_TextChanged" />
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="BookmarkList" Spacing="8" />
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                    <controls:ChapterPanel
+                        x:Name="ChapterPanel"
+                        HorizontalAlignment="Stretch"
+                        Visibility="Collapsed" />
+                </Grid>
             </Grid>
-            </Grid>
-            <controls:ChapterPanel
-                x:Name="ChapterPanel"
+            <controls:ResizeGrip
+                x:Name="ListsGrip"
                 Grid.Column="1"
-                Margin="12,0,0,0"
-                Visibility="Collapsed" />
+                Width="12"
+                Margin="0,8,0,8"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Visibility="Collapsed"
+                PointerPressed="ListsGrip_Pressed"
+                PointerMoved="ListsGrip_Moved"
+                PointerReleased="ListsGrip_Released"
+                PointerCanceled="ListsGrip_Released"
+                PointerCaptureLost="ListsGrip_Released"
+                AutomationProperties.Name="Resize lists"
+                ToolTipService.ToolTip="Drag to resize" />
             <controls:QueuePanel
                 x:Name="QueuePanel"
                 Grid.Column="2"
@@ -181,16 +362,6 @@
             <controls:PlaylistPanel
                 x:Name="PlaylistPanel"
                 Grid.Column="3"
-                Margin="12,0,0,0"
-                Visibility="Collapsed" />
-            <controls:SavedWordsPanel
-                x:Name="WordsPanel"
-                Grid.Column="4"
-                Margin="12,0,0,0"
-                Visibility="Collapsed" />
-            <controls:SubtitleSearchPanel
-                x:Name="SubtitleSearchPanel"
-                Grid.Column="5"
                 Margin="12,0,0,0"
                 Visibility="Collapsed" />
         </Grid>
@@ -290,21 +461,52 @@
                     Content="Next"
                     IsEnabled="False"
                     ToolTipService.ToolTip="Play the next waiting video, then the next playlist video" />
+                <Button
+                    x:Name="MiniSleep"
+                    Width="36"
+                    Height="36"
+                    Padding="0"
+                    AutomationProperties.Name="Sleep timer"
+                    Click="Sleep_Click"
+                    ToolTipService.ToolTip="Sleep timer">
+                    <FontIcon FontSize="14" Glyph="&#xE823;" />
+                </Button>
             </StackPanel>
             <Grid Grid.Row="3" ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Slider
                     x:Name="MiniVolume"
-                    Maximum="100"
+                    Maximum="200"
                     Minimum="0"
                     AutomationProperties.Name="Volume"
+                    ToolTipService.ToolTip="Volume. 100% is the usual level. Up to 200% when a video is quiet."
                     VerticalAlignment="Center" />
-                <Button
+                <TextBlock
+                    x:Name="MiniVolumeText"
                     Grid.Column="1"
+                    MinWidth="36"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Text="80%" />
+                <Button
+                    x:Name="MiniPin"
+                    Grid.Column="2"
+                    Width="36"
+                    Height="36"
+                    Padding="0"
+                    AutomationProperties.Name="Keep on top"
+                    Click="MiniPin_Click"
+                    ToolTipService.ToolTip="Keep this video above other apps">
+                    <FontIcon x:Name="MiniPinIcon" FontSize="14" Glyph="&#xE718;" />
+                </Button>
+                <Button
+                    Grid.Column="3"
                     Width="36"
                     Height="36"
                     Padding="0"
@@ -314,7 +516,7 @@
                     <FontIcon FontSize="14" Glyph="&#xE740;" />
                 </Button>
                 <Button
-                    Grid.Column="2"
+                    Grid.Column="4"
                     Width="36"
                     Height="36"
                     Padding="0"

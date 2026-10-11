@@ -6,6 +6,8 @@ internal readonly record struct PlaybackVolumeState(double Level, double Audible
 
 internal static class PlaybackVolume
 {
+    // LibVLC's DirectSound output accepts 0 through 2.0, which is 0% through 200%.
+    internal const double MaximumLevel = 200;
     private static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PersonalMediaPlayer",
@@ -95,8 +97,10 @@ internal static class PlaybackVolume
             return fallback;
         }
 
-        return Math.Clamp(Math.Round(value), 0, 100);
+        return Math.Clamp(Math.Round(value), 0, MaximumLevel);
     }
+
+    internal static double Limit(double value, double fallback) => Clamp(value, fallback);
 
     private sealed record SavedVolume(double Level, double Audible);
 }

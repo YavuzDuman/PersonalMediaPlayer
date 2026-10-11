@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Runtime.InteropServices.WindowsRuntime;
 using LibVLCSharp.Platforms.Windows;
 using LibVLCSharp.Shared;
 using Microsoft.UI;
@@ -7,7 +8,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
+using PersonalMediaPlayer.App.Controls;
 using PersonalMediaPlayer.App.Editing;
 using PersonalMediaPlayer.App.Helpers;
 using PersonalMediaPlayer.App.Playback;
@@ -52,12 +55,17 @@ public sealed partial class MergePage : Page, IPlaybackSource
     private MergeClip? _handleClip;
     private bool _handleStart;
     private Grid? _handleHost;
+    private const double ClipWaveHeight = 32;
+
     private readonly List<ClipLane> _lanes = [];
+    private int _waveGeneration;
     private long _seekHoldMs = -1;
     private int _seekHoldTicks;
     private bool _holdPause;
     private bool _pausedForOther;
-    private bool _dirty;
+    private string? _draftId;
+    private MergeDraft? _savedWork;
+    private int _resumeIndex = -1;
     private bool _allowLeave;
     private bool _closeWindow;
     private bool _pendingIsBack;
@@ -71,6 +79,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
     private bool _replacing;
     private bool _ignoreClipClick;
     private int _generation;
+    private readonly PreviewSleep _sleep = new();
 
     public MergePage()
     {
@@ -89,6 +98,8 @@ public sealed partial class MergePage : Page, IPlaybackSource
         Playback.PlayButton.Click += Play_Click;
         Playback.BackButton.Click += (_, _) => Skip(-10_000);
         Playback.ForwardButton.Click += (_, _) => Skip(10_000);
+        Playback.SleepButton.Click += (_, _) => _sleep.Show(Playback.SleepButton);
+        _sleep.Changed += () => _sleep.Paint(Playback.SleepButton, Playback.SleepLabel);
         Playback.SeekSlider.AddHandler(PointerPressedEvent, new PointerEventHandler(Seek_Pressed), true);
         Playback.SeekSlider.AddHandler(PointerReleasedEvent, new PointerEventHandler(Seek_Released), true);
         Playback.SeekSlider.AddHandler(PointerCanceledEvent, new PointerEventHandler(Seek_Released), true);
@@ -142,6 +153,19 @@ public sealed partial class MergePage : Page, IPlaybackSource
         {
             _pendingReturn = null;
             _pendingClip = null;
+            if (_clips.Count == 0)
+            {
+                return;
+            }
+
+            var resume = _resumeIndex >= 0 && _resumeIndex < _clips.Count ? _resumeIndex : 0;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (generation == _generation && ReferenceEquals(Frame?.Content, this))
+                {
+                    OpenClip(resume, 0);
+                }
+            });
             return;
         }
 
@@ -177,22 +201,41 @@ public sealed partial class MergePage : Page, IPlaybackSource
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         _generation++;
-        // The editor trip sets _pendingReturn before Navigate, so those clips stay for Back.
-        // Any other leave clears them. The page stays cached, and the next visit starts empty.
-        var keep = _pendingReturn is not null;
-        ReleasePlayer();
-        if (!keep)
+        // The list stays on this cached page. Discard, or removing the last clip, is what clears it.
+        // The player surface cannot be reused after it unloads, so the next visit creates a new one.
+        _resumeIndex = _clipIndex;
+        if (_handleClip is not null)
         {
             _handleClip = null;
-            _dirty = false;
-            _clips.Clear();
-            Refresh();
         }
 
+        ReleasePlayer();
         base.OnNavigatedFrom(e);
     }
 
-    private bool HasWork => _merge is not null || (_dirty && _clips.Count > 0);
+    private bool HasWork => _merge is not null || MergeDiffers();
+
+    private bool MergeDiffers()
+        => WorkDrafts.MergeDiffersFromSaved(_savedWork, _clips.Count == 0 ? null : CaptureMergeDraft());
+
+    private void RememberMerge()
+    {
+        _savedWork = _clips.Count == 0 ? null : WorkDrafts.CopyMerge(CaptureMergeDraft());
+    }
+
+    private void ForgetDraft()
+    {
+        _draftId = null;
+        _savedWork = null;
+    }
+
+    private void ForgetDraftIfEmpty()
+    {
+        if (_clips.Count == 0)
+        {
+            ForgetDraft();
+        }
+    }
 
     internal bool TryHandleHostClose()
     {
@@ -226,6 +269,11 @@ public sealed partial class MergePage : Page, IPlaybackSource
         }
 
         var startPreview = _clips.Count == 0;
+        if (startPreview)
+        {
+            ForgetDraft();
+        }
+
         SetBusy(true, "Reading the videos…");
         try
         {
@@ -245,11 +293,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
         finally
         {
             SetBusy(false, null);
-            if (_clips.Count > 0)
-            {
-                _dirty = true;
-            }
-
             Refresh();
             if (startPreview && _clips.Count > 0)
             {
@@ -258,6 +301,285 @@ public sealed partial class MergePage : Page, IPlaybackSource
             else
             {
                 ShowTrim();
+            }
+        }
+    }
+
+    private async void Drafts_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || _merge is not null)
+        {
+            Show(InfoBarSeverity.Informational, _merge is not null ? "These videos are still being joined." : "Wait until the videos finish opening.");
+            return;
+        }
+
+        var chosen = await ShowDraftsAsync();
+        if (chosen is null)
+        {
+            return;
+        }
+
+        if (MergeDiffers())
+        {
+            var confirm = new ContentDialog
+            {
+                Title = "Open this draft?",
+                Content = "The clips on screen are replaced. Save a draft first if you want to keep them.",
+                PrimaryButtonText = "Open",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot
+            };
+            if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+
+        LoadMergeDraft(chosen);
+    }
+
+    private async Task<MergeDraft?> ShowDraftsAsync()
+    {
+        var list = new StackPanel { Spacing = 8 };
+        var scroll = new ScrollViewer { MaxHeight = 360, Content = list };
+        MergeDraft? chosen = null;
+        var dialog = new ContentDialog
+        {
+            Title = "Drafts",
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Width = 420,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Save draft keeps these clips, their order, and the trims and fades. The video files stay where they are.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    scroll
+                }
+            },
+            PrimaryButtonText = "Save draft",
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = _clips.Count > 0,
+            XamlRoot = XamlRoot
+        };
+
+        void Fill()
+        {
+            list.Children.Clear();
+            var drafts = WorkDrafts.Merges();
+            if (drafts.Count == 0)
+            {
+                list.Children.Add(new TextBlock { Text = "No drafts yet.", Opacity = 0.7 });
+                return;
+            }
+
+            foreach (var draft in drafts)
+            {
+                var moved = draft.Clips.Count(clip => !File.Exists(clip.Path));
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var text = new StackPanel { Spacing = 2 };
+                text.Children.Add(new TextBlock { Text = draft.Name, TextTrimming = TextTrimming.CharacterEllipsis });
+                text.Children.Add(new TextBlock
+                {
+                    Text = WorkDrafts.When(draft.SavedUtc) + (moved == 0 ? "" : moved == 1 ? " · 1 video moved" : $" · {moved} videos moved"),
+                    FontSize = 12,
+                    Opacity = 0.7
+                });
+                var open = new Button { Content = "Open", MinWidth = 72 };
+                var remove = new Button { Content = "Remove" };
+                open.Click += (_, _) =>
+                {
+                    chosen = draft;
+                    dialog.Hide();
+                };
+                remove.Click += (_, _) =>
+                {
+                    WorkDrafts.RemoveMerge(draft.Id);
+                    if (_draftId == draft.Id)
+                    {
+                        ForgetDraft();
+                    }
+
+                    Fill();
+                };
+                Grid.SetColumn(text, 0);
+                Grid.SetColumn(open, 1);
+                Grid.SetColumn(remove, 2);
+                row.Children.Add(text);
+                row.Children.Add(open);
+                row.Children.Add(remove);
+                list.Children.Add(row);
+            }
+        }
+
+        Fill();
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            SaveMergeDraft();
+            return null;
+        }
+
+        return chosen;
+    }
+
+    private void SaveMergeDraft()
+    {
+        if (_clips.Count == 0)
+        {
+            Show(InfoBarSeverity.Informational, "Add a video before saving a draft.");
+            return;
+        }
+
+        var draft = CaptureMergeDraft();
+        var snapshot = WorkDrafts.CopyMerge(draft);
+        var saved = WorkDrafts.SaveMerge(draft);
+        if (saved is null)
+        {
+            Show(InfoBarSeverity.Error, "The draft could not be saved.");
+            return;
+        }
+
+        _draftId = saved.Id;
+        _savedWork = snapshot;
+        Show(InfoBarSeverity.Success, "Draft saved. It stays on this PC after you close the app.");
+    }
+
+    private MergeDraft CaptureMergeDraft()
+    {
+        var remembered = string.IsNullOrEmpty(_draftId) ? null : WorkDrafts.Merge(_draftId)?.Name;
+        return new MergeDraft
+        {
+            Id = _draftId ?? string.Empty,
+            Name = remembered ?? (_clips.Count == 1 ? Path.GetFileNameWithoutExtension(_clips[0].Name) : _clips.Count + " videos"),
+            Clips = _clips.Select(clip => new MergeClipDraft
+            {
+                Path = clip.Source.Path,
+                Name = clip.Name,
+                DurationSeconds = clip.Source.DurationSeconds,
+                StartSeconds = clip.StartSeconds,
+                EndSeconds = clip.EndSeconds,
+                HasAudio = clip.Source.HasAudio,
+                Width = clip.Source.Width,
+                Height = clip.Source.Height,
+                VideoFadeIn = clip.VideoFadeIn,
+                VideoFadeInSeconds = clip.VideoFadeInSeconds,
+                VideoFadeOut = clip.VideoFadeOut,
+                VideoFadeOutSeconds = clip.VideoFadeOutSeconds,
+                AudioFadeIn = clip.AudioFadeIn,
+                AudioFadeInSeconds = clip.AudioFadeInSeconds,
+                AudioFadeOut = clip.AudioFadeOut,
+                AudioFadeOutSeconds = clip.AudioFadeOutSeconds
+            }).ToList()
+        };
+    }
+
+    private void LoadMergeDraft(MergeDraft draft)
+    {
+        try
+        {
+            _player?.Stop();
+        }
+        catch (Exception)
+        {
+            // The preview can already be stopped.
+        }
+
+        _generation++;
+        _clips.Clear();
+        _current = null;
+        _clipIndex = -1;
+        var order = 1;
+        foreach (var clip in draft.Clips)
+        {
+            var item = new MergeClip(
+                new MergeSource(clip.Path, clip.DurationSeconds, clip.HasAudio, clip.Width, clip.Height),
+                NextSwatch(),
+                order++);
+            item.SetSpan(clip.StartSeconds, clip.EndSeconds);
+            item.SetFades(
+                clip.VideoFadeIn,
+                clip.VideoFadeInSeconds,
+                clip.VideoFadeOut,
+                clip.VideoFadeOutSeconds,
+                clip.AudioFadeIn,
+                clip.AudioFadeInSeconds,
+                clip.AudioFadeOut,
+                clip.AudioFadeOutSeconds);
+            _clips.Add(item);
+        }
+
+        _draftId = draft.Id;
+        RememberMerge();
+        Refresh();
+        if (_clips.Count > 0)
+        {
+            OpenClip(0, 0);
+        }
+
+        var moved = _clips.Count(clip => !File.Exists(clip.Source.Path));
+        Show(moved > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+            moved > 0
+                ? "Draft opened. Find each moved video. The order, trims, and fades stay."
+                : "Draft opened.");
+    }
+
+    private async void FindClip_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not MergeClip clip || _busy)
+        {
+            return;
+        }
+
+        _ignoreClipClick = true;
+        DispatcherQueue.TryEnqueue(() => _ignoreClipClick = false);
+        var picked = await FilePickerHelper.PickSingleVideoAsync(App.MainAppWindow);
+        if (picked is null)
+        {
+            return;
+        }
+
+        var failure = false;
+        try
+        {
+            SetBusy(true, "Reading the video…");
+            var source = await VideoMerger.ProbeAsync(picked.Path);
+            clip.UseFoundFile(source);
+            if (!string.IsNullOrEmpty(_draftId))
+            {
+                var saved = WorkDrafts.SaveMerge(CaptureMergeDraft());
+                if (saved is not null)
+                {
+                    _draftId = saved.Id;
+                    RememberMerge();
+                }
+            }
+
+            Refresh();
+            var index = _clips.IndexOf(clip);
+            if (index >= 0)
+            {
+                OpenClip(index, 0);
+            }
+        }
+        catch (Exception ex)
+        {
+            failure = true;
+            Show(InfoBarSeverity.Error, ex.Message);
+        }
+        finally
+        {
+            SetBusy(false, null);
+            if (!failure)
+            {
+                Show(InfoBarSeverity.Success, "Found. The trim and fades stay on this clip.");
             }
         }
     }
@@ -306,7 +628,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
             clip.AudioFadeOutSeconds);
         var handoff = new MergeClipReturn();
         var launch = new EditorLaunch(ItemFor(clip.Source.Path), Array.Empty<SubtitleCue>(), seed, handoff);
-        // Set before Navigate. OnNavigatedFrom keeps this list only while the ticket is set.
+        // Set before Navigate. Back finds this same list and puts the file into this clip.
         _pendingReturn = handoff;
         _pendingClip = clip;
         ReleasePlayer();
@@ -381,7 +703,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
                 sharedFile = true;
             }
 
-            _dirty = true;
             replaced = true;
             Refresh();
             OpenClip(index, 0);
@@ -488,6 +809,12 @@ public sealed partial class MergePage : Page, IPlaybackSource
             return false;
         }
 
+        if (_clips.Any(clip => !File.Exists(clip.Source.Path)))
+        {
+            Show(InfoBarSeverity.Error, "A video was moved. Find it before joining. The draft can still be saved.");
+            return false;
+        }
+
         var choice = await AskSaveAsync();
         if (choice is null)
         {
@@ -526,7 +853,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
                 savedTo = string.IsNullOrWhiteSpace(choice.Album) ? "the library" : choice.Album!;
             }
 
-            _dirty = false;
+            RememberMerge();
             Show(InfoBarSeverity.Success, "Saved the video to " + savedTo);
             return true;
         }
@@ -562,12 +889,22 @@ public sealed partial class MergePage : Page, IPlaybackSource
     private void ShowLeavePrompt()
     {
         var joining = _merge is not null;
-        LeaveTitle.Text = joining
-            ? "These videos are still being joined."
-            : "These videos are not saved as one file.";
-        LeaveDetail.Text = joining
-            ? "Stay until the save finishes, or discard this merge."
-            : "Save them before leaving, or discard this merge.";
+        if (joining)
+        {
+            LeaveTitle.Text = "These videos are still being joined.";
+            LeaveDetail.Text = "Stay until the save finishes, or discard this merge.";
+        }
+        else if (!string.IsNullOrEmpty(_draftId))
+        {
+            LeaveTitle.Text = "These changes are not in the draft.";
+            LeaveDetail.Text = "Save joins them into one video. Discard leaves this page. The saved draft stays on this PC.";
+        }
+        else
+        {
+            LeaveTitle.Text = "These videos are not saved as one file.";
+            LeaveDetail.Text = "Save them before leaving, or discard this merge.";
+        }
+
         LeaveSaveButton.Visibility = joining ? Visibility.Collapsed : Visibility.Visible;
         LeavePrompt.Visibility = Visibility.Visible;
     }
@@ -594,8 +931,8 @@ public sealed partial class MergePage : Page, IPlaybackSource
         _generation++;
         _pendingReturn = null;
         _pendingClip = null;
-        _dirty = false;
         _clips.Clear();
+        ForgetDraft();
         SetBusy(false, null);
         ReleasePlayer();
         Refresh();
@@ -766,7 +1103,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
         }
 
         _clips.Insert(index + 1, clip.Copy(NextSwatch(), index + 2));
-        _dirty = true;
         if (_current is not null)
         {
             _clipIndex = _clips.IndexOf(_current);
@@ -785,7 +1121,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
         var index = _clips.IndexOf(clip);
         var current = clip == _current;
         _clips.Remove(clip);
-        _dirty = _clips.Count > 0;
+        ForgetDraftIfEmpty();
         Refresh();
         if (!current)
         {
@@ -822,7 +1158,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
     private void Clips_Reordered(ListViewBase sender, DragItemsCompletedEventArgs e)
     {
-        _dirty = _clips.Count > 0;
         Refresh();
     }
 
@@ -841,7 +1176,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
         }
 
         _clips.Move(index, next);
-        _dirty = true;
         Refresh();
         if (_current is not null)
         {
@@ -878,10 +1212,13 @@ public sealed partial class MergePage : Page, IPlaybackSource
         TimelineBar.Children.Clear();
         TimelineBar.ColumnDefinitions.Clear();
         _lanes.Clear();
+        _waveGeneration++;
         if (_clips.Count == 0 || total <= 0)
         {
             return;
         }
+
+        var waveGeneration = _waveGeneration;
 
         for (var index = 0; index < _clips.Count; index++)
         {
@@ -892,7 +1229,7 @@ public sealed partial class MergePage : Page, IPlaybackSource
             });
             var host = new Grid { Margin = new Thickness(index == 0 ? 0 : 2, 0, 0, 0) };
             host.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            host.RowDefinitions.Add(new RowDefinition { Height = new GridLength(28) });
+            host.RowDefinitions.Add(new RowDefinition { Height = new GridLength(ClipWaveHeight) });
             var badge = new Border
             {
                 Height = 16,
@@ -934,16 +1271,58 @@ public sealed partial class MergePage : Page, IPlaybackSource
             Grid.SetColumn(leftHandle, 1);
             Grid.SetColumn(rightHandle, 1);
             Grid.SetColumn(tailBody, 2);
+            var wave = new Canvas
+            {
+                IsHitTestVisible = false,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+            Grid.SetColumnSpan(wave, 3);
+            var headMask = new Border
+            {
+                Height = ClipWaveHeight,
+                Background = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)),
+                IsHitTestVisible = false
+            };
+            var tailMask = new Border
+            {
+                Height = ClipWaveHeight,
+                Background = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)),
+                IsHitTestVisible = false
+            };
+            wave.Children.Add(headMask);
+            wave.Children.Add(tailMask);
             track.Children.Add(headBody);
             track.Children.Add(keptBody);
             track.Children.Add(tailBody);
+            track.Children.Add(wave);
             track.Children.Add(leftHandle);
             track.Children.Add(rightHandle);
             Grid.SetRow(track, 1);
             host.Children.Add(badge);
             host.Children.Add(track);
-            var lane = new ClipLane(clip, host, head, kept, tail);
+            var lane = new ClipLane(clip, host, head, kept, tail)
+            {
+                WaveCanvas = wave,
+                HeadMask = headMask,
+                TailMask = tailMask
+            };
             FitLane(lane);
+            if (clip.Source.HasAudio)
+            {
+                var loading = lane;
+                host.SizeChanged += (_, _) =>
+                {
+                    if (loading.WaveCanvas is not null)
+                    {
+                        loading.WaveCanvas.Width = Math.Max(0, host.ActualWidth);
+                    }
+
+                    PlaceWaveMask(loading);
+                    PaintLaneWave(loading);
+                };
+                _ = LoadLaneWaveAsync(loading, waveGeneration);
+            }
             var clipIndex = index;
             leftHandle.PointerPressed += (_, args) => BeginHandle(clip, start: true, host, args);
             rightHandle.PointerPressed += (_, args) => BeginHandle(clip, start: false, host, args);
@@ -1025,12 +1404,134 @@ public sealed partial class MergePage : Page, IPlaybackSource
         args.Handled = true;
     }
 
-    private static void FitLane(ClipLane lane)
+    private void FitLane(ClipLane lane)
     {
         var duration = Math.Max(0.1, lane.Clip.Source.DurationSeconds);
         lane.Head.Width = new GridLength(Math.Max(0, lane.Clip.StartSeconds), GridUnitType.Star);
         lane.Kept.Width = new GridLength(Math.Max(0.1, lane.Clip.KeptSeconds), GridUnitType.Star);
         lane.Tail.Width = new GridLength(Math.Max(0, duration - lane.Clip.EndSeconds), GridUnitType.Star);
+        PlaceWaveMask(lane);
+    }
+
+    private async Task LoadLaneWaveAsync(ClipLane lane, int generation)
+    {
+        if (!File.Exists(lane.Clip.Source.Path))
+        {
+            return;
+        }
+
+        AudioWaveform.Levels? levels = null;
+        for (var attempt = 0; attempt < 4 && generation == _waveGeneration; attempt++)
+        {
+            try
+            {
+                levels = await AudioWaveform.ReadAsync(lane.Clip.Source.Path);
+            }
+            catch (Exception)
+            {
+                levels = null;
+            }
+
+            if (levels is not null)
+            {
+                break;
+            }
+
+            if (attempt < 3)
+            {
+                await Task.Delay(500);
+            }
+        }
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (generation != _waveGeneration || !_lanes.Contains(lane) || levels is null || !levels.Value.HasPeaks)
+            {
+                return;
+            }
+
+            lane.Wave = levels.Value;
+            lane.WaveReady = true;
+            PaintLaneWave(lane);
+        });
+    }
+
+    private void PaintLaneWave(ClipLane lane)
+    {
+        if (!lane.WaveReady || lane.WaveCanvas is null || !lane.Wave.HasPeaks)
+        {
+            return;
+        }
+
+        var width = lane.WaveCanvas.ActualWidth > 1 ? lane.WaveCanvas.ActualWidth : lane.Host.ActualWidth;
+        if (width <= 1)
+        {
+            return;
+        }
+
+        var scale = lane.Host.XamlRoot?.RasterizationScale ?? 1;
+        if (scale < 1 || double.IsNaN(scale))
+        {
+            scale = 1;
+        }
+
+        var pixelWidth = Math.Clamp((int)Math.Round(width * scale), 1, 8192);
+        var pixelHeight = Math.Clamp((int)Math.Round(ClipWaveHeight * scale), 1, 256);
+        var window = AudioWaveform.Window(
+            lane.Wave,
+            Math.Max(0.1, lane.Clip.Source.DurationSeconds),
+            0,
+            1,
+            Math.Max(1, pixelWidth / 2));
+        var pixels = new byte[pixelWidth * pixelHeight * 4];
+        AudioWaveform.Paint(window, pixels, pixelWidth, pixelHeight, 245, 250, 255, 235);
+        var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);
+        using (var stream = bitmap.PixelBuffer.AsStream())
+        {
+            stream.Write(pixels, 0, pixels.Length);
+        }
+
+        bitmap.Invalidate();
+        if (lane.WaveImage is null)
+        {
+            lane.WaveImage = new Image
+            {
+                IsHitTestVisible = false,
+                Stretch = Stretch.Fill,
+                Height = ClipWaveHeight
+            };
+            lane.WaveCanvas.Children.Insert(0, lane.WaveImage);
+        }
+
+        lane.WaveImage.Width = width;
+        lane.WaveImage.Source = bitmap;
+        PlaceWaveMask(lane);
+    }
+
+    private static void PlaceWaveMask(ClipLane lane)
+    {
+        if (lane.HeadMask is null || lane.TailMask is null)
+        {
+            return;
+        }
+
+        var width = lane.WaveCanvas?.ActualWidth > 1 ? lane.WaveCanvas.ActualWidth : lane.Host.ActualWidth;
+        if (width <= 1)
+        {
+            return;
+        }
+
+        var duration = Math.Max(0.1, lane.Clip.Source.DurationSeconds);
+        var head = Math.Clamp(lane.Clip.StartSeconds / duration, 0, 1) * width;
+        var tail = Math.Clamp(lane.Clip.EndSeconds / duration, 0, 1) * width;
+        lane.HeadMask.Width = Math.Max(0, head);
+        lane.HeadMask.Height = ClipWaveHeight;
+        lane.TailMask.Width = Math.Max(0, width - tail);
+        lane.TailMask.Height = ClipWaveHeight;
+        Canvas.SetLeft(lane.HeadMask, 0);
+        Canvas.SetLeft(lane.TailMask, tail);
+        Canvas.SetTop(lane.HeadMask, 0);
+        Canvas.SetTop(lane.TailMask, 0);
     }
 
     private async Task<MergeSaveChoice?> AskSaveAsync()
@@ -1149,6 +1650,16 @@ public sealed partial class MergePage : Page, IPlaybackSource
         _clipIndex = index;
         _current = _clips[index];
         _queuedPath = _current.Source.Path;
+        if (!File.Exists(_queuedPath))
+        {
+            PreviewHint.Text = _current.Name + " was moved. Find it to play this spot. The trim and fades stay.";
+            PreviewHint.Visibility = Visibility.Visible;
+            ShowTrim();
+            UpdatePlayIcon();
+            return;
+        }
+
+        PreviewHint.Text = "The preview plays your clips in this order.";
         var keptOffset = Math.Clamp(offsetMs, 0, Math.Max(0, ClipMs(_current) - 50));
         _queuedSeek = _current.StartMs + keptOffset;
         PreviewHint.Visibility = Visibility.Collapsed;
@@ -1446,6 +1957,16 @@ public sealed partial class MergePage : Page, IPlaybackSource
         }
     }
 
+    private void PauseForSleep()
+    {
+        if (_player is not { IsPlaying: true })
+        {
+            return;
+        }
+
+        _player.SetPause(true);
+    }
+
     private void UpdateClock()
     {
         if (_queuedSeek < 0
@@ -1458,9 +1979,22 @@ public sealed partial class MergePage : Page, IPlaybackSource
             _advance = true;
         }
 
+        var slept = _sleep.Tick(PauseForSleep);
         if (_advance)
         {
             _advance = false;
+            if (slept || _sleep.HoldAtEnd())
+            {
+                PauseForSleep();
+                if (_clipIndex + 1 >= _clips.Count)
+                {
+                    _ended = true;
+                }
+
+                UpdatePlayIcon();
+                return;
+            }
+
             if (_clipIndex + 1 < _clips.Count)
             {
                 OpenClip(_clipIndex + 1, 0);
@@ -1621,7 +2155,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
             FadeSeconds(AudioFadeInSeconds),
             AudioFadeOutBox.IsChecked == true,
             FadeSeconds(AudioFadeOutSeconds));
-        _dirty = true;
         ApplyPreviewFade();
     }
 
@@ -1798,7 +2331,6 @@ public sealed partial class MergePage : Page, IPlaybackSource
         }
 
         clip.SetSpan(start, end);
-        _dirty = true;
         if (!redraw)
         {
             var lane = _lanes.FirstOrDefault(item => item.Clip == clip);
@@ -2011,6 +2543,18 @@ public sealed partial class MergePage : Page, IPlaybackSource
         public ColumnDefinition Kept { get; } = kept;
 
         public ColumnDefinition Tail { get; } = tail;
+
+        public AudioWaveform.Levels Wave { get; set; } = AudioWaveform.Levels.Empty;
+
+        public bool WaveReady { get; set; }
+
+        public Canvas? WaveCanvas { get; init; }
+
+        public Image? WaveImage { get; set; }
+
+        public Border? HeadMask { get; init; }
+
+        public Border? TailMask { get; init; }
     }
 
     private sealed class MergeClip : INotifyPropertyChanged
@@ -2035,7 +2579,9 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
         public MergeSource Source { get; private set; }
 
-        public string Name { get; }
+        public string Name { get; private set; } = string.Empty;
+
+        public Visibility FindVisibility => File.Exists(Source.Path) ? Visibility.Collapsed : Visibility.Visible;
 
         public double StartSeconds => _start;
 
@@ -2090,6 +2636,16 @@ public sealed partial class MergePage : Page, IPlaybackSource
             SetSpan(span.Start, span.End);
         }
 
+        public void UseFoundFile(MergeSource source)
+        {
+            Source = source;
+            Name = Path.GetFileName(source.Path);
+            var span = MergeHandoff.FitSpan(_start, _end, source.DurationSeconds);
+            SetSpan(span.Start, span.End);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FindVisibility)));
+        }
+
         public void SetFades(bool videoIn, double videoInSeconds, bool videoOut, double videoOutSeconds, bool audioIn, double audioInSeconds, bool audioOut, double audioOutSeconds)
         {
             VideoFadeIn = videoIn;
@@ -2114,6 +2670,11 @@ public sealed partial class MergePage : Page, IPlaybackSource
 
         private string Describe()
         {
+            if (!File.Exists(Source.Path))
+            {
+                return "Moved. Find this video. The trim and fades stay.";
+            }
+
             var sound = Source.HasAudio ? "sound included" : "no audio, silence keeps the next clip in time";
             var fades = VideoFadeIn || VideoFadeOut || AudioFadeIn || AudioFadeOut ? " · fades" : string.Empty;
             return Format(_start) + "–" + Format(_end) + " kept · " + sound + fades;

@@ -147,6 +147,11 @@
                     </Button.KeyboardAccelerators>
                     <FontIcon FontSize="16" Glyph="&#xE7A6;" />
                 </Button>
+                <Button
+                    Click="Drafts_Click"
+                    Content="Drafts"
+                    Style="{StaticResource EditorChip}"
+                    ToolTipService.ToolTip="Save this edit on this PC and open it again later." />
                 <Button Click="Cancel_Click" Content="Cancel" Style="{StaticResource EditorChip}" />
                 <Button
                     x:Name="ExportCaptionsButton"
@@ -547,10 +552,13 @@
             <Border Padding="24" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="18" MaxWidth="420">
                 <StackPanel Spacing="12">
                     <TextBlock
+                        x:Name="LeavePromptTitle"
                         Style="{StaticResource BodyStrongTextBlockStyle}"
                         Text="These edits are not saved."
-                        TextAlignment="Center" />
+                        TextAlignment="Center"
+                        TextWrapping="Wrap" />
                     <TextBlock
+                        x:Name="LeavePromptDetail"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Text="Leave without keeping them?"
                         TextAlignment="Center"

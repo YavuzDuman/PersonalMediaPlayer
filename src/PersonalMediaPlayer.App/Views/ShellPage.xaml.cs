@@ -28,7 +28,9 @@ public sealed partial class ShellPage : UserControl
     private StreamOpenRequest? _heldStream;
     private VideoPlayerPage? _playerPage;
     private PlayerSlot _playerSlot = PlayerSlot.Hidden;
+    private bool _floating;
     private bool _restoredWatching;
+    private bool _syncingLearning = true;
 
     public ShellPage()
     {
@@ -36,6 +38,9 @@ public sealed partial class ShellPage : UserControl
         NavigationHelper.ContentFrame = NavFrame;
         NavigationHelper.RequestCapture = OpenCapture;
         NavFrame.Navigated += NavFrame_Navigated;
+        LearningMode.Changed += OnLearningModeChanged;
+        Unloaded += (_, _) => LearningMode.Changed -= OnLearningModeChanged;
+        ApplyLearningChrome();
     }
 
     public bool ShowBackButton
@@ -74,7 +79,11 @@ public sealed partial class ShellPage : UserControl
 
         NavView.IsPaneOpen = false;
         NavView.IsSettingsVisible = false;
+        NavView.CompactPaneLength = 0;
+        NavView.OpenPaneLength = 0;
+        NavView.PaneDisplayMode = NavigationViewPaneDisplayMode.LeftMinimal;
         NavView.IsPaneVisible = false;
+        SyncLearningLabel();
     }
 
     public void EnsurePaneAvailable()
@@ -88,6 +97,8 @@ public sealed partial class ShellPage : UserControl
         {
             NavView.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
         }
+
+        SyncLearningLabel();
     }
 
     private void NavView_Loaded(object sender, RoutedEventArgs e)
@@ -107,6 +118,7 @@ public sealed partial class ShellPage : UserControl
         }
 
         NameSettingsInEnglish();
+        ApplyLearningChrome();
         RestoreWatching();
     }
 
@@ -155,6 +167,12 @@ public sealed partial class ShellPage : UserControl
                 NavigateToSection(typeof(PlaylistsPage));
                 break;
             case "words":
+                if (!LearningMode.Enabled)
+                {
+                    SyncNavSelection();
+                    break;
+                }
+
                 NavigateToSection(typeof(SavedWordsPage));
                 break;
             case "recordings":
@@ -527,8 +545,29 @@ public sealed partial class ShellPage : UserControl
         }
     }
 
+    internal bool IsMiniPlayer => _playerSlot == PlayerSlot.Mini;
+
+    internal void NoteFolderRest(string message) => _playerPage?.NoteFolderRest(message);
+
+    // The floating player is the same page in a small always-on-top window.
+    // The video surface stays where it was created.
+    internal void UseFloatingPlayer(bool floating)
+    {
+        _floating = floating;
+        if (_playerSlot == PlayerSlot.Mini)
+        {
+            ApplyPlayerHost(mini: true);
+            _playerPage?.RefitPicture();
+        }
+    }
+
     private void Present(PlayerSlot slot)
     {
+        if (slot != PlayerSlot.Mini && App.MainAppWindow is MainWindow window)
+        {
+            window.LeaveFloatingPlayer();
+        }
+
         _playerSlot = slot;
         if (slot == PlayerSlot.Hidden)
         {
@@ -538,17 +577,7 @@ public sealed partial class ShellPage : UserControl
         }
 
         var mini = slot == PlayerSlot.Mini;
-        // Hide the page underneath. A theme brush stays see-through over Mica, so the
-        // video name was drawn on top of that page.
-        NavFrame.Visibility = mini ? Visibility.Visible : Visibility.Collapsed;
-        PlayerHost.Visibility = Visibility.Visible;
-        PlayerHost.HorizontalAlignment = mini ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
-        PlayerHost.VerticalAlignment = mini ? VerticalAlignment.Bottom : VerticalAlignment.Stretch;
-        PlayerHost.Width = mini ? 360 : double.NaN;
-        PlayerHost.Height = mini ? 320 : double.NaN;
-        PlayerHost.Margin = mini ? new Thickness(16) : new Thickness(0);
-        PlayerHost.BorderThickness = mini ? new Thickness(1) : new Thickness(0);
-        PlayerHost.CornerRadius = mini ? new CornerRadius(16) : new CornerRadius(0);
+        ApplyPlayerHost(mini);
         var dark = ActualTheme == ElementTheme.Dark;
         PlayerHost.Background = new SolidColorBrush(mini
             ? (dark ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White)
@@ -567,8 +596,24 @@ public sealed partial class ShellPage : UserControl
         PlayerPage.ApplyBackdrop(mini);
     }
 
-    private void RefreshBack()
-        => ShowBackButton = _playerSlot == PlayerSlot.Full || NavFrame.CanGoBack;
+    private void ApplyPlayerHost(bool mini)
+    {
+        var fill = mini && _floating;
+        // Hide the page underneath. A theme brush stays see-through over Mica, so the
+        // video name was drawn on top of that page.
+        NavFrame.Visibility = mini && !fill ? Visibility.Visible : Visibility.Collapsed;
+        PlayerHost.Visibility = Visibility.Visible;
+        PlayerHost.HorizontalAlignment = mini && !fill ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+        PlayerHost.VerticalAlignment = mini && !fill ? VerticalAlignment.Bottom : VerticalAlignment.Stretch;
+        PlayerHost.Width = mini && !fill ? 360 : double.NaN;
+        PlayerHost.Height = mini && !fill ? 320 : double.NaN;
+        PlayerHost.Margin = mini && !fill ? new Thickness(16) : new Thickness(0);
+        PlayerHost.BorderThickness = mini && !fill ? new Thickness(1) : new Thickness(0);
+        PlayerHost.CornerRadius = mini && !fill ? new CornerRadius(16) : new CornerRadius(0);
+    }
+
+    internal void RefreshBack()
+        => ShowBackButton = !_floating && (_playerSlot == PlayerSlot.Full || NavFrame.CanGoBack);
 
     private void NavFrame_Navigated(object sender, NavigationEventArgs e)
     {
@@ -626,5 +671,107 @@ public sealed partial class ShellPage : UserControl
                             ? "merge"
                             : "library";
         SelectNavTag(tag);
+    }
+
+    private void LearningSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncingLearning)
+        {
+            return;
+        }
+
+        if (LearningMode.Save(LearningSwitch.IsOn))
+        {
+            HideLearningWarning();
+            return;
+        }
+
+        ShowLearningWarning();
+    }
+
+    private void ShowLearningWarning()
+    {
+        LearningWarning.Message = LearningMode.SaveFailedMessage;
+        LearningWarning.Margin = new Thickness(16, 8, 16, 8);
+        LearningWarning.IsOpen = true;
+    }
+
+    private void HideLearningWarning()
+    {
+        LearningWarning.IsOpen = false;
+        LearningWarning.Margin = new Thickness(16, 0, 16, 0);
+    }
+
+    private void LearningWarning_Closed(InfoBar sender, InfoBarClosedEventArgs args)
+    {
+        LearningWarning.Margin = new Thickness(16, 0, 16, 0);
+    }
+
+    private void OnLearningModeChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(ApplyLearningChrome);
+            return;
+        }
+
+        ApplyLearningChrome();
+    }
+
+    private void ApplyLearningChrome()
+    {
+        _syncingLearning = true;
+        LearningSwitch.IsOn = LearningMode.Enabled;
+        _syncingLearning = false;
+        WordsNav.Visibility = LearningMode.Enabled ? Visibility.Visible : Visibility.Collapsed;
+        SyncLearningLabel();
+        if (!LearningMode.Enabled)
+        {
+            LeaveSavedWords();
+        }
+    }
+
+    private void NavView_PaneOpened(NavigationView sender, object args) => SyncLearningLabel();
+
+    private void NavView_PaneClosed(NavigationView sender, object args) => SyncLearningLabel();
+
+    private void NavView_DisplayModeChanged(NavigationView sender, NavigationViewDisplayModeChangedEventArgs args)
+        => SyncLearningLabel();
+
+    private void SyncLearningLabel()
+    {
+        var open = NavView.IsPaneVisible && NavView.IsPaneOpen && NavView.CompactPaneLength >= 48;
+        LearningLabel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // The player covers the page. Changing the page under a full player must not dock it.
+    private void LeaveSavedWords()
+    {
+        if (NavFrame.CurrentSourcePageType != typeof(SavedWordsPage))
+        {
+            return;
+        }
+
+        if (_playerSlot == PlayerSlot.Full)
+        {
+            var ease = NavFrame.Content is not null;
+            if (!NavFrame.Navigate(typeof(HomePage)))
+            {
+                return;
+            }
+
+            NavFrame.BackStack.Clear();
+            SelectNavTag("home");
+            if (ease)
+            {
+                SectionArrival.Play(NavFrame.Content as UIElement);
+            }
+
+            RefreshBack();
+            return;
+        }
+
+        NavigateToSection(typeof(HomePage));
+        SelectNavTag("home");
     }
 }

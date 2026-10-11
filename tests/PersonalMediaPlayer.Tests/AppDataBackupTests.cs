@@ -70,6 +70,26 @@ public class AppDataBackupTests
     }
 
     [Fact]
+    public void RestorePreviewKeepsVolumeAboveOneHundred()
+    {
+        using var root = new TempFolder();
+        var backup = Path.Combine(root.Path, "loud.pmpbackup");
+        File.WriteAllText(Path.Combine(root.Path, "playback-volume.json"), """{"Level":180,"Audible":180}""");
+        AppDataBackup.Export(root.Path, backup);
+        Assert.Contains("volume 180", AppDataBackup.Read(backup).Confirmation);
+
+        File.WriteAllText(Path.Combine(root.Path, "playback-volume.json"), """{"Level":250,"Audible":250}""");
+        var capped = Path.Combine(root.Path, "capped.pmpbackup");
+        AppDataBackup.Export(root.Path, capped);
+        Assert.Contains("volume 200", AppDataBackup.Read(capped).Confirmation);
+
+        File.WriteAllText(Path.Combine(root.Path, "playback-volume.json"), """{"Level":-4,"Audible":80}""");
+        var quiet = Path.Combine(root.Path, "quiet.pmpbackup");
+        AppDataBackup.Export(root.Path, quiet);
+        Assert.Contains("volume 0", AppDataBackup.Read(quiet).Confirmation);
+    }
+
+    [Fact]
     public void RestoreClearsDataTheBackupDoesNotHave()
     {
         using var source = new TempFolder();

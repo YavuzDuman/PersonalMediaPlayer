@@ -12,7 +12,7 @@
             <Border x:Name="MarkInk" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" />
         </StackPanel>
         <Border
-            Width="300"
+            HorizontalAlignment="Stretch"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"

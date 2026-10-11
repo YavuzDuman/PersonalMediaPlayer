@@ -18,15 +18,43 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
+                    <Grid>
+                        <Border
+                            x:Name="PositionHit"
+                            Height="28"
+                            MinWidth="48"
+                            Background="Transparent"
+                            AutomationProperties.Name="Current time"
+                            Tapped="Position_Tapped">
+                            <TextBlock
+                                x:Name="PositionText"
+                                x:FieldModifier="public"
+                                VerticalAlignment="Center"
+                                Foreground="White"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="00:00" />
+                        </Border>
+                        <TextBox
+                            x:Name="PositionBox"
+                            Height="28"
+                            MinWidth="76"
+                            MaxLength="11"
+                            Padding="6,0"
+                            VerticalAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            Visibility="Collapsed"
+                            RequestedTheme="Dark"
+                            AutomationProperties.Name="Time"
+                            KeyDown="PositionBox_KeyDown"
+                            LostFocus="PositionBox_LostFocus" />
+                    </Grid>
                     <TextBlock
-                        x:Name="PositionText"
-                        x:FieldModifier="public"
-                        Height="28"
-                        MinWidth="48"
-                        VerticalAlignment="Center"
-                        Foreground="White"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="00:00" />
+                        x:Name="TimeMessage"
+                        MaxWidth="140"
+                        Foreground="#FFFFB4AB"
+                        FontSize="12"
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed" />
                     <TextBlock
                         x:Name="CaptionLaneLabel"
                         Height="18"
@@ -158,7 +186,7 @@
                         <Border
                             x:Name="AudioLane"
                             Grid.Row="2"
-                            Height="22"
+                            Height="32"
                             Margin="0,6,0,0"
                             Background="#FF242424"
                             BorderBrush="#33FFFFFF"
@@ -310,12 +338,20 @@
                     <Slider
                         x:Name="VolumeSlider"
                         x:FieldModifier="public"
-                        Width="120"
+                        Width="96"
                         VerticalAlignment="Center"
-                        Maximum="100"
+                        Maximum="200"
                         Minimum="0"
                         StepFrequency="1"
+                        ToolTipService.ToolTip="Volume. 100% is the usual level. Raise it up to 200% when a video is quiet."
                         Value="80" />
+                    <TextBlock
+                        x:Name="VolumeReadout"
+                        MinWidth="42"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="Volume percent"
+                        FontSize="12"
+                        Text="80%" />
                 </StackPanel>
                 <StackPanel
                     Grid.Column="1"
@@ -379,20 +415,66 @@
                         </StackPanel>
                     </Button>
                     <Button
+                        x:Name="ToolsButton"
+                        x:FieldModifier="public"
+                        Height="40"
+                        Padding="12,0"
+                        AutomationProperties.Name="Tools"
+                        ToolTipService.ToolTip="Tools"
+                        Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE15E;" />
+                            <TextBlock VerticalAlignment="Center" Text="Tools" />
+                            <TextBlock
+                                x:Name="ToolsExtra"
+                                x:FieldModifier="public"
+                                VerticalAlignment="Center"
+                                FontSize="13"
+                                Visibility="Collapsed" />
+                        </StackPanel>
+                    </Button>
+                    <Button
                         x:Name="SnapshotButton"
                         x:FieldModifier="public"
                         Width="44"
                         Height="40"
                         Padding="0"
+                        AutomationProperties.Name="Save this frame"
                         ToolTipService.ToolTip="Save this frame"
                         Visibility="Collapsed">
                         <FontIcon FontSize="16" Glyph="&#xE722;" />
+                    </Button>
+                    <Button
+                        x:Name="CopyFrameButton"
+                        x:FieldModifier="public"
+                        Width="44"
+                        Height="40"
+                        Padding="0"
+                        AutomationProperties.Name="Copy this frame"
+                        ToolTipService.ToolTip="Copy this frame"
+                        Visibility="Collapsed">
+                        <FontIcon FontSize="16" Glyph="&#xE8C8;" />
+                    </Button>
+                    <Button
+                        x:Name="SleepButton"
+                        x:FieldModifier="public"
+                        Height="40"
+                        MinWidth="64"
+                        Padding="10,0"
+                        AutomationProperties.Name="Sleep timer"
+                        ToolTipService.ToolTip="Sleep timer">
+                        <TextBlock
+                            x:Name="SleepLabel"
+                            x:FieldModifier="public"
+                            FontSize="13"
+                            Text="Sleep" />
                     </Button>
                     <Button
                         x:Name="SettingsButton"
                         Width="44"
                         Height="40"
                         Padding="0"
+                        AutomationProperties.Name="Playback settings"
                         Click="Settings_Click"
                         ToolTipService.ToolTip="Playback settings">
                         <FontIcon FontSize="16" Glyph="&#xE713;" />
@@ -448,13 +530,68 @@
             <Border
                 x:Name="SettingsCard"
                 Width="360"
-                Padding="16"
+                Padding="0"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="12">
+                <ScrollViewer
+                    x:Name="SettingsScroll"
+                    Padding="16"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
                 <StackPanel Spacing="14">
-                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Playback" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="SettingsBackButton"
+                            Height="32"
+                            Padding="10,0"
+                            HorizontalAlignment="Left"
+                            AutomationProperties.Name="Back to playback"
+                            Click="SettingsBack_Click"
+                            Content="Back"
+                            Visibility="Collapsed" />
+                        <TextBlock
+                            x:Name="SettingsTitle"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="Playback" />
+                    </Grid>
+                    <StackPanel x:Name="SettingsHome" Spacing="14">
+                    <Button
+                        x:Name="OpenLookButton"
+                        Height="36"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        AutomationProperties.Name="Subtitle settings"
+                        Click="OpenLook_Click"
+                        ToolTipService.ToolTip="Size, color, background, position, and timing"
+                        Visibility="Collapsed">
+                        <Grid>
+                            <TextBlock VerticalAlignment="Center" Text="Subtitle settings" />
+                            <FontIcon HorizontalAlignment="Right" FontSize="12" Glyph="&#xE76C;" />
+                        </Grid>
+                    </Button>
+                    <Button
+                        x:Name="OpenSoundButton"
+                        Height="36"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        AutomationProperties.Name="Sound settings"
+                        Click="OpenSound_Click"
+                        ToolTipService.ToolTip="Bass, voice, treble, and even volume"
+                        Visibility="Collapsed">
+                        <Grid>
+                            <TextBlock VerticalAlignment="Center" Text="Sound" />
+                            <FontIcon HorizontalAlignment="Right" FontSize="12" Glyph="&#xE76C;" />
+                        </Grid>
+                    </Button>
                     <StackPanel x:Name="QualityRow" Spacing="8" Visibility="Collapsed">
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -575,7 +712,252 @@
                                 Visibility="Collapsed" />
                         </StackPanel>
                     </StackPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="LookPage" Spacing="8" Visibility="Collapsed">
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Subtitle sync" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Move the words earlier or later when they do not match the voice."
+                            TextWrapping="Wrap" />
+                        <Grid>
+                            <Button
+                                x:Name="DelayEarlierButton"
+                                Height="36"
+                                Padding="12,0"
+                                HorizontalAlignment="Left"
+                                Click="DelayEarlier_Click"
+                                Content="Earlier"
+                                ToolTipService.ToolTip="Show the words 0.5 seconds sooner" />
+                            <TextBlock
+                                x:Name="DelayText"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontWeight="SemiBold"
+                                Text="In sync"
+                                ToolTipService.ToolTip="Sooner is to the left. Later is to the right." />
+                            <Button
+                                x:Name="DelayLaterButton"
+                                Height="36"
+                                Padding="12,0"
+                                HorizontalAlignment="Right"
+                                Click="DelayLater_Click"
+                                Content="Later"
+                                ToolTipService.ToolTip="Show the words 0.5 seconds later" />
+                        </Grid>
+                        <Slider
+                            x:Name="DelaySlider"
+                            AutomationProperties.Name="Subtitle delay"
+                            LargeChange="0.5"
+                            Maximum="15"
+                            Minimum="-15"
+                            SmallChange="0.1"
+                            StepFrequency="0.1"
+                            ToolTipService.ToolTip="Drag left to show the words sooner. Drag right to show them later." />
+                        <Grid ColumnSpacing="10" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Size" />
+                            <TextBlock
+                                Grid.Column="1"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Color" />
+                            <ComboBox
+                                x:Name="CaptionSizeCombo"
+                                Grid.Row="1"
+                                HorizontalAlignment="Stretch"
+                                AutomationProperties.Name="Subtitle size"
+                                ToolTipService.ToolTip="Subtitle size">
+                                <ComboBoxItem Content="Small" />
+                                <ComboBoxItem Content="Medium" />
+                                <ComboBoxItem Content="Large" />
+                            </ComboBox>
+                            <ComboBox
+                                x:Name="CaptionColorCombo"
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                HorizontalAlignment="Stretch"
+                                AutomationProperties.Name="Subtitle color"
+                                ToolTipService.ToolTip="Subtitle color">
+                                <ComboBoxItem Content="White" />
+                                <ComboBoxItem Content="Yellow" />
+                                <ComboBoxItem Content="Cyan" />
+                                <ComboBoxItem Content="Green" />
+                                <ComboBoxItem Content="Black" />
+                            </ComboBox>
+                            <TextBlock
+                                Grid.Row="2"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Background" />
+                            <TextBlock
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Position" />
+                            <ComboBox
+                                x:Name="CaptionPlateCombo"
+                                Grid.Row="3"
+                                HorizontalAlignment="Stretch"
+                                AutomationProperties.Name="Subtitle background"
+                                ToolTipService.ToolTip="Subtitle background">
+                                <ComboBoxItem Content="Dark" />
+                                <ComboBoxItem Content="Light" />
+                                <ComboBoxItem Content="None" />
+                            </ComboBox>
+                            <ComboBox
+                                x:Name="CaptionSpotCombo"
+                                Grid.Row="3"
+                                Grid.Column="1"
+                                HorizontalAlignment="Stretch"
+                                AutomationProperties.Name="Subtitle position"
+                                ToolTipService.ToolTip="Subtitle position">
+                                <ComboBoxItem Content="Bottom" />
+                                <ComboBoxItem Content="Middle" />
+                                <ComboBoxItem Content="Top" />
+                            </ComboBox>
+                        </Grid>
+                        <Button
+                            x:Name="ResetLookButton"
+                            Height="36"
+                            Padding="12,0"
+                            HorizontalAlignment="Left"
+                            AutomationProperties.Name="Reset subtitles"
+                            Click="ResetLook_Click"
+                            Content="Reset"
+                            ToolTipService.ToolTip="Restore subtitle size, color, background, position, and timing" />
+                    </StackPanel>
+                    <StackPanel x:Name="SoundPage" Spacing="10" Visibility="Collapsed">
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Shape the sound while this plays. A change continues from the same moment, and the file stays as it is."
+                            TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button
+                                x:Name="SoundOffButton"
+                                Height="36"
+                                MinWidth="72"
+                                Padding="12,0"
+                                AutomationProperties.Name="Sound off"
+                                Click="SoundPreset_Click"
+                                Content="Off"
+                                Tag="Flat"
+                                ToolTipService.ToolTip="Play the sound without an equalizer" />
+                            <Button
+                                x:Name="SoundBassButton"
+                                Height="36"
+                                MinWidth="72"
+                                Padding="12,0"
+                                AutomationProperties.Name="Bass"
+                                Click="SoundPreset_Click"
+                                Content="Bass"
+                                Tag="Bass"
+                                ToolTipService.ToolTip="Boost the low sound" />
+                            <Button
+                                x:Name="SoundVoiceButton"
+                                Height="36"
+                                MinWidth="72"
+                                Padding="12,0"
+                                AutomationProperties.Name="Voice"
+                                Click="SoundPreset_Click"
+                                Content="Voice"
+                                Tag="Voice"
+                                ToolTipService.ToolTip="Bring voices forward" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button
+                                x:Name="SoundTrebleButton"
+                                Height="36"
+                                MinWidth="72"
+                                Padding="12,0"
+                                AutomationProperties.Name="Treble"
+                                Click="SoundPreset_Click"
+                                Content="Treble"
+                                Tag="Treble"
+                                ToolTipService.ToolTip="Boost the high sound" />
+                            <Button
+                                x:Name="SoundCustomButton"
+                                Height="36"
+                                MinWidth="84"
+                                Padding="12,0"
+                                AutomationProperties.Name="Custom"
+                                Click="SoundPreset_Click"
+                                Content="Custom"
+                                Tag="Custom"
+                                ToolTipService.ToolTip="Set bass, voice, and treble yourself" />
+                        </StackPanel>
+                        <StackPanel x:Name="CustomBands" Spacing="6" Visibility="Collapsed">
+                            <TextBlock x:Name="BassGainText" Text="Bass  0 dB" />
+                            <Slider
+                                x:Name="BassSlider"
+                                AutomationProperties.Name="Bass amount"
+                                LargeChange="3"
+                                Maximum="12"
+                                Minimum="-12"
+                                SmallChange="1"
+                                StepFrequency="1"
+                                ToolTipService.ToolTip="Low sound, from -12 dB to +12 dB" />
+                            <TextBlock x:Name="VoiceGainText" Text="Voice  0 dB" />
+                            <Slider
+                                x:Name="VoiceSlider"
+                                AutomationProperties.Name="Voice amount"
+                                LargeChange="3"
+                                Maximum="12"
+                                Minimum="-12"
+                                SmallChange="1"
+                                StepFrequency="1"
+                                ToolTipService.ToolTip="Voice, from -12 dB to +12 dB" />
+                            <TextBlock x:Name="TrebleGainText" Text="Treble  0 dB" />
+                            <Slider
+                                x:Name="TrebleSlider"
+                                AutomationProperties.Name="Treble amount"
+                                LargeChange="3"
+                                Maximum="12"
+                                Minimum="-12"
+                                SmallChange="1"
+                                StepFrequency="1"
+                                ToolTipService.ToolTip="High sound, from -12 dB to +12 dB" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="NormalizeSwitch"
+                            AutomationProperties.Name="Normalize volume"
+                            Header="Normalize volume"
+                            OffContent=""
+                            OnContent="" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Quiet videos come up and loud videos come down."
+                            TextWrapping="Wrap" />
+                        <Button
+                            x:Name="ResetSoundButton"
+                            Height="36"
+                            Padding="12,0"
+                            HorizontalAlignment="Left"
+                            AutomationProperties.Name="Reset sound"
+                            Click="ResetSound_Click"
+                            Content="Reset"
+                            ToolTipService.ToolTip="Turn the equalizer off and stop normalization. The volume slider stays where you set it." />
+                    </StackPanel>
                 </StackPanel>
+                </ScrollViewer>
             </Border>
         </Popup>
     </Grid>

@@ -101,6 +101,23 @@ internal static class FilePickerHelper
         return await picker.PickSingleFolderAsync();
     }
 
+    public static async Task<StorageFile?> PickSingleVideoAsync(Window window)
+    {
+        var picker = new FileOpenPicker
+        {
+            ViewMode = PickerViewMode.Thumbnail,
+            SuggestedStartLocation = PickerLocationId.VideosLibrary
+        };
+        foreach (var extension in new[] { ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".m4v" })
+        {
+            picker.FileTypeFilter.Add(extension);
+        }
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        return await picker.PickSingleFileAsync();
+    }
+
     public static async Task<IReadOnlyList<StorageFile>> PickVideosAsync(Window window)
     {
         var picker = new FileOpenPicker

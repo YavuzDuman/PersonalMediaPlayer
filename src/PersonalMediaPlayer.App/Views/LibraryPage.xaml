@@ -70,7 +70,7 @@
                     ItemsSource="{x:Bind ViewModel.TypeFilters}"
                     SelectedIndex="{x:Bind ViewModel.TypeFilterIndex, Mode=TwoWay}" />
                 <ComboBox
-                    MinWidth="160"
+                    MinWidth="220"
                     Header="Sort"
                     ItemsSource="{x:Bind ViewModel.SortOptions}"
                     SelectedIndex="{x:Bind ViewModel.SortIndex, Mode=TwoWay}" />
@@ -256,6 +256,12 @@
                             Click="PlayNext_Click"
                             Content="Play next"
                             Style="{StaticResource ActionButtonStyle}"
+                            Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
+                        <Button
+                            Click="PlayRest_Click"
+                            Content="Play the rest"
+                            Style="{StaticResource ActionButtonStyle}"
+                            ToolTipService.ToolTip="Play this video, then the videos after it in this list"
                             Visibility="{x:Bind ViewModel.CanOrganizeSelection, Mode=OneWay, Converter={StaticResource VisibleWhenTrue}}" />
                         <Button
                             Click="AddToQueue_Click"

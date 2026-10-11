@@ -28,6 +28,8 @@ public sealed class SubtitleHit : INotifyPropertyChanged
                 ? "Save this line on this computer"
                 : "This caption is not attached to a video.";
 
+    public Visibility SaveVisibility => LearningMode.Enabled ? Visibility.Visible : Visibility.Collapsed;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     internal void Apply(CaptionLineSaveState state)
@@ -64,6 +66,38 @@ public sealed partial class SubtitleSearchPanel : UserControl
     public SubtitleSearchPanel()
     {
         InitializeComponent();
+        SubtitleLook.Changed += OnLookChanged;
+        LearningMode.Changed += OnLearningChanged;
+        Unloaded += (_, _) =>
+        {
+            SubtitleLook.Changed -= OnLookChanged;
+            LearningMode.Changed -= OnLearningChanged;
+        };
+        Render();
+    }
+
+    private void OnLookChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnLookChanged);
+            return;
+        }
+
+        if (_availability == Availability.Ready && !string.IsNullOrWhiteSpace(Query.Text))
+        {
+            Render();
+        }
+    }
+
+    private void OnLearningChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnLearningChanged);
+            return;
+        }
+
         Render();
     }
 
@@ -139,7 +173,7 @@ public sealed partial class SubtitleSearchPanel : UserControl
 
     private void SaveHit_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement element || element.DataContext is not SubtitleHit hit || !hit.CanSave)
+        if (!LearningMode.Enabled || sender is not FrameworkElement element || element.DataContext is not SubtitleHit hit || !hit.CanSave)
         {
             return;
         }
@@ -201,7 +235,7 @@ public sealed partial class SubtitleSearchPanel : UserControl
             var hit = new SubtitleHit
             {
                 StartMs = cue.StartMs,
-                Time = VideoChapters.Format(cue.StartMs),
+                Time = VideoChapters.Format(SubtitleLook.PlaybackMs(cue.StartMs)),
                 Line = cue.Text
             };
             hit.Apply(StateFor(cue.Text, cue.StartMs));

@@ -793,7 +793,7 @@ internal static class AppDataBackup
             && !double.IsNaN(value)
             && !double.IsInfinity(value))
         {
-            return (int)Math.Clamp(Math.Round(value), 0, 100);
+            return (int)Math.Clamp(Math.Round(value), 0, PlaybackVolume.MaximumLevel);
         }
 
         return 80;

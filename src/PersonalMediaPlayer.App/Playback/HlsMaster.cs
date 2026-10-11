@@ -309,6 +309,29 @@ internal sealed class HlsMaster
         return closest;
     }
 
+    internal string? AudioPlaylist(string? audioKey, Uri playlistUrl)
+    {
+        if (_audios.Count == 0)
+        {
+            return null;
+        }
+
+        var selected = SelectAudio(audioKey);
+        Rendition? match = null;
+        foreach (var rendition in _audios)
+        {
+            if (rendition.Key.Equals(selected, StringComparison.OrdinalIgnoreCase))
+            {
+                match = rendition;
+                break;
+            }
+        }
+
+        match ??= _audios[0];
+        var uri = Attribute(match.Attributes, "URI");
+        return string.IsNullOrWhiteSpace(uri) ? null : Absolute(uri, playlistUrl);
+    }
+
     internal string Rewrite(string? audioKey, int height, Uri playlistUrl)
     {
         var selectedAudio = SelectAudio(audioKey);

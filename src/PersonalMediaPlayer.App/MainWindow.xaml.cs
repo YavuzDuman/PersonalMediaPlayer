@@ -17,6 +17,10 @@ public sealed partial class MainWindow : Window
     private const int SwRestore = 9;
 
     private bool _paneOpenBeforeFullScreen = true;
+    private bool _paneOpenBeforeFloat = true;
+    private bool _floating;
+    private bool _hasRestoreBounds;
+    private RectInt32 _restoreBounds;
     private readonly GlobalHotkeyService? _hotkeys;
     private int _handoffGeneration;
     private CancellationTokenSource? _handoffCheck;
@@ -296,8 +300,98 @@ public sealed partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(nint hWnd);
 
+    internal void NoteFolderRest(string message) => Shell.NoteFolderRest(message);
+
+    internal bool ToggleFloatingPlayer()
+    {
+        if (_floating)
+        {
+            LeaveFloatingPlayer();
+            return false;
+        }
+
+        return EnterFloatingPlayer();
+    }
+
+    internal void LeaveFloatingPlayer()
+    {
+        if (!_floating)
+        {
+            return;
+        }
+
+        _floating = false;
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.IsAlwaysOnTop = false;
+            presenter.IsMaximizable = true;
+        }
+
+        Shell.UseFloatingPlayer(false);
+        if (_hasRestoreBounds)
+        {
+            AppWindow.MoveAndResize(_restoreBounds);
+            _hasRestoreBounds = false;
+        }
+
+        AppTitleBar.IsPaneToggleButtonVisible = true;
+        Shell.EnsurePaneAvailable();
+        Shell.IsPaneOpen = _paneOpenBeforeFloat;
+        Shell.RefreshBack();
+    }
+
+    private bool EnterFloatingPlayer()
+    {
+        if (_floating || IsFullScreen || !Shell.IsMiniPlayer || AppWindow.Presenter is not OverlappedPresenter presenter)
+        {
+            return false;
+        }
+
+        _paneOpenBeforeFloat = Shell.IsPaneOpen;
+        var position = AppWindow.Position;
+        var size = AppWindow.Size;
+        _restoreBounds = new RectInt32(position.X, position.Y, size.Width, size.Height);
+        _hasRestoreBounds = true;
+        _floating = true;
+        Shell.SetPaneVisible(false);
+        AppTitleBar.IsPaneToggleButtonVisible = false;
+        Shell.ShowBackButton = false;
+        presenter.IsAlwaysOnTop = true;
+        presenter.IsMaximizable = false;
+        PlaceFloatingPlayer();
+        Shell.UseFloatingPlayer(true);
+        return true;
+    }
+
+    private void PlaceFloatingPlayer()
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var dpi = GetDpiForWindow(hwnd);
+        var scale = dpi >= 96 ? dpi / 96.0 : 1;
+        var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest);
+        var work = area?.WorkArea ?? default;
+        var spot = work.Width > 2 && work.Height > 2
+            ? FloatingPlayerPlacement.Place(work.X, work.Y, work.Width, work.Height, scale)
+            : FloatingPlayerPlacement.Place(AppWindow.Position.X, AppWindow.Position.Y, 0, 0, scale);
+        AppWindow.ResizeClient(new SizeInt32(spot.Width, spot.Height));
+        if (work.Width <= 2 || work.Height <= 2)
+        {
+            return;
+        }
+
+        var outer = AppWindow.Size;
+        var margin = (int)Math.Ceiling(FloatingPlayerPlacement.MarginDips * scale);
+        var x = work.X + Math.Max(0, work.Width - outer.Width - margin);
+        var y = work.Y + Math.Max(0, work.Height - outer.Height - margin);
+        AppWindow.Move(new PointInt32(x, y));
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint hwnd);
+
     private void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
+        LeaveFloatingPlayer();
         Shell.RememberPlayer();
         if (ScreenshotSession.TryHandleHostClose())
         {

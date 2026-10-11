@@ -21,7 +21,7 @@
             CornerRadius="8"
             Visibility="Collapsed">
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <StackPanel x:Name="Line" Orientation="Horizontal" VerticalAlignment="Center" />
+                <StackPanel x:Name="Line" Orientation="Vertical" Spacing="2" VerticalAlignment="Center" />
                 <Button
                     x:Name="SaveLineButton"
                     Height="32"

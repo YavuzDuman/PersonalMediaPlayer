@@ -42,10 +42,12 @@ public sealed partial class HomePage : Page
         CardDragScroll.Attach(RecentRow);
         LibraryWatch.Changed += OnLibraryWatchChanged;
         Playlists.QueueCopied += OnQueueCopied;
+        LearningMode.Changed += OnLearningModeChanged;
         Unloaded += (_, _) =>
         {
             LibraryWatch.Changed -= OnLibraryWatchChanged;
             Playlists.QueueCopied -= OnQueueCopied;
+            LearningMode.Changed -= OnLearningModeChanged;
         };
         PlaylistPreview.PointerEntered += (_, _) => _previewTicket++;
         PlaylistPreview.PointerExited += PlaylistPreview_Exited;
@@ -124,6 +126,28 @@ public sealed partial class HomePage : Page
         if (_left)
         {
             return;
+        }
+
+        Show();
+    }
+
+    private void OnLearningModeChanged()
+    {
+        if (_left)
+        {
+            return;
+        }
+
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnLearningModeChanged);
+            return;
+        }
+
+        if (!LearningMode.Enabled)
+        {
+            WordList.Children.Clear();
+            WordsSection.Visibility = Visibility.Collapsed;
         }
 
         Show();
@@ -786,7 +810,7 @@ public sealed partial class HomePage : Page
 
     private UIElement CaptionRow(LibraryCaptionHit hit)
     {
-        var clock = VideoChapters.Format(hit.StartMs);
+        var clock = VideoChapters.Format(SubtitleLook.PlaybackMs(hit.StartMs));
         var detail = clock + " · " + hit.Line;
         var text = new StackPanel
         {
@@ -838,7 +862,7 @@ public sealed partial class HomePage : Page
             return;
         }
 
-        NavigationHelper.OpenPlayer(new VideoOpenRequest(item, hit.StartMs));
+        NavigationHelper.OpenPlayer(new VideoOpenRequest(item, SubtitleLook.PlaybackMs(hit.StartMs)));
     }
 
     private UIElement SearchRow(HomeHit hit, int generation)
@@ -1172,6 +1196,12 @@ public sealed partial class HomePage : Page
     private void ShowWords()
     {
         WordList.Children.Clear();
+        if (!LearningMode.Enabled)
+        {
+            WordsSection.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         var words = SavedWords.All().Where(SavedWords.CanOpen).Take(8).ToArray();
         WordsSection.Visibility = words.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         for (var index = 0; index < words.Length; index++)
@@ -1267,7 +1297,7 @@ public sealed partial class HomePage : Page
             return name ?? "Saved word";
         }
 
-        var clock = ContinueClock(time);
+        var clock = ContinueClock(SubtitleLook.PlaybackMs(time));
         return name is null ? clock : $"{name} · {clock}";
     }
 
@@ -1335,7 +1365,15 @@ public sealed partial class HomePage : Page
 
     private void RecentAll_Click(object sender, RoutedEventArgs e) => OpenSection(typeof(LibraryPage));
 
-    private void WordsAll_Click(object sender, RoutedEventArgs e) => OpenSection(typeof(SavedWordsPage));
+    private void WordsAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (!LearningMode.Enabled)
+        {
+            return;
+        }
+
+        OpenSection(typeof(SavedWordsPage));
+    }
 
     private void DownloadsAll_Click(object sender, RoutedEventArgs e) => OpenSection(typeof(DownloadPage));
 

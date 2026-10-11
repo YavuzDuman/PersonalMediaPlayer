@@ -45,25 +45,162 @@ public sealed partial class HoverCaptions : UserControl
     private long? _savedTimeMs;
     private IReadOnlyList<SavedWord>? _savedCache;
     private readonly SolidColorBrush _captionBrush = new(Microsoft.UI.Colors.White);
+    private readonly SolidColorBrush _plateBrush = new(Windows.UI.Color.FromArgb(0xCC, 0, 0, 0));
     private readonly SolidColorBrush _clearBrush = new(Microsoft.UI.Colors.Transparent);
     private readonly SolidColorBrush _markBrush = new(Windows.UI.Color.FromArgb(255, 255, 214, 10));
     private readonly SolidColorBrush _markTextBrush = new(Windows.UI.Color.FromArgb(255, 28, 28, 28));
+    private int _fontSize = 22;
+    private int _builtSize = -1;
+    private double _flowWidth = -1;
+    private bool _lookHooked;
+    private bool _learningHooked;
 
     public event EventHandler? WordSaved;
 
     public HoverCaptions()
     {
         InitializeComponent();
+        CaptionPlate.Background = _plateBrush;
         _rootPressed = RootPressed;
+        Loaded += (_, _) =>
+        {
+            HookLook();
+            HookLearning();
+            ApplyStyle();
+        };
+        SizeChanged += Caption_Sized;
         Unloaded += HoverCaptions_Unloaded;
         SavedWords.Changed += SavedWordsChanged;
+        HookLook();
+        HookLearning();
+        ApplyStyle();
+    }
+
+    private void HookLook()
+    {
+        if (_lookHooked)
+        {
+            return;
+        }
+
+        SubtitleLook.Changed += OnLookChanged;
+        _lookHooked = true;
+    }
+
+    private void HookLearning()
+    {
+        if (_learningHooked)
+        {
+            return;
+        }
+
+        LearningMode.Changed += OnLearningChanged;
+        _learningHooked = true;
     }
 
     private void HoverCaptions_Unloaded(object sender, RoutedEventArgs e)
     {
+        if (_lookHooked)
+        {
+            SubtitleLook.Changed -= OnLookChanged;
+            _lookHooked = false;
+        }
+
+        if (_learningHooked)
+        {
+            LearningMode.Changed -= OnLearningChanged;
+            _learningHooked = false;
+        }
+
         SavedWords.Changed -= SavedWordsChanged;
         CloseCard();
     }
+
+    private void OnLearningChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnLearningChanged);
+            return;
+        }
+
+        if (!LearningMode.Enabled)
+        {
+            ProtectedCursor = null;
+            HideMeaning();
+            CloseCard();
+        }
+
+        var time = _shownTime;
+        _cueIndex = -1;
+        _builtSize = -1;
+        SetTime(time);
+    }
+
+    private void OnLookChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(OnLookChanged);
+            return;
+        }
+
+        ApplyStyle();
+    }
+
+    private void ApplyStyle()
+    {
+        var style = SubtitleLook.Current;
+        _captionBrush.Color = Argb(SubtitleLook.TextArgb(style.Color));
+        _plateBrush.Color = Argb(SubtitleLook.PlateArgb(style.Plate));
+        _fontSize = SubtitleLook.FontSize(style.Size);
+        ApplySpot(style.Spot);
+        SetTime(_shownTime);
+    }
+
+    private void ApplySpot(SubtitleSpot spot)
+    {
+        CaptionPlate.HorizontalAlignment = HorizontalAlignment.Center;
+        if (spot == SubtitleSpot.Top)
+        {
+            CaptionPlate.VerticalAlignment = VerticalAlignment.Top;
+            CaptionPlate.Margin = new Thickness(SubtitleLook.SideMargin, SubtitleLook.TopGap, SubtitleLook.SideMargin, 0);
+            WordCard.VerticalAlignment = VerticalAlignment.Bottom;
+            WordCard.Margin = new Thickness(SubtitleLook.SideMargin, 0, SubtitleLook.SideMargin, SubtitleLook.BottomGap);
+            return;
+        }
+
+        WordCard.VerticalAlignment = VerticalAlignment.Top;
+        WordCard.Margin = new Thickness(SubtitleLook.SideMargin, 32, SubtitleLook.SideMargin, 0);
+        if (spot == SubtitleSpot.Middle)
+        {
+            CaptionPlate.VerticalAlignment = VerticalAlignment.Center;
+            CaptionPlate.Margin = new Thickness(SubtitleLook.SideMargin, 0, SubtitleLook.SideMargin, 0);
+            return;
+        }
+
+        CaptionPlate.VerticalAlignment = VerticalAlignment.Bottom;
+        CaptionPlate.Margin = new Thickness(SubtitleLook.SideMargin, 0, SubtitleLook.SideMargin, SubtitleLook.BottomGap);
+    }
+
+    private void Caption_Sized(object sender, SizeChangedEventArgs e)
+    {
+        if (_cueIndex < 0 || Math.Abs(e.NewSize.Width - _flowWidth) < 8)
+        {
+            return;
+        }
+
+        var time = _shownTime;
+        _cueIndex = -1;
+        SetTime(time);
+    }
+
+    private static Windows.UI.Color Argb(uint value)
+        => Windows.UI.Color.FromArgb(
+            (byte)((value >> 24) & 0xFF),
+            (byte)((value >> 16) & 0xFF),
+            (byte)((value >> 8) & 0xFF),
+            (byte)(value & 0xFF));
 
     private void SavedWordsChanged()
     {
@@ -82,6 +219,52 @@ public sealed partial class HoverCaptions : UserControl
     }
 
     public bool HasCues => _cues.Count > 0;
+
+    internal bool TryWordBounds(UIElement relativeTo, out double x, out double y, out double width, out double height)
+    {
+        x = 0;
+        y = 0;
+        width = 0;
+        height = 0;
+        if (Line.ActualWidth < 2 || Line.ActualHeight < 2)
+        {
+            return false;
+        }
+
+        try
+        {
+            var origin = Line.TransformToVisual(relativeTo).TransformPoint(new Point(0, 0));
+            x = origin.X;
+            y = origin.Y;
+            width = Line.ActualWidth;
+            height = Line.ActualHeight;
+            return double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(width) && double.IsFinite(height);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    internal bool TryShownWords(out string[] words, out bool[] highlight)
+    {
+        words = [];
+        highlight = [];
+        if (!_shown || CaptionPlate.Visibility != Visibility.Visible || _line.Length == 0 || _cueIndex < 0 || _cueIndex >= _cues.Count)
+        {
+            return false;
+        }
+
+        words = _line.ToArray();
+        var marks = HighlightedIndexes(_cueIndex);
+        highlight = new bool[words.Length];
+        for (var index = 0; index < words.Length; index++)
+        {
+            highlight[index] = marks.Contains(index);
+        }
+
+        return true;
+    }
 
     internal IReadOnlyList<SubtitleCue> CopyCues() => _cues.Count == 0 ? [] : _cues.ToArray();
 
@@ -246,65 +429,32 @@ public sealed partial class HoverCaptions : UserControl
             return;
         }
 
-        var index = -1;
-        for (var i = 0; i < _cues.Count; i++)
-        {
-            if (milliseconds >= _cues[i].StartMs && milliseconds < _cues[i].EndMs)
-            {
-                index = i;
-                break;
-            }
-        }
-
+        var index = SubtitleLook.CueAt(_cues, milliseconds, SubtitleLook.Current.DelayMs);
         if (index < 0)
         {
             HideCurrentLine();
             return;
         }
 
-        if (index == _cueIndex)
+        if (index == _cueIndex && _builtSize == _fontSize)
         {
             return;
         }
 
         _cueIndex = index;
+        _builtSize = _fontSize;
         HideMeaning();
         ProtectedCursor = null;
         Line.Children.Clear();
         _line = [];
 
         _line = _cues[index].Text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var marked = HighlightedIndexes(index);
-        for (var wordIndex = 0; wordIndex < _line.Length; wordIndex++)
-        {
-            var highlight = marked.Contains(wordIndex);
-            var word = new TextBlock
-            {
-                Text = _line[wordIndex],
-                Foreground = highlight ? _markTextBrush : _captionBrush,
-                FontSize = 22,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                IsHitTestVisible = false
-            };
-            var host = new Border
-            {
-                Tag = wordIndex,
-                Margin = new Thickness(3, 0, 3, 0),
-                Padding = highlight ? new Thickness(4, 0, 4, 0) : new Thickness(0),
-                CornerRadius = new CornerRadius(4),
-                Background = highlight ? _markBrush : _clearBrush,
-                Child = word,
-                IsHitTestVisible = true,
-                IsTapEnabled = true
-            };
-            host.PointerEntered += Word_Entered;
-            host.PointerExited += Word_Exited;
-            host.Tapped += Word_Tapped;
-            Line.Children.Add(host);
-        }
+        FillWords(HighlightedIndexes(index));
 
+        var learning = LearningMode.Enabled;
         CaptionPlate.Visibility = Line.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        Line.IsHitTestVisible = Line.Children.Count > 0;
+        CaptionPlate.IsHitTestVisible = learning && Line.Children.Count > 0;
+        Line.IsHitTestVisible = learning && Line.Children.Count > 0;
         if (Line.Children.Count > 0)
         {
             ShowLineSave(CueSaveState(_cues[index].Text, _cues[index].StartMs));
@@ -317,7 +467,7 @@ public sealed partial class HoverCaptions : UserControl
 
     private void SaveLine_Click(object sender, RoutedEventArgs e)
     {
-        if (_cueIndex < 0 || _cueIndex >= _cues.Count || !SaveLineButton.IsEnabled)
+        if (!LearningMode.Enabled || _cueIndex < 0 || _cueIndex >= _cues.Count || !SaveLineButton.IsEnabled)
         {
             return;
         }
@@ -344,6 +494,7 @@ public sealed partial class HoverCaptions : UserControl
         }
 
         _cueIndex = -1;
+        _builtSize = -1;
         HideMeaning();
         ProtectedCursor = null;
         Line.Children.Clear();
@@ -354,6 +505,12 @@ public sealed partial class HoverCaptions : UserControl
 
     private void ShowLineSave(CaptionLineSaveState state)
     {
+        if (!LearningMode.Enabled)
+        {
+            SaveLineButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         var realLine = state is CaptionLineSaveState.Ready or CaptionLineSaveState.Saved;
         SaveLineButton.Visibility = realLine ? Visibility.Visible : Visibility.Collapsed;
         SaveLineButton.IsEnabled = state == CaptionLineSaveState.Ready;
@@ -370,7 +527,7 @@ public sealed partial class HoverCaptions : UserControl
 
     private void Word_Entered(object sender, PointerRoutedEventArgs e)
     {
-        if (sender is not FrameworkElement word || word.Tag is not int wordIndex || wordIndex < 0 || wordIndex >= _line.Length)
+        if (!LearningMode.Enabled || sender is not FrameworkElement word || word.Tag is not int wordIndex || wordIndex < 0 || wordIndex >= _line.Length)
         {
             return;
         }
@@ -389,7 +546,73 @@ public sealed partial class HoverCaptions : UserControl
         var size = MeaningCard.DesiredSize;
         var origin = word.TransformToVisual(MeaningLayer).TransformPoint(new Point(0, 0));
         Canvas.SetLeft(MeaningCard, origin.X + (word.ActualWidth - size.Width) / 2);
-        Canvas.SetTop(MeaningCard, origin.Y - size.Height - 8);
+        var top = origin.Y - size.Height - 8;
+        if (top < 4)
+        {
+            top = origin.Y + word.ActualHeight + 8;
+        }
+
+        Canvas.SetTop(MeaningCard, top);
+    }
+
+    private void FillWords(HashSet<int> marked)
+    {
+        _flowWidth = ActualWidth;
+        var reserve = LearningMode.Enabled ? CaptionFrame.SaveButtonReserve : 0;
+        var max = ActualWidth - (SubtitleLook.SideMargin * 2) - reserve;
+        if (double.IsNaN(max) || max < 120)
+        {
+            max = double.PositiveInfinity;
+        }
+
+        StackPanel? row = null;
+        double used = 0;
+        for (var wordIndex = 0; wordIndex < _line.Length; wordIndex++)
+        {
+            var host = WordHost(wordIndex, marked.Contains(wordIndex));
+            host.Measure(new Size(2000, 200));
+            var width = Math.Max(1, host.DesiredSize.Width) + host.Margin.Left + host.Margin.Right;
+            if (row is null || (used > 0 && used + width > max))
+            {
+                row = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                Line.Children.Add(row);
+                used = 0;
+            }
+
+            row.Children.Add(host);
+            used += width;
+        }
+    }
+
+    private Border WordHost(int wordIndex, bool highlight)
+    {
+        var word = new TextBlock
+        {
+            Text = _line[wordIndex],
+            Foreground = highlight ? _markTextBrush : _captionBrush,
+            FontSize = _fontSize,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            IsHitTestVisible = false
+        };
+        var host = new Border
+        {
+            Tag = wordIndex,
+            Margin = new Thickness(3, 0, 3, 0),
+            Padding = highlight ? new Thickness(4, 0, 4, 0) : new Thickness(0),
+            CornerRadius = new CornerRadius(4),
+            Background = highlight ? _markBrush : _clearBrush,
+            Child = word,
+            IsHitTestVisible = LearningMode.Enabled,
+            IsTapEnabled = LearningMode.Enabled
+        };
+        host.PointerEntered += Word_Entered;
+        host.PointerExited += Word_Exited;
+        host.Tapped += Word_Tapped;
+        return host;
     }
 
     private void Word_Exited(object sender, PointerRoutedEventArgs e)
@@ -400,6 +623,11 @@ public sealed partial class HoverCaptions : UserControl
 
     private void Word_Tapped(object sender, TappedRoutedEventArgs e)
     {
+        if (!LearningMode.Enabled)
+        {
+            return;
+        }
+
         if (sender is not FrameworkElement word || word.Tag is not int wordIndex || wordIndex < 0 || wordIndex >= _line.Length || _cueIndex < 0 || _cueIndex >= _cues.Count)
         {
             return;
@@ -531,7 +759,7 @@ public sealed partial class HoverCaptions : UserControl
     private HashSet<int> HighlightedIndexes(int cueIndex)
     {
         var marks = new HashSet<int>();
-        if (_savedEnglish is null || cueIndex < 0 || cueIndex >= _cues.Count)
+        if (!LearningMode.Enabled || _savedEnglish is null || cueIndex < 0 || cueIndex >= _cues.Count)
         {
             return marks;
         }

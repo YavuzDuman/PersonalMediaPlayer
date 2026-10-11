@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices.WindowsRuntime;
 using LibVLCSharp.Shared;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -5,7 +6,11 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Text;
 using PersonalMediaPlayer.App.Editing;
+using PersonalMediaPlayer.App.Playback;
+using PersonalMediaPlayer.App.Subtitles;
 using Windows.Foundation;
 using Windows.System;
 
@@ -28,6 +33,12 @@ public sealed partial class VideoPlaybackBar : UserControl
     private double _trimStart;
     private double _trimEnd = 1;
     private string? _hoverPath;
+    private AudioWaveform.Levels _waveLevels = AudioWaveform.Levels.Empty;
+    private AudioWaveform.WaveformKey _waveKey;
+    private int _waveSerial;
+    private bool _waveLoading;
+    private bool _waveAttempted;
+    private bool _waveQueued;
     private readonly List<(long StartMs, long EndMs, string Text)> _captionCues = [];
     private int _captionTip = -1;
     private long _hoverDurationMs;
@@ -43,6 +54,7 @@ public sealed partial class VideoPlaybackBar : UserControl
     private bool _seekDragging;
     private bool _holdView;
     private double _edgePointerX = double.NaN;
+    private FrameworkElement? _seekThumb;
     private bool _audioInteractive = true;
     private double _audioAnchor;
     private List<(double Start, double End, int Volume)> _silenceFractions = [];
@@ -66,6 +78,21 @@ public sealed partial class VideoPlaybackBar : UserControl
     private bool _suppressSettingsOpen;
     private int _openLists;
     private bool _fillingChoices;
+    private bool _fillingLook;
+    private bool _sliderDriving;
+    private bool _lookHooked;
+    private bool _soundOffered;
+    private bool _fillingSound;
+    private bool _soundHooked;
+    private SettingsSection _settingsSection;
+    private readonly DispatcherTimer _soundApplyTimer = new() { Interval = TimeSpan.FromMilliseconds(420) };
+
+    private enum SettingsSection
+    {
+        Home,
+        Look,
+        Sound
+    }
 
     public event EventHandler? SectionARequested;
 
@@ -84,12 +111,46 @@ public sealed partial class VideoPlaybackBar : UserControl
         WatchCombo(QualityCombo);
         WatchCombo(AudioCombo);
         WatchCombo(CaptionCombo);
+        WatchCombo(CaptionSizeCombo);
+        WatchCombo(CaptionColorCombo);
+        WatchCombo(CaptionPlateCombo);
+        WatchCombo(CaptionSpotCombo);
+        DelaySlider.ValueChanged += DelaySlider_Changed;
+        CaptionSizeCombo.SelectionChanged += Look_Changed;
+        CaptionColorCombo.SelectionChanged += Look_Changed;
+        CaptionPlateCombo.SelectionChanged += Look_Changed;
+        CaptionSpotCombo.SelectionChanged += Look_Changed;
+        DelaySlider.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(DelaySlider_Released), true);
+        DelaySlider.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(DelaySlider_Released), true);
+        VolumeSlider.ValueChanged += (_, e) => VolumeReadout.Text = ((int)Math.Round(e.NewValue)).ToString() + "%";
+        HookLook();
+        HookSound();
+        BassSlider.ValueChanged += CustomSlider_Changed;
+        VoiceSlider.ValueChanged += CustomSlider_Changed;
+        TrebleSlider.ValueChanged += CustomSlider_Changed;
+        BassSlider.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(CustomSlider_Released), true);
+        BassSlider.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(CustomSlider_Released), true);
+        VoiceSlider.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(CustomSlider_Released), true);
+        VoiceSlider.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(CustomSlider_Released), true);
+        TrebleSlider.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(CustomSlider_Released), true);
+        TrebleSlider.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(CustomSlider_Released), true);
+        NormalizeSwitch.Toggled += Normalize_Toggled;
+        _soundApplyTimer.Tick += (_, _) =>
+        {
+            _soundApplyTimer.Stop();
+            PlaybackSound.Commit();
+        };
+        SettingsPopup.Opened += (_, _) => NotifyChromeHold();
         SettingsPopup.Closed += (_, _) =>
         {
             if (_openLists > 0)
             {
                 SettingsPopup.IsOpen = true;
+                return;
             }
+
+            ShowSettingsHome();
+            NotifyChromeHold();
         };
         UpdateSettingsButton();
         _hoverTimer.Tick += (_, _) =>
@@ -100,6 +161,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         _edgeTimer.Tick += (_, _) => AdvanceEdgeScroll();
         Loaded += (_, _) =>
         {
+            HookLook();
             TimelineHost.AddHandler(PointerMovedEvent, new PointerEventHandler(Timeline_Moved), true);
             TimelineHost.AddHandler(PointerPressedEvent, new PointerEventHandler(Timeline_Pressed), true);
             TimelineHost.AddHandler(PointerReleasedEvent, new PointerEventHandler(Timeline_Released), true);
@@ -130,6 +192,18 @@ public sealed partial class VideoPlaybackBar : UserControl
             _edgeTimer.Stop();
             _thumbs.Dispose();
             CloseSettings();
+            _soundApplyTimer.Stop();
+            if (_lookHooked)
+            {
+                SubtitleLook.Changed -= LookChanged;
+                _lookHooked = false;
+            }
+
+            if (_soundHooked)
+            {
+                PlaybackSound.Changed -= SoundChanged;
+                _soundHooked = false;
+            }
         };
     }
 
@@ -170,6 +244,128 @@ public sealed partial class VideoPlaybackBar : UserControl
         OpenSettings();
     }
 
+    public bool KeepsChromeOpen => SettingsPopup.IsOpen || _openLists > 0 || TimeEntryOpen;
+
+    public bool TimeEntryOpen => PositionBox.Visibility == Visibility.Visible;
+
+    public event EventHandler<string>? TimeSubmitted;
+
+    private bool _allowTimeEntry;
+
+    public bool AllowTimeEntry
+    {
+        get => _allowTimeEntry;
+        set
+        {
+            if (_allowTimeEntry == value)
+            {
+                return;
+            }
+
+            _allowTimeEntry = value;
+            ToolTipService.SetToolTip(PositionHit, value ? "Type a time" : null);
+            if (!value && TimeEntryOpen)
+            {
+                EndTimeEntry();
+            }
+        }
+    }
+
+    public void BeginTimeEntry()
+    {
+        if (!_allowTimeEntry || TimeEntryOpen)
+        {
+            return;
+        }
+
+        TimeMessage.Visibility = Visibility.Collapsed;
+        PositionBox.Text = PositionText.Text;
+        PositionHit.Visibility = Visibility.Collapsed;
+        PositionBox.Visibility = Visibility.Visible;
+        NotifyChromeHold();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!TimeEntryOpen)
+            {
+                return;
+            }
+
+            PositionBox.Focus(FocusState.Programmatic);
+            PositionBox.SelectAll();
+        });
+    }
+
+    public void SelectTimeEntry()
+    {
+        if (!TimeEntryOpen)
+        {
+            return;
+        }
+
+        PositionBox.Focus(FocusState.Programmatic);
+        PositionBox.SelectAll();
+    }
+
+    public void ShowTimeMessage(string message)
+    {
+        TimeMessage.Text = message;
+        TimeMessage.Visibility = Visibility.Visible;
+    }
+
+    public void EndTimeEntry()
+    {
+        if (!TimeEntryOpen && TimeMessage.Visibility == Visibility.Collapsed)
+        {
+            return;
+        }
+
+        PositionBox.Visibility = Visibility.Collapsed;
+        PositionHit.Visibility = Visibility.Visible;
+        TimeMessage.Visibility = Visibility.Collapsed;
+        NotifyChromeHold();
+    }
+
+    private void Position_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (!_allowTimeEntry)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        BeginTimeEntry();
+    }
+
+    private void PositionBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            e.Handled = true;
+            TimeSubmitted?.Invoke(this, PositionBox.Text);
+            return;
+        }
+
+        if (e.Key == VirtualKey.Escape)
+        {
+            e.Handled = true;
+            EndTimeEntry();
+        }
+    }
+
+    private void PositionBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!TimeEntryOpen)
+        {
+            return;
+        }
+
+        EndTimeEntry();
+    }
+
+    public event EventHandler? ChromeHoldChanged;
+
+    private void NotifyChromeHold() => ChromeHoldChanged?.Invoke(this, EventArgs.Empty);
+
     public void CloseSettings()
     {
         _suppressSettingsOpen = false;
@@ -193,15 +389,23 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     private void PlaceSettings()
     {
-        SettingsCard.Measure(new Size(320, 800));
-        var width = SettingsCard.ActualWidth > 1 ? SettingsCard.ActualWidth : SettingsCard.DesiredSize.Width;
-        var height = SettingsCard.ActualHeight > 1 ? SettingsCard.ActualHeight : SettingsCard.DesiredSize.Height;
-        if (width <= 1)
+        SettingsScroll.MaxHeight = double.PositiveInfinity;
+        SettingsCard.Measure(new Size(360, 4000));
+        var height = SettingsCard.DesiredSize.Height;
+        if (double.IsNaN(height) || double.IsInfinity(height) || height > 520)
         {
-            width = 300;
+            SettingsScroll.MaxHeight = 520;
+            SettingsCard.Measure(new Size(360, 560));
+            height = SettingsCard.DesiredSize.Height;
         }
 
-        if (height <= 1)
+        var width = SettingsCard.ActualWidth > 1 ? SettingsCard.ActualWidth : SettingsCard.DesiredSize.Width;
+        if (width <= 1)
+        {
+            width = 360;
+        }
+
+        if (double.IsNaN(height) || height <= 1)
         {
             height = 280;
         }
@@ -218,6 +422,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         {
             _openLists++;
             SettingsPopup.IsLightDismissEnabled = false;
+            NotifyChromeHold();
         };
         combo.DropDownClosed += (_, _) =>
         {
@@ -226,6 +431,8 @@ public sealed partial class VideoPlaybackBar : UserControl
             {
                 SettingsPopup.IsLightDismissEnabled = true;
             }
+
+            NotifyChromeHold();
         };
     }
 
@@ -235,6 +442,11 @@ public sealed partial class VideoPlaybackBar : UserControl
         var captions = SubtitleButton.Visibility == Visibility.Visible || CaptionCombo.Visibility == Visibility.Visible;
         var repeat = RepeatButtons.Visibility == Visibility.Visible;
         CaptionRow.Visibility = captions ? Visibility.Visible : Visibility.Collapsed;
+        OpenLookButton.Visibility = captions ? Visibility.Visible : Visibility.Collapsed;
+        if (!captions && _settingsSection == SettingsSection.Look)
+        {
+            ShowSettingsHome();
+        }
         SpeedRow.Visibility = speed ? Visibility.Visible : Visibility.Collapsed;
         var quality = QualityRow.Visibility == Visibility.Visible;
         var audio = AudioRow.Visibility == Visibility.Visible;
@@ -244,6 +456,331 @@ public sealed partial class VideoPlaybackBar : UserControl
         {
             CloseSettings();
         }
+        else if (SettingsPopup.IsOpen)
+        {
+            PlaceSettings();
+        }
+    }
+
+    private void HookLook()
+    {
+        if (_lookHooked)
+        {
+            return;
+        }
+
+        SubtitleLook.Changed += LookChanged;
+        _lookHooked = true;
+        ShowLook();
+    }
+
+    private void LookChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(LookChanged);
+            return;
+        }
+
+        ShowLook();
+    }
+
+    private void ShowLook()
+    {
+        var style = SubtitleLook.Current;
+        _fillingLook = true;
+        if (!_sliderDriving)
+        {
+            DelaySlider.Value = SubtitleLook.Seconds(style.DelayMs);
+        }
+
+        DelayText.Text = SubtitleLook.DelayLabel(style.DelayMs);
+        CaptionSizeCombo.SelectedIndex = (int)style.Size;
+        CaptionColorCombo.SelectedIndex = (int)style.Color;
+        CaptionPlateCombo.SelectedIndex = (int)style.Plate;
+        CaptionSpotCombo.SelectedIndex = (int)style.Spot;
+        _fillingLook = false;
+    }
+
+    private void Look_Changed(object sender, SelectionChangedEventArgs e) => CommitLook();
+
+    private void DelaySlider_Changed(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_fillingLook)
+        {
+            return;
+        }
+
+        _sliderDriving = true;
+        try
+        {
+            CommitLook();
+        }
+        finally
+        {
+            _sliderDriving = false;
+        }
+    }
+
+    private void DelaySlider_Released(object sender, PointerRoutedEventArgs e) => SnapDelaySlider();
+
+    private void SnapDelaySlider()
+    {
+        var seconds = SubtitleLook.Seconds(SubtitleLook.Current.DelayMs);
+        if (Math.Abs(DelaySlider.Value - seconds) < 0.001)
+        {
+            return;
+        }
+
+        _fillingLook = true;
+        DelaySlider.Value = seconds;
+        _fillingLook = false;
+        DelayText.Text = SubtitleLook.DelayLabel(SubtitleLook.Current.DelayMs);
+    }
+
+    private void CommitLook()
+    {
+        if (_fillingLook
+            || CaptionSizeCombo.SelectedIndex < 0
+            || CaptionColorCombo.SelectedIndex < 0
+            || CaptionPlateCombo.SelectedIndex < 0
+            || CaptionSpotCombo.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var style = new SubtitleStyle(
+            SubtitleLook.FromSeconds(DelaySlider.Value),
+            (SubtitleSize)CaptionSizeCombo.SelectedIndex,
+            (SubtitleTextColor)CaptionColorCombo.SelectedIndex,
+            (SubtitlePlate)CaptionPlateCombo.SelectedIndex,
+            (SubtitleSpot)CaptionSpotCombo.SelectedIndex);
+        SubtitleLook.Save(style);
+        DelayText.Text = SubtitleLook.DelayLabel(style.DelayMs);
+    }
+
+    private void DelayEarlier_Click(object sender, RoutedEventArgs e)
+    {
+        var current = SubtitleLook.Current;
+        SubtitleLook.Save(current with { DelayMs = SubtitleLook.Step(current.DelayMs, -SubtitleLook.StepMs) });
+    }
+
+    private void DelayLater_Click(object sender, RoutedEventArgs e)
+    {
+        var current = SubtitleLook.Current;
+        SubtitleLook.Save(current with { DelayMs = SubtitleLook.Step(current.DelayMs, SubtitleLook.StepMs) });
+    }
+
+    private void ResetLook_Click(object sender, RoutedEventArgs e) => SubtitleLook.Reset();
+
+    public void OfferSound()
+    {
+        _soundOffered = true;
+        OpenSoundButton.Visibility = Visibility.Visible;
+        if (SettingsPopup.IsOpen)
+        {
+            PlaceSettings();
+        }
+    }
+
+    private void OpenLook_Click(object sender, RoutedEventArgs e)
+    {
+        if (OpenLookButton.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        ShowLookPage();
+    }
+
+    private void OpenSound_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_soundOffered)
+        {
+            return;
+        }
+
+        ShowSoundPage();
+    }
+
+    private void SettingsBack_Click(object sender, RoutedEventArgs e) => ShowSettingsHome(place: true);
+
+    private void ShowSettingsHome(bool place = false)
+    {
+        _settingsSection = SettingsSection.Home;
+        SettingsBackButton.Visibility = Visibility.Collapsed;
+        SettingsTitle.Text = "Playback";
+        SettingsHome.Visibility = Visibility.Visible;
+        LookPage.Visibility = Visibility.Collapsed;
+        SoundPage.Visibility = Visibility.Collapsed;
+        if (place && SettingsPopup.IsOpen)
+        {
+            PlaceSettings();
+        }
+    }
+
+    private void ShowLookPage()
+    {
+        _settingsSection = SettingsSection.Look;
+        SettingsBackButton.Visibility = Visibility.Visible;
+        SettingsTitle.Text = "Subtitles";
+        SettingsHome.Visibility = Visibility.Collapsed;
+        LookPage.Visibility = Visibility.Visible;
+        SoundPage.Visibility = Visibility.Collapsed;
+        if (SettingsPopup.IsOpen)
+        {
+            PlaceSettings();
+        }
+    }
+
+    private void ShowSoundPage()
+    {
+        _settingsSection = SettingsSection.Sound;
+        SettingsBackButton.Visibility = Visibility.Visible;
+        SettingsTitle.Text = "Sound";
+        SettingsHome.Visibility = Visibility.Collapsed;
+        LookPage.Visibility = Visibility.Collapsed;
+        SoundPage.Visibility = Visibility.Visible;
+        ShowSound();
+        if (SettingsPopup.IsOpen)
+        {
+            PlaceSettings();
+        }
+    }
+
+    private void HookSound()
+    {
+        if (_soundHooked)
+        {
+            return;
+        }
+
+        PlaybackSound.Changed += SoundChanged;
+        _soundHooked = true;
+        ShowSound();
+    }
+
+    private void SoundChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(SoundChanged);
+            return;
+        }
+
+        ShowSound();
+    }
+
+    private void ShowSound()
+    {
+        var sound = PlaybackSound.Current;
+        _fillingSound = true;
+        BassSlider.Value = sound.Bass;
+        VoiceSlider.Value = sound.Voice;
+        TrebleSlider.Value = sound.Treble;
+        NormalizeSwitch.IsOn = sound.Normalize;
+        _fillingSound = false;
+        BassGainText.Text = "Bass  " + PlaybackSound.GainLabel(sound.Bass);
+        VoiceGainText.Text = "Voice  " + PlaybackSound.GainLabel(sound.Voice);
+        TrebleGainText.Text = "Treble  " + PlaybackSound.GainLabel(sound.Treble);
+        CustomBands.Visibility = sound.Preset == SoundPreset.Custom ? Visibility.Visible : Visibility.Collapsed;
+        MarkPreset(SoundOffButton, sound.Preset == SoundPreset.Flat);
+        MarkPreset(SoundBassButton, sound.Preset == SoundPreset.Bass);
+        MarkPreset(SoundVoiceButton, sound.Preset == SoundPreset.Voice);
+        MarkPreset(SoundTrebleButton, sound.Preset == SoundPreset.Treble);
+        MarkPreset(SoundCustomButton, sound.Preset == SoundPreset.Custom);
+        if (SettingsPopup.IsOpen && _settingsSection == SettingsSection.Sound)
+        {
+            PlaceSettings();
+        }
+    }
+
+    private static void MarkPreset(Button button, bool selected)
+    {
+        button.FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal;
+        var resources = Application.Current?.Resources;
+        if (resources is null)
+        {
+            return;
+        }
+
+        if (resources.TryGetValue(selected ? "AccentFillColorDefaultBrush" : "SubtleFillColorSecondaryBrush", out var fill)
+            && fill is Brush fillBrush)
+        {
+            button.Background = fillBrush;
+        }
+
+        if (resources.TryGetValue(selected ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush", out var text)
+            && text is Brush textBrush)
+        {
+            button.Foreground = textBrush;
+        }
+    }
+
+    private void SoundPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string tag || !Enum.TryParse(tag, out SoundPreset preset) || !Enum.IsDefined(preset))
+        {
+            return;
+        }
+
+        _soundApplyTimer.Stop();
+        PlaybackSound.Save(PlaybackSound.Current with { Preset = preset }, apply: true);
+    }
+
+    private void CustomSlider_Changed(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_fillingSound)
+        {
+            return;
+        }
+
+        StageCustom();
+        _soundApplyTimer.Stop();
+        _soundApplyTimer.Start();
+    }
+
+    private void CustomSlider_Released(object sender, PointerRoutedEventArgs e)
+    {
+        if (_fillingSound)
+        {
+            return;
+        }
+
+        _soundApplyTimer.Stop();
+        PlaybackSound.Commit();
+    }
+
+    private void StageCustom()
+    {
+        var state = PlaybackSound.Current with
+        {
+            Preset = SoundPreset.Custom,
+            Bass = (int)Math.Round(BassSlider.Value),
+            Voice = (int)Math.Round(VoiceSlider.Value),
+            Treble = (int)Math.Round(TrebleSlider.Value)
+        };
+        PlaybackSound.Save(state, apply: false);
+        BassGainText.Text = "Bass  " + PlaybackSound.GainLabel(state.Bass);
+        VoiceGainText.Text = "Voice  " + PlaybackSound.GainLabel(state.Voice);
+        TrebleGainText.Text = "Treble  " + PlaybackSound.GainLabel(state.Treble);
+    }
+
+    private void Normalize_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_fillingSound)
+        {
+            return;
+        }
+
+        _soundApplyTimer.Stop();
+        PlaybackSound.Save(PlaybackSound.Current with { Normalize = NormalizeSwitch.IsOn }, apply: true);
+    }
+
+    private void ResetSound_Click(object sender, RoutedEventArgs e)
+    {
+        _soundApplyTimer.Stop();
+        PlaybackSound.Reset();
     }
 
     public void UseSubtitles(MediaPlayer player)
@@ -624,14 +1161,32 @@ public sealed partial class VideoPlaybackBar : UserControl
 
     public void SetHoverSource(string? path)
     {
-        if (string.Equals(_hoverPath, path, StringComparison.OrdinalIgnoreCase))
+        var next = string.IsNullOrWhiteSpace(path) ? null : path;
+        var key = next is null ? default : AudioWaveform.WaveformKey.For(next);
+        var same = string.Equals(_hoverPath, next, StringComparison.OrdinalIgnoreCase) && key.Equals(_waveKey);
+        if (string.Equals(_hoverPath, next, StringComparison.OrdinalIgnoreCase))
         {
+            if (same && (_waveLevels.HasPeaks || _waveLoading || _waveAttempted))
+            {
+                UpdatePreviewCache();
+                return;
+            }
+
+            RequestWaveform();
+            UpdatePreviewCache();
             return;
         }
 
-        _hoverPath = string.IsNullOrWhiteSpace(path) ? null : path;
+        _hoverPath = next;
         _thumbs.Cancel();
         HideHover();
+        _waveSerial++;
+        _waveLoading = false;
+        _waveAttempted = false;
+        _waveLevels = AudioWaveform.Levels.Empty;
+        // The duration still belongs to the previous file until SetHoverDuration.
+        TimelinePreviewCache.Cancel();
+        RequestWaveform();
     }
 
     public void ReleaseHoverFile()
@@ -639,6 +1194,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         _hoverTimer.Stop();
         _hoverOpen = false;
         _thumbs.ReleaseFile();
+        TimelinePreviewCache.Cancel();
         HideHover();
     }
 
@@ -650,7 +1206,20 @@ public sealed partial class VideoPlaybackBar : UserControl
             HideHover();
         }
 
+        UpdatePreviewCache();
         UpdateCaptionLane();
+        DrawAudioLane();
+    }
+
+    private void UpdatePreviewCache()
+    {
+        if (string.IsNullOrWhiteSpace(_hoverPath) || _hoverDurationMs <= 0)
+        {
+            TimelinePreviewCache.Cancel();
+            return;
+        }
+
+        TimelinePreviewCache.Ensure(_hoverPath, _hoverDurationMs / 1000d);
     }
 
     public double TrimStart => _trimStart;
@@ -703,7 +1272,17 @@ public sealed partial class VideoPlaybackBar : UserControl
         AudioHint.Visibility = visible;
         FitTimeline();
         UpdatePartVolumeVisibility();
+        if (!show)
+        {
+            _waveSerial++;
+            _waveLoading = false;
+        }
+
         DrawAudioLane();
+        if (show)
+        {
+            RequestWaveform();
+        }
     }
 
     public void SetAudioLaneInteractive(bool enabled, string? hint)
@@ -717,7 +1296,19 @@ public sealed partial class VideoPlaybackBar : UserControl
         }
 
         UpdatePartVolumeVisibility();
+        if (!enabled)
+        {
+            _waveSerial++;
+            _waveLoading = false;
+            _waveAttempted = false;
+            _waveLevels = AudioWaveform.Levels.Empty;
+        }
+
         DrawAudioLane();
+        if (enabled)
+        {
+            RequestWaveform();
+        }
     }
 
     public int PartVolumePercent => PartVolumeSlider is null ? 0 : (int)Math.Round(PartVolumeSlider.Value);
@@ -918,6 +1509,7 @@ public sealed partial class VideoPlaybackBar : UserControl
         _trimEnd = Math.Clamp(Math.Max(end, _trimStart + minGap), 0, 1);
         ArrangeTrim();
         DrawCaptions();
+        DrawAudioLane();
     }
 
     public void EndTrim()
@@ -957,7 +1549,7 @@ public sealed partial class VideoPlaybackBar : UserControl
             ? PointerContentX()
             : e.GetCurrentPoint(TimelineHost).Position.X;
         var x = Math.Clamp(rawX, 0, TimelineHost.ActualWidth);
-        var ms = (long)(x / TimelineHost.ActualWidth * _hoverDurationMs);
+        var ms = HoverMilliseconds(e, x);
         HoverTime.Text = FormatHover(ms);
         _wantedHover = TimeSpan.FromMilliseconds(ms);
         _hoverOpen = true;
@@ -1115,6 +1707,74 @@ public sealed partial class VideoPlaybackBar : UserControl
         {
             _hoverBusy = false;
         }
+    }
+
+    // A click moves the playhead so its center is under the pointer. The preview uses that
+    // same value, which is inset from the raw width by half the thumb.
+    private long HoverMilliseconds(PointerRoutedEventArgs e, double contentX)
+    {
+        if (HoverFollowsSlider())
+        {
+            var value = SliderValueAt(e.GetCurrentPoint(SeekSlider).Position.X);
+            if (SeekSlider.Maximum > 0)
+            {
+                return (long)(value / SeekSlider.Maximum * _hoverDurationMs);
+            }
+        }
+
+        return (long)(contentX / Math.Max(1, TimelineHost.ActualWidth) * _hoverDurationMs);
+    }
+
+    private bool HoverFollowsSlider()
+        => !_cutDragging
+           && _trimDrag == TrimHandle.None
+           && !(_timelineZoom && _zoomIndex > 0)
+           && SeekSlider.IsHitTestVisible
+           && SeekSlider.ActualWidth > 1
+           && SeekSlider.Maximum > SeekSlider.Minimum;
+
+    private double SliderValueAt(double pointerX)
+    {
+        var fraction = TimelineGesture.SliderFraction(pointerX, SeekSlider.ActualWidth, SeekThumbWidth());
+        var range = SeekSlider.Maximum - SeekSlider.Minimum;
+        return TimelineGesture.SnapValue(
+            SeekSlider.Minimum + fraction * range,
+            SeekSlider.Minimum,
+            SeekSlider.Maximum,
+            SeekSlider.StepFrequency);
+    }
+
+    private double SeekThumbWidth()
+    {
+        if (_seekThumb is null)
+        {
+            SeekSlider.ApplyTemplate();
+            _seekThumb = FindNamed(SeekSlider, "HorizontalThumb");
+        }
+
+        var width = _seekThumb?.ActualWidth ?? 0;
+        return width >= 1 && width < SeekSlider.ActualWidth ? width : 18;
+    }
+
+    private static FrameworkElement? FindNamed(DependencyObject parent, string name)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(parent);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is FrameworkElement element && element.Name == name)
+            {
+                return element;
+            }
+
+            var nested = FindNamed(child, name);
+            if (nested is not null)
+            {
+                return nested;
+            }
+        }
+
+        return null;
     }
 
     private static string FormatHover(long milliseconds)
@@ -1723,12 +2383,13 @@ public sealed partial class VideoPlaybackBar : UserControl
 
         AudioCanvas.Width = width;
         AudioCanvas.Height = AudioLane.Height;
+        var lane = AudioLane.Height > 1 ? AudioLane.Height : 32;
         if (!_audioInteractive)
         {
             var empty = new TextBlock
             {
                 Width = width,
-                Height = 22,
+                Height = lane,
                 Text = "No audio",
                 Foreground = new SolidColorBrush(ColorHelper.FromArgb(200, 255, 255, 255)),
                 FontSize = 12,
@@ -1740,25 +2401,33 @@ public sealed partial class VideoPlaybackBar : UserControl
             return;
         }
 
-        AddAudioBand(0, 1, width, 8, ColorHelper.FromArgb(255, 126, 182, 214));
-        var outside = ColorHelper.FromArgb(150, 0, 0, 0);
+        if (_waveLevels.HasPeaks)
+        {
+            AddWaveform(width, lane);
+        }
+        else
+        {
+            AddAudioBand(0, 1, width, 8, ColorHelper.FromArgb(255, 126, 182, 214));
+        }
+
+        var outside = ColorHelper.FromArgb(110, 0, 0, 0);
         if (_trimStart > 0.001)
         {
-            AddAudioBand(0, _trimStart, width, 22, outside);
+            AddAudioBand(0, _trimStart, width, lane, outside);
         }
 
         if (_trimEnd < 0.999)
         {
-            AddAudioBand(_trimEnd, 1, width, 22, outside);
+            AddAudioBand(_trimEnd, 1, width, lane, outside);
         }
         foreach (var (start, end, volume) in _silenceFractions)
         {
-            AddAudioBand(start, end, width, 22, AudioLevelColor(volume));
+            AddAudioBand(start, end, width, lane, AudioLevelColor(volume));
         }
 
         if (_audioSelection is { } selected && selected.End > selected.Start)
         {
-            AddAudioBand(selected.Start, selected.End, width, 22, ColorHelper.FromArgb(160, 255, 196, 64));
+            AddAudioBand(selected.Start, selected.End, width, lane, ColorHelper.FromArgb(100, 255, 196, 64));
         }
 
         foreach (var (start, end, volume) in _silenceFractions)
@@ -1790,15 +2459,15 @@ public sealed partial class VideoPlaybackBar : UserControl
     {
         if (volume <= 0)
         {
-            return ColorHelper.FromArgb(230, 90, 28, 28);
+            return ColorHelper.FromArgb(140, 90, 28, 28);
         }
 
         if (volume < AudioSilence.OriginalVolume)
         {
-            return ColorHelper.FromArgb(220, 32, 112, 168);
+            return ColorHelper.FromArgb(110, 32, 112, 168);
         }
 
-        return ColorHelper.FromArgb(230, 214, 148, 32);
+        return ColorHelper.FromArgb(120, 214, 148, 32);
     }
 
     private string? SpanLabel(double start, double end)
@@ -1878,8 +2547,137 @@ public sealed partial class VideoPlaybackBar : UserControl
             IsHitTestVisible = false
         };
         Canvas.SetLeft(mark, left);
-        Canvas.SetTop(mark, (22 - band) / 2);
+        var lane = AudioLane.Height > 1 ? AudioLane.Height : band;
+        Canvas.SetTop(mark, Math.Max(0, (lane - band) / 2));
         AudioCanvas.Children.Add(mark);
+    }
+
+    private void RequestWaveform()
+    {
+        if (AudioLane is null || AudioLane.Visibility != Visibility.Visible || !_audioInteractive || string.IsNullOrWhiteSpace(_hoverPath))
+        {
+            return;
+        }
+
+        var path = _hoverPath;
+        var key = AudioWaveform.WaveformKey.For(path);
+        if (AudioWaveform.TryGet(key, out var cached))
+        {
+            _waveKey = key;
+            _waveAttempted = true;
+            _waveLoading = false;
+            _waveLevels = cached;
+            DrawAudioLane();
+            return;
+        }
+
+        if (_waveLoading && key.Equals(_waveKey))
+        {
+            return;
+        }
+
+        _waveKey = key;
+        _waveLoading = true;
+        _waveAttempted = true;
+        var serial = ++_waveSerial;
+        _ = LoadWaveformAsync(path, key, serial);
+    }
+
+    private async Task LoadWaveformAsync(string path, AudioWaveform.WaveformKey key, int serial)
+    {
+        AudioWaveform.Levels? levels = null;
+        for (var attempt = 0; attempt < 4 && serial == _waveSerial; attempt++)
+        {
+            try
+            {
+                levels = await AudioWaveform.ReadAsync(path);
+            }
+            catch (Exception)
+            {
+                levels = null;
+            }
+
+            if (levels is not null)
+            {
+                break;
+            }
+
+            if (attempt < 3)
+            {
+                await Task.Delay(500);
+            }
+        }
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (serial != _waveSerial)
+            {
+                return;
+            }
+
+            _waveLoading = false;
+            if (levels is null)
+            {
+                _waveAttempted = false;
+                DrawAudioLane();
+                return;
+            }
+
+            if (!AudioWaveform.WaveformKey.For(path).Equals(key))
+            {
+                _waveAttempted = false;
+                RequestWaveform();
+                return;
+            }
+
+            _waveLevels = levels.Value;
+            DrawAudioLane();
+        });
+    }
+
+    private void AddWaveform(double width, double lane)
+    {
+        var viewport = TimelineScroll.ViewportWidth;
+        var offset = TimelineScroll.HorizontalOffset;
+        if (double.IsNaN(viewport) || viewport <= 1 || width <= viewport + 1)
+        {
+            offset = 0;
+            viewport = width;
+        }
+
+        var scale = XamlRoot?.RasterizationScale ?? 1;
+        if (scale < 1 || double.IsNaN(scale))
+        {
+            scale = 1;
+        }
+
+        var pixelWidth = Math.Clamp((int)Math.Round(viewport * scale), 1, 8192);
+        var pixelHeight = Math.Clamp((int)Math.Round(lane * scale), 1, 256);
+        var bars = Math.Max(1, pixelWidth / 2);
+        var timeline = _hoverDurationMs > 0 ? _hoverDurationMs / 1000d : _waveLevels.DurationSeconds;
+        var start = width > 1 ? offset / width : 0;
+        var end = width > 1 ? Math.Min(1, (offset + viewport) / width) : 1;
+        var window = AudioWaveform.Window(_waveLevels, timeline, start, end, bars);
+        var pixels = new byte[pixelWidth * pixelHeight * 4];
+        AudioWaveform.Paint(window, pixels, pixelWidth, pixelHeight, 232, 244, 255, 235);
+        var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);
+        using (var stream = bitmap.PixelBuffer.AsStream())
+        {
+            stream.Write(pixels, 0, pixels.Length);
+        }
+
+        bitmap.Invalidate();
+        var image = new Image
+        {
+            Source = bitmap,
+            Width = viewport,
+            Height = lane,
+            Stretch = Stretch.Fill,
+            IsHitTestVisible = false
+        };
+        Canvas.SetLeft(image, Math.Max(0, offset));
+        Canvas.SetTop(image, 0);
+        AudioCanvas.Children.Add(image);
     }
 
     private bool IsTimelineOverlay(DependencyObject? source) => IsLane(source, AudioLane) || IsLane(source, CaptionLane);
@@ -1956,7 +2754,24 @@ public sealed partial class VideoPlaybackBar : UserControl
         TimelineHost.MinHeight = Math.Max(28, height);
     }
 
-    private void TimelineScroll_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e) => DrawCaptions();
+    private void TimelineScroll_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
+    {
+        DrawCaptions();
+        if (!_waveLevels.HasPeaks || _waveQueued)
+        {
+            return;
+        }
+
+        _waveQueued = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _waveQueued = false;
+            if (_waveLevels.HasPeaks)
+            {
+                DrawAudioLane();
+            }
+        });
+    }
 
     private void Caption_Moved(object sender, PointerRoutedEventArgs e)
     {

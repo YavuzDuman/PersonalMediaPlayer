@@ -15,7 +15,7 @@
 
         <Border
             x:Name="Panel"
-            Width="320"
+            HorizontalAlignment="Stretch"
             Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
